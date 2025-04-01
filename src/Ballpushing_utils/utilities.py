@@ -1,3 +1,12 @@
+import numpy as np
+import pandas as pd
+from pathlib import Path
+import pickle
+from scipy.signal import find_peaks, savgol_filter
+
+brain_regions_path = "/mnt/upramdya_data/MD/Region_map_250116.csv"
+
+
 def save_object(obj, filename):
     """Save a custom object as a pickle file.
 
@@ -103,8 +112,7 @@ def find_interaction_events(
     # Combine distances to find frames where any node is within the threshold distance
     combined_distances = np.min(distances, axis=0)
     interaction_frames = np.where(
-        (np.array(combined_distances) > threshold[0])
-        & (np.array(combined_distances) < threshold[1])
+        (np.array(combined_distances) > threshold[0]) & (np.array(combined_distances) < threshold[1])
     )[0]
 
     # Debug: Print the combined distances and interaction frames
@@ -158,17 +166,13 @@ def find_interaction_start(
     data = data.copy()
 
     # Smoothing and derivative calculation
-    data["smoothed_distance"] = savgol_filter(
-        data[distance_col], window_length=11, polyorder=3
-    )
+    data["smoothed_distance"] = savgol_filter(data[distance_col], window_length=11, polyorder=3)
     data["smoothed_diff"] = data["smoothed_distance"].diff()
     data["smoothed_accel"] = data["smoothed_diff"].diff()  # Second derivative
 
     # Dynamic threshold for plateaus based on rolling standard deviation
     rolling_std = data["smoothed_diff"].rolling(window=window_size).std()
-    dynamic_threshold = (
-        rolling_std.mean() * threshold_multiplier
-    )  # Adjust multiplier as needed
+    dynamic_threshold = rolling_std.mean() * threshold_multiplier  # Adjust multiplier as needed
 
     # Plateau detection with dynamic threshold
     plateau_mask = data["smoothed_diff"].abs() < dynamic_threshold
@@ -176,33 +180,21 @@ def find_interaction_start(
 
     # Initialize plateau markers
     data["plateau_start"] = 0
-    valid_plateaus = (
-        data[plateau_mask]
-        .groupby(plateau_groups)
-        .filter(lambda x: len(x) >= min_plateau_length)
-    )
+    valid_plateaus = data[plateau_mask].groupby(plateau_groups).filter(lambda x: len(x) >= min_plateau_length)
     if not valid_plateaus.empty:
         start_indices = valid_plateaus.groupby(plateau_groups).head(1).index
         data.loc[start_indices, "plateau_start"] = 1
 
     # Peak detection with stricter prominence
-    peaks, _ = find_peaks(
-        -data["smoothed_distance"], prominence=peak_prominence, width=3
-    )
+    peaks, _ = find_peaks(-data["smoothed_distance"], prominence=peak_prominence, width=3)
 
     # Refine peak detection for better alignment
     refined_peaks = []
     for peak in peaks:
         if peak > 0 and peak < len(data) - 1:
             # Perform local search around the detected peak to refine position
-            local_region = data.iloc[
-                max(0, peak - peak_window_size) : min(
-                    len(data), peak + peak_window_size
-                )
-            ]
-            true_peak_idx = local_region[
-                distance_col
-            ].idxmin()  # Find true minimum in this region
+            local_region = data.iloc[max(0, peak - peak_window_size) : min(len(data), peak + peak_window_size)]
+            true_peak_idx = local_region[distance_col].idxmin()  # Find true minimum in this region
             refined_peaks.append(true_peak_idx)
 
     # Combine plateau and refined peak detections
@@ -214,63 +206,3 @@ def find_interaction_start(
         return data[distance_col].idxmin()
 
     return all_candidates[0]
-
-
-def filter_experiments(source, **criteria):
-    """Generates a list of Experiment objects based on criteria.
-
-    Args:
-        source (list): A list of flies, experiments or folders to create Experiment objects from.
-        criteria (dict): A dictionary of criteria to filter the experiments.
-
-    Returns:
-        list: A list of Experiment objects that match the criteria.
-    """
-
-    flies = []
-
-    # If the source is a list of flies, check directly for the criteria in flies
-    if isinstance(source[0], Fly):
-        for fly in source:
-            if all(
-                fly.arena_metadata.get(key) == value for key, value in criteria.items()
-            ):
-                flies.append(fly)
-
-    else:
-        if isinstance(source[0], Experiment):
-            Exps = source
-
-        else:
-            # Create Experiment objects from the folders
-            Exps = [Experiment(f) for f in source]
-
-        # Get a list of flies based on the criteria
-        for exp in Exps:
-            for fly in exp.flies:
-                if all(
-                    fly.arena_metadata.get(key) == value
-                    for key, value in criteria.items()
-                ):
-                    flies.append(fly)
-
-    return flies
-
-
-def load_fly(
-    mp4_file,
-    experiment,
-    # experiment_type,
-):
-    print(f"Loading fly from {mp4_file.parent}")
-    try:
-        fly = Fly(
-            mp4_file.parent,
-            experiment=experiment,
-            # experiment_type=experiment_type,
-        )
-        if fly.tracking_data and fly.tracking_data.valid_data:
-            return fly
-    except TypeError as e:
-        print(f"Error while loading fly from {mp4_file.parent}: {e}")
-    return None

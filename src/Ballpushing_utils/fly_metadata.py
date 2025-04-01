@@ -1,4 +1,11 @@
-# @dataclass
+from __future__ import annotations
+from pathlib import Path
+import pandas as pd
+from .utilities import brain_regions_path
+
+import cv2
+
+
 class FlyMetadata:
     def __init__(self, fly):
 
@@ -36,11 +43,7 @@ class FlyMetadata:
         """
         # Get the metadata for this fly's arena
         arena_key = self.arena.lower()
-        return {
-            var: data[arena_key]
-            for var, data in self.experiment.metadata.items()
-            if arena_key in data
-        }
+        return {var: data[arena_key] for var, data in self.experiment.metadata.items() if arena_key in data}
 
     def load_brain_regions(self, brain_regions_path):
         # Get the brain regions table
@@ -61,17 +64,11 @@ class FlyMetadata:
                 matched_index = lowercase_index.get_loc(genotype.lower())
 
                 self.nickname = brain_regions.iloc[matched_index]["Nickname"]
-                self.brain_region = brain_regions.iloc[matched_index][
-                    "Simplified region"
-                ]
-                self.simplified_nickname = brain_regions.iloc[matched_index][
-                    "Simplified Nickname"
-                ]
+                self.brain_region = brain_regions.iloc[matched_index]["Simplified region"]
+                self.simplified_nickname = brain_regions.iloc[matched_index]["Simplified Nickname"]
                 self.split = brain_regions.iloc[matched_index]["Split"]
             except KeyError:
-                print(
-                    f"Genotype {genotype} not found in brain regions table for {self.name}. Defaulting to PR"
-                )
+                print(f"Genotype {genotype} not found in brain regions table for {self.name}. Defaulting to PR")
                 self.nickname = "PR"
                 self.brain_region = "Control"
                 self.simplified_nickname = "PR"
@@ -85,11 +82,7 @@ class FlyMetadata:
             return list(self.directory.glob(f"{self.corridor}.mp4"))[0]
         except IndexError:
             try:
-                return list(
-                    self.directory.glob(
-                        f"{self.directory.parent.name}_corridor_{self.corridor[-1]}.mp4"
-                    )
-                )[0]
+                return list(self.directory.glob(f"{self.directory.parent.name}_corridor_{self.corridor[-1]}.mp4"))[0]
             except IndexError:
                 try:
                     # Look for a video file in the corridor directory

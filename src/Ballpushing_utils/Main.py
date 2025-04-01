@@ -1,11 +1,10 @@
 # Internal classes import
 
-import Fly, Experiment, Dataset, Config, FlyMetadata, FlyTrackingData, BallPushingMetrics, SkeletonMetrics, LearningMetrics, F1Metrics, Utils
+import Ballpushing_utils.fly as fly, Ballpushing_utils.experiment as experiment, Ballpushing_utils.dataset as dataset, Ballpushing_utils.config as config, Ballpushing_utils.fly_metadata as fly_metadata, Ballpushing_utils.fly_trackingdata as fly_trackingdata, Ballpushing_utils.ballpushing_metrics as ballpushing_metrics, Ballpushing_utils.skeleton_metrics as skeleton_metrics, Ballpushing_utils.learning_metrics as learning_metrics, Ballpushing_utils.f1_metrics as f1_metrics, Ballpushing_utils.utilities as utilities
 
-# Internal classes from Nely girhub utils_behavior
+# Internal classes from Nely github utils_behavior
 
-import utils_behavior import Utils
-from utils_behavior import Sleap_utils
+import utils_behavior
 
 # External libraries import
 
@@ -47,9 +46,7 @@ from dataclasses import dataclass
 from scipy.signal import find_peaks, savgol_filter
 
 moviepy.config.change_settings({"IMAGEMAGICK_BINARY": "magick"})
-mpconfig.change_settings(
-    {"IMAGEMAGICK_BINARY": "/home/durrieu/miniforge3/envs/tracking_analysis/bin/magick"}
-)
+mpconfig.change_settings({"IMAGEMAGICK_BINARY": "/home/durrieu/miniforge3/envs/tracking_analysis/bin/magick"})
 
 os.environ["MAGICK_FONT_PATH"] = "/etc/ImageMagick-6"
 # os.environ['MAGICK_CONFIGURE_PATH'] = '/etc/ImageMagick-6'
@@ -61,39 +58,6 @@ sys.modules["Ballpushing_utils"] = sys.modules[__name__]
 
 print("Loading BallPushing utils version 10 Mar 2025")
 
-print(f"Current configuration : {Config.Config.__dict__}")
+print(f"Current configuration : {config.Config.__dict__}")
 
 brain_regions_path = "/mnt/upramdya_data/MD/Region_map_250116.csv"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

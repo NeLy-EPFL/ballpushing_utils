@@ -1,3 +1,9 @@
+from utils_behavior import Sleap_utils
+from Ballpushing_utils import utilities
+import numpy as np
+import warnings
+
+
 class FlyTrackingData:
     def __init__(self, fly, time_range=None, log_missing=False, keep_idle=False):
         self.fly = fly
@@ -19,9 +25,7 @@ class FlyTrackingData:
                 smoothing=self.fly.config.skeleton_tracks_smoothing,
             )
 
-            if self.balltrack is None or (
-                self.flytrack is None and self.skeletontrack is None
-            ):
+            if self.balltrack is None or (self.flytrack is None and self.skeletontrack is None):
                 print(f"Missing tracking files for {self.fly.metadata.name}")
                 self.valid_data = False
                 if self.log_missing:
@@ -178,14 +182,12 @@ class FlyTrackingData:
         if time_range:
             # Convert frame indices to integers for iloc
             start = int(time_range[0] * self.fly.experiment.fps)
-            end = (
-                int(time_range[1] * self.fly.experiment.fps) if time_range[1] else None
-            )
+            end = int(time_range[1] * self.fly.experiment.fps) if time_range[1] else None
             fly_data = fly_data.iloc[start:end]
             ball_data = ball_data.iloc[start:end]
 
         # Original event detection logic
-        interaction_events = find_interaction_events(
+        interaction_events = utilities.find_interaction_events(
             fly_data,
             ball_data,
             nodes1=["thorax"],
@@ -203,16 +205,8 @@ class FlyTrackingData:
         if self.cutoff_reference:
             all_events = self._calculate_interactions(None)
             filtered_events = self._calculate_interactions((0, self.cutoff_reference))
-            all_count = sum(
-                len(events)
-                for fly_dict in all_events.values()
-                for events in fly_dict.values()
-            )
-            filtered_count = sum(
-                len(events)
-                for fly_dict in filtered_events.values()
-                for events in fly_dict.values()
-            )
+            all_count = sum(len(events) for fly_dict in all_events.values() for events in fly_dict.values())
+            filtered_count = sum(len(events) for fly_dict in filtered_events.values() for events in fly_dict.values())
             return filtered_count, all_count
         return None, None
 
@@ -228,9 +222,7 @@ class FlyTrackingData:
     def _calculate_interactions_onsets(self):
         """Calculate interaction onsets."""
         if self.flytrack is None or self.balltrack is None:
-            print(
-                f"Skipping interaction events for {self.fly.metadata.name} due to missing tracking data."
-            )
+            print(f"Skipping interaction events for {self.fly.metadata.name} due to missing tracking data.")
             return {}
 
         interactions_onsets = {}
@@ -256,9 +248,7 @@ class FlyTrackingData:
                         + (event_data["y_thorax"] - ball_data["y_centre"]) ** 2
                     )
 
-                    onset = find_interaction_start(
-                        event_data, "distance", "adjusted_frame"
-                    )
+                    onset = utilities.find_interaction_start(event_data, "distance", "adjusted_frame")
                     onsets.append(onset)
 
                 interactions_onsets[(fly_idx, ball_idx)] = onsets
@@ -274,9 +264,7 @@ class FlyTrackingData:
         ):
             # Make sure interaction_events exist and contain data
             if not self.interaction_events or not any(
-                events
-                for fly_dict in self.interaction_events.values()
-                for events in fly_dict.values()
+                events for fly_dict in self.interaction_events.values() for events in fly_dict.values()
             ):
                 print(f"No interaction events found for {self.fly.metadata.name}")
                 self._std_interactions = {}
@@ -335,14 +323,10 @@ class FlyTrackingData:
         Returns:
             dict: A dictionary of events for the specified trial.
         """
-        if self.fly.config.experiment_type != "Learning" or not hasattr(
-            self.fly, "learning_metrics"
-        ):
+        if self.fly.config.experiment_type != "Learning" or not hasattr(self.fly, "learning_metrics"):
             return {}
 
-        trial_interactions = self.fly.learning_metrics.metrics.get(
-            "trial_interactions", {}
-        )
+        trial_interactions = self.fly.learning_metrics.metrics.get("trial_interactions", {})
         return trial_interactions.get(trial_number, [])
 
     def get_trial_standardized_interactions(self, trial_number):
@@ -355,9 +339,7 @@ class FlyTrackingData:
         Returns:
             dict: A dictionary of standardized events for the specified trial.
         """
-        if self.fly.config.experiment_type != "Learning" or not hasattr(
-            self.fly, "learning_metrics"
-        ):
+        if self.fly.config.experiment_type != "Learning" or not hasattr(self.fly, "learning_metrics"):
             return {}
 
         # Filter standardized interactions by trial
@@ -370,9 +352,7 @@ class FlyTrackingData:
         trial_std_interactions = {}
 
         for (fly_idx, ball_idx), events in self.standardized_interactions.items():
-            matching_events = [
-                event for event in events if (event[0], event[1]) in event_bounds
-            ]
+            matching_events = [event for event in events if (event[0], event[1]) in event_bounds]
 
             if matching_events:
                 trial_std_interactions[(fly_idx, ball_idx)] = matching_events
@@ -396,14 +376,8 @@ class FlyTrackingData:
         fly_data = self.flytrack.objects[0].dataset
 
         # Check if any of the smoothed fly x and y coordinates are more than 30 pixels away from their initial position
-        moved_y = np.any(
-            abs(fly_data["y_thorax"] - fly_data["y_thorax"].iloc[0])
-            > self.fly.config.dead_threshold
-        )
-        moved_x = np.any(
-            abs(fly_data["x_thorax"] - fly_data["x_thorax"].iloc[0])
-            > self.fly.config.dead_threshold
-        )
+        moved_y = np.any(abs(fly_data["y_thorax"] - fly_data["y_thorax"].iloc[0]) > self.fly.config.dead_threshold)
+        moved_x = np.any(abs(fly_data["x_thorax"] - fly_data["x_thorax"].iloc[0]) > self.fly.config.dead_threshold)
 
         if not moved_y and not moved_x:
             print(f"{self.fly.metadata.name} did not move significantly.")
@@ -428,8 +402,7 @@ class FlyTrackingData:
 
         # Get the velocity of the fly
         velocity = np.sqrt(
-            np.diff(fly_data["x_thorax"], prepend=np.nan) ** 2
-            + np.diff(fly_data["y_thorax"], prepend=np.nan) ** 2
+            np.diff(fly_data["x_thorax"], prepend=np.nan) ** 2 + np.diff(fly_data["y_thorax"], prepend=np.nan) ** 2
         )
 
         # Ensure the length of the velocity array matches the length of the DataFrame index
@@ -446,9 +419,7 @@ class FlyTrackingData:
 
         # Get consecutive time points where the fly's velocity is less than 2 px/s
 
-        consecutive_points = np.split(
-            low_velocity, np.where(np.diff(low_velocity.index) != 1)[0] + 1
-        )
+        consecutive_points = np.split(low_velocity, np.where(np.diff(low_velocity.index) != 1)[0] + 1)
 
         # Get the duration of each consecutive period
 
@@ -460,9 +431,7 @@ class FlyTrackingData:
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time
 
-                time = fly_data.loc[
-                    consecutive_points[durations.index(events)].index[0]
-                ]["time"]
+                time = fly_data.loc[consecutive_points[durations.index(events)].index[0]]["time"]
 
                 print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
 
@@ -486,18 +455,12 @@ class FlyTrackingData:
 
         # Fallback to skeleton data if fly tracking data is not available
         if self.fly_skeleton is not None:
-            if (
-                "y_thorax" in self.fly_skeleton.columns
-                and "x_thorax" in self.fly_skeleton.columns
-            ):
+            if "y_thorax" in self.fly_skeleton.columns and "x_thorax" in self.fly_skeleton.columns:
                 return (
                     self.fly_skeleton["x_thorax"].iloc[0],
                     self.fly_skeleton["y_thorax"].iloc[0],
                 )
-            elif (
-                "y_thorax" in self.fly_skeleton.columns
-                and "x_thorax" in self.fly_skeleton.columns
-            ):
+            elif "y_thorax" in self.fly_skeleton.columns and "x_thorax" in self.fly_skeleton.columns:
                 return (
                     self.fly_skeleton["x_thorax"].iloc[0],
                     self.fly_skeleton["y_thorax"].iloc[0],
@@ -514,9 +477,7 @@ class FlyTrackingData:
         """
 
         if self.skeletontrack is None:
-            warnings.warn(
-                f"No skeleton tracking file found for {self.fly.metadata.name}."
-            )
+            warnings.warn(f"No skeleton tracking file found for {self.fly.metadata.name}.")
             return None
 
         # Get the first track

@@ -1,3 +1,13 @@
+from __future__ import annotations
+from pathlib import Path
+
+from utils_behavior import Utils
+
+from Ballpushing_utils.fly_trackingdata import FlyTrackingData
+
+print(FlyTrackingData)
+
+
 class Fly:
     """
     A class for a single fly. This represents a folder containing a video, associated tracking files, and metadata files. It is usually contained in an Experiment object, and inherits the Experiment object's metadata.
@@ -31,14 +41,15 @@ class Fly:
             flyball_positions (DataFrame): The coordinates of the fly and the ball, obtained by calling the get_coordinates function with the flytrack and balltrack paths.
         """
 
+        from Ballpushing_utils.experiment import Experiment
+        from Ballpushing_utils.fly_metadata import FlyMetadata
+
         self.directory = Path(directory)
 
         if experiment is not None:
             self.experiment = experiment
         elif as_individual:
-            self.experiment = Experiment(
-                self.directory.parent.parent, metadata_only=True
-            )
+            self.experiment = Experiment(self.directory.parent.parent, metadata_only=True)
         else:
             self.experiment = Experiment(self.directory.parent.parent)
 
@@ -84,7 +95,7 @@ class Fly:
     def events_metrics(self):
         if self._events_metrics is None:
             # print("Computing events metrics...")
-            self._events_metrics = BallpushingMetrics(self.tracking_data).metrics
+            self._events_metrics = BallPushingMetrics(self.tracking_data).metrics
         return self._events_metrics
 
     @property
@@ -103,10 +114,7 @@ class Fly:
     def skeleton_metrics(self):
         if self.tracking_data.skeletontrack is None:
             print("No skeleton data available.")
-        elif (
-            self._skeleton_metrics is None
-            and self.tracking_data.skeletontrack is not None
-        ):
+        elif self._skeleton_metrics is None and self.tracking_data.skeletontrack is not None:
             self._skeleton_metrics = SkeletonMetrics(self)
         return self._skeleton_metrics
 
@@ -119,9 +127,7 @@ class Fly:
     def __repr__(self):
         return f"Fly({self.directory})"
 
-    def generate_clip(
-        self, event, outpath=None, fps=None, width=None, height=None, tracks=False
-    ):
+    def generate_clip(self, event, outpath=None, fps=None, width=None, height=None, tracks=False):
         """
         Generate a video clip for a given event.
 
@@ -166,9 +172,7 @@ class Fly:
             event_index = self.tracking_data.interaction_events.index(event)
 
             if outpath == Utils.get_labserver() / "Videos":
-                clip_path = outpath.joinpath(
-                    f"{self.metadata.name}_{event_index}.mp4"
-                ).as_posix()
+                clip_path = outpath.joinpath(f"{self.metadata.name}_{event_index}.mp4").as_posix()
             else:
                 clip_path = outpath.joinpath(f"output_{event_index}.mp4").as_posix()
             out = cv2.VideoWriter(clip_path, fourcc, fps, (height, width))
@@ -211,9 +215,7 @@ class Fly:
                     )
 
                     # Check if yball value varies more than threshold
-                    if self.check_yball_variation(event)[
-                        0
-                    ]:  # You need to implement this function
+                    if self.check_yball_variation(event)[0]:  # You need to implement this function
                         # Add red dot to segment
                         dot = np.zeros((10, 10, 3), dtype=np.uint8)
                         dot[:, :, 0] = 0
@@ -228,15 +230,9 @@ class Fly:
 
                         # Adjusted position for dot_y to make it slightly higher
                         dot_y_adjustment_factor = 1.2
-                        dot_y = (
-                            text_y
-                            - int(dot.shape[0] * dot_y_adjustment_factor)
-                            + text_size[1] // 2
-                        )
+                        dot_y = text_y - int(dot.shape[0] * dot_y_adjustment_factor) + text_size[1] // 2
 
-                        frame[
-                            dot_y : dot_y + dot.shape[0], dot_x : dot_x + dot.shape[1]
-                        ] = dot
+                        frame[dot_y : dot_y + dot.shape[0], dot_x : dot_x + dot.shape[1]] = dot
 
                     # Write the frame into the output file
                     out.write(frame)
@@ -264,9 +260,7 @@ class Fly:
 
         """
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(
-            outpath.joinpath(f"{vidname}.mp4").as_posix(), fourcc, fps, (height, width)
-        )
+        out = cv2.VideoWriter(outpath.joinpath(f"{vidname}.mp4").as_posix(), fourcc, fps, (height, width))
         try:
             for clip_path in clips:
                 cap = cv2.VideoCapture(clip_path)
@@ -305,9 +299,7 @@ class Fly:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
-        vidname = (
-            f"{self.metadata.name}_{self.Genotype if self.Genotype else 'undefined'}"
-        )
+        vidname = f"{self.metadata.name}_{self.Genotype if self.Genotype else 'undefined'}"
 
         for i, event in enumerate(events):
             clip_path = self.generate_clip(event, outpath, fps, width, height, tracks)
@@ -332,12 +324,8 @@ class Fly:
         """
 
         # Extract the x and y coordinates from the pandas Series
-        fly_pos = tuple(
-            map(int, [flyball_coordinates["xfly"], flyball_coordinates["yfly"]])
-        )
-        ball_pos = tuple(
-            map(int, [flyball_coordinates["xball"], flyball_coordinates["yball"]])
-        )
+        fly_pos = tuple(map(int, [flyball_coordinates["xfly"], flyball_coordinates["yfly"]]))
+        ball_pos = tuple(map(int, [flyball_coordinates["xball"], flyball_coordinates["yball"]]))
 
         # Draw a smaller circle at the fly's position
         cv2.circle(frame, fly_pos, 5, (0, 0, 255), -1)  # Adjust the radius to 5
@@ -346,15 +334,11 @@ class Fly:
         cv2.circle(frame, ball_pos, 5, (255, 0, 0), -1)  # Adjust the radius to 5
 
         # Draw an empty circle around the ball
-        cv2.circle(
-            frame, ball_pos, 11, (255, 0, 0), 2
-        )  # Adjust the radius to 25 and the thickness to 2
+        cv2.circle(frame, ball_pos, 11, (255, 0, 0), 2)  # Adjust the radius to 25 and the thickness to 2
 
         return frame
 
-    def generate_preview(
-        self, speed=60.0, save=False, preview=False, output_path=None, tracks=True
-    ):
+    def generate_preview(self, speed=60.0, save=False, preview=False, output_path=None, tracks=True):
         """
         Generate an accelerated version of the video using moviepy.
 
@@ -391,9 +375,7 @@ class Fly:
             marked_clip = VideoClip(
                 lambda t: self.draw_circles(
                     clip.get_frame(t),
-                    self.flyball_positions.loc[
-                        round(t * clip.fps)  # Ensure correct frame is accessed
-                    ],
+                    self.flyball_positions.loc[round(t * clip.fps)],  # Ensure correct frame is accessed
                 ),
                 duration=clip.duration,
             )
@@ -405,12 +387,8 @@ class Fly:
 
         # If saving, write the new video clip to a file
         if save:
-            print(
-                f"Saving {self.metadata.video.name} at {speed}x speed in {output_path.parent}"
-            )
-            sped_up_clip.write_videofile(
-                str(output_path), fps=clip.fps
-            )  # Save the sped-up clip
+            print(f"Saving {self.metadata.video.name} at {speed}x speed in {output_path.parent}")
+            sped_up_clip.write_videofile(str(output_path), fps=clip.fps)  # Save the sped-up clip
 
         # If not saving, preview the new video clip
         if preview:

@@ -1,4 +1,4 @@
-class BallpushingMetrics:
+class BallPushingMetrics:
     def __init__(self, tracking_data):
 
         self.tracking_data = tracking_data
@@ -16,9 +16,7 @@ class BallpushingMetrics:
                 key = f"fly_{fly_idx}_ball_{ball_idx}"
 
                 try:
-                    nb_events = self.get_adjusted_nb_events(
-                        fly_idx, ball_idx, signif=False
-                    )
+                    nb_events = self.get_adjusted_nb_events(fly_idx, ball_idx, signif=False)
                 except Exception as e:
                     nb_events = np.nan
 
@@ -51,9 +49,7 @@ class BallpushingMetrics:
 
                 try:
                     if self.fly.config.experiment_type == "F1":
-                        nb_significant_events = self.get_adjusted_nb_events(
-                            fly_idx, ball_idx, signif=True
-                        )
+                        nb_significant_events = self.get_adjusted_nb_events(fly_idx, ball_idx, signif=True)
                     else:
                         nb_significant_events = len(significant_events)
                 except Exception as e:
@@ -63,9 +59,7 @@ class BallpushingMetrics:
                         print(f"Error in get_adjusted_nb_events: {e}")
 
                 try:
-                    first_significant_event = self.get_first_significant_event(
-                        fly_idx, ball_idx
-                    )
+                    first_significant_event = self.get_first_significant_event(fly_idx, ball_idx)
                 except Exception as e:
                     first_significant_event = (np.nan, np.nan)
 
@@ -105,9 +99,7 @@ class BallpushingMetrics:
                         print(f"Error in get_success_direction: {e}")
 
                 try:
-                    cumulated_breaks_duration = self.get_cumulated_breaks_duration(
-                        fly_idx, ball_idx
-                    )
+                    cumulated_breaks_duration = self.get_cumulated_breaks_duration(fly_idx, ball_idx)
                 except Exception as e:
                     cumulated_breaks_duration = np.nan
 
@@ -123,11 +115,7 @@ class BallpushingMetrics:
                         print(f"Error in get_distance_moved: {e}")
 
                 try:
-                    insight_effect = (
-                        self.get_insight_effect(fly_idx, ball_idx)
-                        if aha_moment
-                        else np.nan
-                    )
+                    insight_effect = self.get_insight_effect(fly_idx, ball_idx) if aha_moment else np.nan
                 except Exception as e:
                     insight_effect = np.nan
 
@@ -142,9 +130,7 @@ class BallpushingMetrics:
                     "final_event": final_event[0],
                     "final_event_time": final_event[1],
                     "nb_significant_events": nb_significant_events,
-                    "significant_ratio": (
-                        nb_significant_events / nb_events if nb_events > 0 else np.nan
-                    ),
+                    "significant_ratio": (nb_significant_events / nb_events if nb_events > 0 else np.nan),
                     "first_significant_event": first_significant_event[0],
                     "first_significant_event_time": first_significant_event[1],
                     "aha_moment": aha_moment[0],
@@ -156,18 +142,14 @@ class BallpushingMetrics:
                     "pushed": len(events_direction[0]),
                     "pulled": len(events_direction[1]),
                     "pulling_ratio": (
-                        len(events_direction[1])
-                        / (len(events_direction[0]) + len(events_direction[1]))
+                        len(events_direction[1]) / (len(events_direction[0]) + len(events_direction[1]))
                         if (len(events_direction[0]) + len(events_direction[1])) > 0
                         else np.nan
                     ),
                     "success_direction": success_direction,
                     "interaction_proportion": (
                         sum([event[2] for event in events])
-                        / (
-                            sum([event[2] for event in events])
-                            + cumulated_breaks_duration
-                        )
+                        / (sum([event[2] for event in events]) + cumulated_breaks_duration)
                         if cumulated_breaks_duration > 0
                         else np.nan
                     ),
@@ -208,8 +190,7 @@ class BallpushingMetrics:
                         len(events)
                         * self.fly.config.adjusted_events_normalisation
                         / (self.tracking_data.duration - self.tracking_data.exit_time)
-                        if self.tracking_data.duration - self.tracking_data.exit_time
-                        > 0
+                        if self.tracking_data.duration - self.tracking_data.exit_time > 0
                         else 0
                     )
             else:
@@ -218,29 +199,19 @@ class BallpushingMetrics:
                         len(events)
                         * self.fly.config.adjusted_events_normalisation
                         / (self.tracking_data.duration - self.tracking_data.exit_time)
-                        if self.tracking_data.duration - self.tracking_data.exit_time
-                        > 0
+                        if self.tracking_data.duration - self.tracking_data.exit_time > 0
                         else 0
                     )
                 elif ball_idx == 0:
                     adjusted_nb_events = (
-                        len(events)
-                        * self.fly.config.adjusted_events_normalisation
-                        / self.tracking_data.exit_time
-                        if (
-                            self.tracking_data.exit_time
-                            and self.tracking_data.exit_time > 0
-                        )
-                        else len(events)
-                        * self.fly.config.adjusted_events_normalisation
-                        / self.tracking_data.duration
+                        len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.exit_time
+                        if (self.tracking_data.exit_time and self.tracking_data.exit_time > 0)
+                        else len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
                     )
 
         else:
             adjusted_nb_events = (
-                len(events)
-                * self.fly.config.adjusted_events_normalisation
-                / self.tracking_data.duration
+                len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
                 if self.tracking_data.duration > 0
                 else 0
             )
@@ -278,27 +249,17 @@ class BallpushingMetrics:
         if distance_type == "max":
             max_distance = ball_data["euclidean_distance"].max() - threshold
             distance_check = (
-                lambda event: ball_data.loc[
-                    event[0] : event[1], "euclidean_distance"
-                ].max()
-                >= max_distance
+                lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= max_distance
             )
         elif distance_type == "threshold":
-            distance_check = (
-                lambda event: ball_data.loc[
-                    event[0] : event[1], "euclidean_distance"
-                ].max()
-                >= threshold
-            )
+            distance_check = lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= threshold
         else:
             raise ValueError("Invalid distance_type. Use 'max' or 'threshold'.")
 
         try:
             event, event_index = next(
                 (event, i)
-                for i, event in enumerate(
-                    self.tracking_data.interaction_events[fly_idx][ball_idx]
-                )
+                for i, event in enumerate(self.tracking_data.interaction_events[fly_idx][ball_idx])
                 if distance_check(event)
             )
         except StopIteration:
@@ -329,19 +290,13 @@ class BallpushingMetrics:
 
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        max_event, max_event_idx = self.find_event_by_distance(
-            fly_idx, ball_idx, threshold, distance_type="max"
-        )
+        max_event, max_event_idx = self.find_event_by_distance(fly_idx, ball_idx, threshold, distance_type="max")
 
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            max_event_time = (
-                max_event[0] / self.fly.experiment.fps if max_event else None
-            )
+            max_event_time = max_event[0] / self.fly.experiment.fps if max_event else None
         else:
             max_event_time = (
-                (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
-                if max_event
-                else None
+                (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time if max_event else None
             )
 
         return max_event_idx, max_event_time
@@ -382,9 +337,7 @@ class BallpushingMetrics:
                 fly_idx, ball_idx, threshold, distance_type="threshold"
             )
 
-            final_event_time = (
-                final_event[0] / self.fly.experiment.fps if final_event else None
-            )
+            final_event_time = final_event[0] / self.fly.experiment.fps if final_event else None
 
         else:
             threshold = self.fly.config.final_event_F1_threshold
@@ -394,10 +347,7 @@ class BallpushingMetrics:
             )
 
             final_event_time = (
-                (final_event[0] / self.fly.experiment.fps)
-                - self.tracking_data.exit_time
-                if final_event
-                else None
+                (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time if final_event else None
             )
 
         return final_event_idx, final_event_time
@@ -407,9 +357,7 @@ class BallpushingMetrics:
 
         significant_events = [
             (event, i)
-            for i, event in enumerate(
-                self.tracking_data.interaction_events[fly_idx][ball_idx]
-            )
+            for i, event in enumerate(self.tracking_data.interaction_events[fly_idx][ball_idx])
             if self.check_yball_variation(event, ball_data, threshold=distance)
         ]
 
@@ -418,18 +366,14 @@ class BallpushingMetrics:
     def get_first_significant_event(self, fly_idx, ball_idx, distance=5):
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        significant_events = self.get_significant_events(
-            fly_idx, ball_idx, distance=distance
-        )
+        significant_events = self.get_significant_events(fly_idx, ball_idx, distance=distance)
 
         if significant_events:
             first_significant_event = significant_events[0]
             first_significant_event_idx = first_significant_event[1]
 
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                first_significant_event_time = (
-                    first_significant_event[0][0] / self.fly.experiment.fps
-                )
+                first_significant_event_time = first_significant_event[0][0] / self.fly.experiment.fps
             else:
                 first_significant_event_time = (
                     first_significant_event[0][0] / self.fly.experiment.fps
@@ -465,23 +409,18 @@ class BallpushingMetrics:
                 )
             )
 
-        for i, event in enumerate(
-            self.tracking_data.interaction_events[fly_idx][ball_idx][:-1]
-        ):
+        for i, event in enumerate(self.tracking_data.interaction_events[fly_idx][ball_idx][:-1]):
             start = event[1]
             end = self.tracking_data.interaction_events[fly_idx][ball_idx][i + 1][0]
             duration = end - start
             breaks.append((start, end, duration))
 
-        if self.tracking_data.interaction_events[fly_idx][ball_idx][-1][1] < len(
-            ball_data
-        ):
+        if self.tracking_data.interaction_events[fly_idx][ball_idx][-1][1] < len(ball_data):
             breaks.append(
                 (
                     self.tracking_data.interaction_events[fly_idx][ball_idx][-1][1],
                     len(ball_data),
-                    len(ball_data)
-                    - self.tracking_data.interaction_events[fly_idx][ball_idx][-1][1],
+                    len(ball_data) - self.tracking_data.interaction_events[fly_idx][ball_idx][-1][1],
                 )
             )
 
@@ -508,28 +447,12 @@ class BallpushingMetrics:
             end_roi = event[1]
 
             start_distance = np.sqrt(
-                (
-                    ball_data.loc[start_roi, "x_centre"]
-                    - fly_data.loc[start_roi, "x_thorax"]
-                )
-                ** 2
-                + (
-                    ball_data.loc[start_roi, "y_centre"]
-                    - fly_data.loc[start_roi, "y_thorax"]
-                )
-                ** 2
+                (ball_data.loc[start_roi, "x_centre"] - fly_data.loc[start_roi, "x_thorax"]) ** 2
+                + (ball_data.loc[start_roi, "y_centre"] - fly_data.loc[start_roi, "y_thorax"]) ** 2
             )
             end_distance = np.sqrt(
-                (
-                    ball_data.loc[end_roi, "x_centre"]
-                    - fly_data.loc[start_roi, "x_thorax"]
-                )
-                ** 2
-                + (
-                    ball_data.loc[end_roi, "y_centre"]
-                    - fly_data.loc[start_roi, "y_thorax"]
-                )
-                ** 2
+                (ball_data.loc[end_roi, "x_centre"] - fly_data.loc[start_roi, "x_thorax"]) ** 2
+                + (ball_data.loc[end_roi, "y_centre"] - fly_data.loc[start_roi, "y_thorax"]) ** 2
             )
 
             if end_distance > start_distance:
@@ -547,16 +470,8 @@ class BallpushingMetrics:
 
         for event in subset:
             ball_data.loc[event[0] : event[1], "euclidean_distance"] = np.sqrt(
-                (
-                    ball_data["x_centre"].iloc[event[1]]
-                    - ball_data["x_centre"].iloc[event[0]]
-                )
-                ** 2
-                + (
-                    ball_data["y_centre"].iloc[event[1]]
-                    - ball_data["y_centre"].iloc[event[0]]
-                )
-                ** 2
+                (ball_data["x_centre"].iloc[event[1]] - ball_data["x_centre"].iloc[event[0]]) ** 2
+                + (ball_data["y_centre"].iloc[event[1]] - ball_data["y_centre"].iloc[event[0]]) ** 2
             )
 
         return ball_data["euclidean_distance"].sum()
@@ -586,9 +501,7 @@ class BallpushingMetrics:
 
         aha_moment = [
             (event, i)
-            for i, event in enumerate(
-                self.tracking_data.interaction_events[fly_idx][ball_idx]
-            )
+            for i, event in enumerate(self.tracking_data.interaction_events[fly_idx][ball_idx])
             if self.check_yball_variation(event, ball_data, threshold=distance)
         ]
 
@@ -596,18 +509,14 @@ class BallpushingMetrics:
             # Select the event right before the event at which the ball was moved more than the threshold
             aha_moment_event, aha_moment_idx = aha_moment[0]
             if aha_moment_idx > 0:
-                previous_event = self.tracking_data.interaction_events[fly_idx][
-                    ball_idx
-                ][aha_moment_idx - 1]
+                previous_event = self.tracking_data.interaction_events[fly_idx][ball_idx][aha_moment_idx - 1]
                 aha_moment_event = previous_event
                 aha_moment_idx -= 1
 
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
                 aha_moment_time = aha_moment_event[0] / self.fly.experiment.fps
             else:
-                aha_moment_time = (
-                    aha_moment_event[0] / self.fly.experiment.fps
-                ) - self.tracking_data.exit_time
+                aha_moment_time = (aha_moment_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
 
             return aha_moment_idx, aha_moment_time
         else:
@@ -638,9 +547,7 @@ class BallpushingMetrics:
             - first_event: Flag for aha moment as first interaction
             - post_aha_count: Number of post-aha events
         """
-        significant_events = [
-            event[0] for event in self.get_significant_events(fly_idx, ball_idx)
-        ]
+        significant_events = [event[0] for event in self.get_significant_events(fly_idx, ball_idx)]
         aha_moment_index, _ = self.get_aha_moment(fly_idx, ball_idx)
 
         # Handle no significant events case early
@@ -755,10 +662,7 @@ class BallpushingMetrics:
         start_position_y = np.mean(tracking_data.y[:num_frames_to_average])
 
         # Calculate the distance from the start position for each frame
-        distances = np.sqrt(
-            (tracking_data.x - start_position_x) ** 2
-            + (tracking_data.y - start_position_y) ** 2
-        )
+        distances = np.sqrt((tracking_data.x - start_position_x) ** 2 + (tracking_data.y - start_position_y) ** 2)
 
         # Determine the frames where the fly is within a 50 px radius of the start position
         in_chamber = distances <= 50
