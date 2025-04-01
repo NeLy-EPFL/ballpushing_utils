@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class BallPushingMetrics:
     def __init__(self, tracking_data):
 
@@ -115,9 +118,25 @@ class BallPushingMetrics:
                         print(f"Error in get_distance_moved: {e}")
 
                 try:
-                    insight_effect = self.get_insight_effect(fly_idx, ball_idx) if aha_moment else np.nan
+                    if aha_moment:
+                        insight_effect = self.get_insight_effect(fly_idx, ball_idx)
+                    else:
+                        # Ensure insight_effect is always a dictionary with default values
+                        insight_effect = {
+                            "raw_effect": np.nan,
+                            "log_effect": np.nan,
+                            "classification": "none",
+                            "first_event": False,
+                            "post_aha_count": 0,
+                        }
                 except Exception as e:
-                    insight_effect = np.nan
+                    insight_effect = {
+                        "raw_effect": np.nan,
+                        "log_effect": np.nan,
+                        "classification": "none",
+                        "first_event": False,
+                        "post_aha_count": 0,
+                    }
 
                     if self.fly.config.debugging:
                         print(f"Error in get_insight_effect: {e}")

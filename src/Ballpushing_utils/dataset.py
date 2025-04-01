@@ -1,3 +1,21 @@
+from __future__ import annotations
+from Ballpushing_utils.config import Config
+
+import os
+import pandas as pd
+from collections import Counter
+import traceback
+import numpy as np
+from matplotlib import pyplot as plt
+import cv2
+
+from moviepy.editor import (
+    VideoFileClip,
+    clips_array,
+    ColorClip,
+)
+
+
 class Dataset:
     def __init__(
         self,
@@ -26,9 +44,7 @@ class Dataset:
                 # If the source contains Experiment objects, generate a dataset from the experiments
                 self.experiments = source
 
-                self.flies = [
-                    fly for experiment in self.experiments for fly in experiment.flies
-                ]
+                self.flies = [fly for experiment in self.experiments for fly in experiment.flies]
 
             elif type(source[0]).__name__ == "Fly":
                 # make a list of distinct experiments associated with the flies
@@ -70,31 +86,30 @@ class Dataset:
 
     def __str__(self):
         # Look for recurring words in the experiment names
-        experiment_names = [
-            experiment.directory.name for experiment in self.experiments
-        ]
+        experiment_names = [experiment.directory.name for experiment in self.experiments]
         experiment_names = "_".join(experiment_names)
         experiment_names = experiment_names.split("_")  # Split by "_"
 
         # Ignore certain labels
         labels_to_ignore = {"Tracked", "Videos"}
-        experiment_names = [
-            name for name in experiment_names if name not in labels_to_ignore
-        ]
+        experiment_names = [name for name in experiment_names if name not in labels_to_ignore]
 
         # Ignore words that are found only once
-        experiment_names = [
-            name for name in experiment_names if experiment_names.count(name) > 1
-        ]
+        experiment_names = [name for name in experiment_names if experiment_names.count(name) > 1]
 
         experiment_names = Counter(experiment_names)
         experiment_names = experiment_names.most_common(3)
         experiment_names = [name for name, _ in experiment_names]
         experiment_names = ", ".join(experiment_names)
 
-        return f"Dataset with {len(self.flies)} flies and {len(self.experiments)} experiments\nkeyword: {experiment_names}"
+        return (
+            f"Dataset with {len(self.flies)} flies and {len(self.experiments)} experiments\nkeyword: {experiment_names}"
+        )
 
     def __repr__(self):
+
+        from Ballpushing_utils import Experiment, Fly
+
         # Adapt the repr function to the source attribute
         # If the source is a list, check if it is Fly or Experiment objects
         if isinstance(self.source, list):
@@ -106,6 +121,7 @@ class Dataset:
             return f"Dataset({self.experiments[0].directory})"
         elif isinstance(self.source, Fly):
             return f"Dataset({self.flies[0].directory})"
+        return "Dataset()"
 
     def find_flies(self, on, value):
         """
@@ -174,11 +190,6 @@ class Dataset:
                     data = self._prepare_dataset_F1_coordinates(fly)
                     Dataset.append(data)
 
-            elif metrics == "F1_summary":
-                for fly in self.flies:
-                    data = self._prepare_dataset_F1_summary(fly)
-                    Dataset.append(data)
-
             elif metrics == "F1_checkpoints":
                 for fly in self.flies:
                     data = self._prepare_dataset_F1_checkpoints(fly)
@@ -205,9 +216,7 @@ class Dataset:
 
         return self.data
 
-    def _prepare_dataset_coordinates(
-        self, fly, downsampling_factor=None, annotate_events=True
-    ):
+    def _prepare_dataset_coordinates(self, fly, downsampling_factor=None, annotate_events=True):
         """
         Helper function to prepare individual fly dataset with fly and ball coordinates. It also adds the fly name, experiment name, and arena metadata as categorical data.
 
@@ -230,11 +239,7 @@ class Dataset:
             {
                 "time": flydata[0]["time"],
                 "frame": flydata[0]["frame"],
-                "adjusted_time": (
-                    fly.f1_metrics["adjusted_time"]
-                    if fly.tracking_data.exit_time
-                    else np.nan
-                ),
+                "adjusted_time": (fly.f1_metrics["adjusted_time"] if fly.tracking_data.exit_time else np.nan),
             }
         )
 
@@ -242,17 +247,13 @@ class Dataset:
         for i, data in enumerate(flydata):
             dataset[f"x_fly_{i}"] = data["x_thorax"] - fly.tracking_data.start_x
             dataset[f"y_fly_{i}"] = data["y_thorax"] - fly.tracking_data.start_y
-            dataset[f"distance_fly_{i}"] = np.sqrt(
-                dataset[f"x_fly_{i}"].pow(2) + dataset[f"y_fly_{i}"].pow(2)
-            )
+            dataset[f"distance_fly_{i}"] = np.sqrt(dataset[f"x_fly_{i}"].pow(2) + dataset[f"y_fly_{i}"].pow(2))
 
         # Add ball coordinates and distances
         for i, data in enumerate(balldata):
             dataset[f"x_ball_{i}"] = data["x_centre"] - fly.tracking_data.start_x
             dataset[f"y_ball_{i}"] = data["y_centre"] - fly.tracking_data.start_y
-            dataset[f"distance_ball_{i}"] = np.sqrt(
-                dataset[f"x_ball_{i}"].pow(2) + dataset[f"y_ball_{i}"].pow(2)
-            )
+            dataset[f"distance_ball_{i}"] = np.sqrt(dataset[f"x_ball_{i}"].pow(2) + dataset[f"y_ball_{i}"].pow(2))
 
         # Downsample the dataset if required
         if downsampling_factor:
@@ -263,9 +264,7 @@ class Dataset:
             self._annotate_interaction_events(dataset, fly)
 
         # Add trial information for learning experiments
-        if fly.config.experiment_type == "Learning" and hasattr(
-            fly, "learning_metrics"
-        ):
+        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
             self._add_trial_information(dataset, fly)
 
         # Add metadata
@@ -463,13 +462,9 @@ class Dataset:
         # Assign training_ball and test_ball distances separately
 
         if fly.metadata.F1_condition != "control":
-            dataset["training_ball"] = fly.f1_metrics["training_ball_distances"][
-                "euclidean_distance"
-            ]
+            dataset["training_ball"] = fly.f1_metrics["training_ball_distances"]["euclidean_distance"]
 
-        dataset["test_ball"] = fly.f1_metrics["test_ball_distances"][
-            "euclidean_distance"
-        ]
+        dataset["test_ball"] = fly.f1_metrics["test_ball_distances"]["euclidean_distance"]
 
         # Exclude the fly if test_ball_distances has moved > 10 px before adjusted time 0
         NegData = dataset[dataset["adjusted_time"] < 0]
@@ -507,14 +502,10 @@ class Dataset:
         dataset = self._add_metadata(dataset, fly)
 
         if fly.metadata.F1_condition == "control":
-            dataset["success_direction"] = fly.events_metrics["fly_0_ball_0"][
-                "success_direction"
-            ]
+            dataset["success_direction"] = fly.events_metrics["fly_0_ball_0"]["success_direction"]
 
         else:
-            dataset["success_direction"] = fly.events_metrics["fly_0_ball_1"][
-                "success_direction"
-            ]
+            dataset["success_direction"] = fly.events_metrics["fly_0_ball_1"]["success_direction"]
 
         return dataset
 
@@ -565,6 +556,8 @@ class Dataset:
             pandas.DataFrame: A DataFrame containing the fly's coordinates and associated metadata.
         """
 
+        dataset = pd.DataFrame()
+
         try:
             dataset = data
 
@@ -581,24 +574,12 @@ class Dataset:
             dataset["experiment"] = dataset["experiment"].astype("category")
 
             # Handle missing values for 'Nickname' and 'Brain region'
-            dataset["Nickname"] = (
-                fly.metadata.nickname
-                if fly.metadata.nickname is not None
-                else "Unknown"
-            )
-            dataset["Brain region"] = (
-                fly.metadata.brain_region
-                if fly.metadata.brain_region is not None
-                else "Unknown"
-            )
+            dataset["Nickname"] = fly.metadata.nickname if fly.metadata.nickname is not None else "Unknown"
+            dataset["Brain region"] = fly.metadata.brain_region if fly.metadata.brain_region is not None else "Unknown"
             dataset["Simplified Nickname"] = (
-                fly.metadata.simplified_nickname
-                if fly.metadata.simplified_nickname is not None
-                else "Unknown"
+                fly.metadata.simplified_nickname if fly.metadata.simplified_nickname is not None else "Unknown"
             )
-            dataset["Split"] = (
-                fly.metadata.split if fly.metadata.split is not None else "Unknown"
-            )
+            dataset["Split"] = fly.metadata.split if fly.metadata.split is not None else "Unknown"
 
             # Add the metadata for the fly's arena as columns
             for var, data in fly.metadata.arena_metadata.items():
@@ -612,9 +593,7 @@ class Dataset:
                     self.metadata.append(var)
 
         except Exception as e:
-            print(
-                f"Error occurred while adding metadata for fly {fly.metadata.name}: {str(e)}"
-            )
+            print(f"Error occurred while adding metadata for fly {fly.metadata.name}: {str(e)}")
             print(f"Current dataset:\n{dataset}")
 
         return dataset
@@ -627,9 +606,7 @@ class Dataset:
         events_df = fly.skeleton_metrics.events_based_contacts
 
         # Add trial information for learning experiments
-        if fly.config.experiment_type == "Learning" and hasattr(
-            fly, "learning_metrics"
-        ):
+        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
             trials_data = fly.learning_metrics.trials_data
 
             # Add trial column with default value of 0
@@ -638,9 +615,7 @@ class Dataset:
             # Update with actual trial values - more efficient with vectorized operations
             common_indices = events_df.index.intersection(trials_data.index)
             if not common_indices.empty:
-                events_df.loc[common_indices, "trial"] = trials_data.loc[
-                    common_indices, "trial"
-                ].values
+                events_df.loc[common_indices, "trial"] = trials_data.loc[common_indices, "trial"].values
 
         # add metadata
         events_df = self._add_metadata(events_df, fly)
@@ -679,7 +654,7 @@ class Dataset:
         end_frame = event_end
 
         # Create a VideoWriter object
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
         # Get the video dimensions
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -734,9 +709,7 @@ class Dataset:
                 )
                 clips.append(event_clip_path)
             except Exception as e:
-                print(
-                    f"Error generating clip for fly {fly_name}, event {event_index}: {e}"
-                )
+                print(f"Error generating clip for fly {fly_name}, event {event_index}: {e}")
                 continue
 
         if clips:
@@ -776,7 +749,7 @@ class Dataset:
                     color=(0, 0, 0),
                     duration=video_clips[0].duration,
                 )
-                clip_row.append(empty_clip)
+                clip_row.append(empty_clip.set_duration(video_clips[0].duration))
             clip_grid.append(clip_row)
 
         # Pad the grid with empty rows if necessary
@@ -897,9 +870,7 @@ def generate_grid(Experiment, preview=False, overwrite=False):
             try:
                 axs[row, col].imshow(frame, cmap="gray", vmin=0, vmax=255)
             except Exception as e:
-                print(
-                    f"Error: Could not plot frame {i} for video {flypath}. Exception: {e}"
-                )
+                print(f"Error: Could not plot frame {i} for video {flypath}. Exception: {e}")
                 # go to the next folder
                 continue
 

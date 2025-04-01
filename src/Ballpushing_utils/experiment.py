@@ -16,7 +16,6 @@ class Experiment:
         self,
         directory,
         metadata_only=False,
-        experiment_type=None,
     ):
         """
         Parameters
