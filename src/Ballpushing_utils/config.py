@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from utils_behavior import Utils
+from typing import Optional
 
 # Pixel size: 30 mm = 500 pixels, 4 mm = 70 pixels, 1.5 mm = 25 pixels
 
@@ -30,8 +31,7 @@ class Config:
     # General configuration attributes
 
     experiment_type: str = "Learning"
-
-    time_range: tuple = None
+    time_range: Optional[tuple] = None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
@@ -43,7 +43,7 @@ class Config:
 
     # Coordinates dataset attributes
 
-    downsampling_factor: int = None  # Classic values used are 5 or 10.
+    downsampling_factor: Optional[int] = None  # Classic values used are 5 or 10.
 
     # Random events attributes
 
@@ -85,8 +85,8 @@ class Config:
     contact_nodes = ["Rfront", "Lfront"]
 
     contact_threshold: tuple = (0, 13)
-    gap_between_contacts: int = 1 / 2
-    contact_min_length: int = 1 / 2
+    gap_between_contacts: float = 1 / 2
+    contact_min_length: float = 1 / 2
 
     # Skeleton metrics: longer
 

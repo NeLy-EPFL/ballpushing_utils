@@ -105,6 +105,10 @@ class FlyTrackingData:
 
     def _determine_success_cutoff(self):
         """Calculate success cutoff based on the final event threshold."""
+        if self.balltrack is None or self.balltrack.objects is None:
+            warnings.warn("Balltrack or its objects are not initialized.")
+            return
+
         if self.fly.config.success_cutoff_method == "final_event":
             ball_data = self.balltrack.objects[0].dataset
             threshold = self.fly.config.final_event_threshold
@@ -142,6 +146,13 @@ class FlyTrackingData:
 
     def _calculate_interactions(self, time_range=None):
         """Actual event detection with optional time range"""
+        if self.balltrack is None or self.balltrack.objects is None:
+            warnings.warn("Balltrack or its objects are not initialized.")
+            return
+        if self.flytrack is None or self.flytrack.objects is None:
+            warnings.warn("Flytrack or its objects are not initialized.")
+            return
+
         events = {}
         for fly_idx in range(len(self.flytrack.objects)):
             events[fly_idx] = {}
@@ -205,9 +216,16 @@ class FlyTrackingData:
         if self.cutoff_reference:
             all_events = self._calculate_interactions(None)
             filtered_events = self._calculate_interactions((0, self.cutoff_reference))
+
+            # Ensure all_events and filtered_events are not None
+            if all_events is None or filtered_events is None:
+                warnings.warn("Interaction events could not be calculated.")
+                return None, None
+
             all_count = sum(len(events) for fly_dict in all_events.values() for events in fly_dict.values())
             filtered_count = sum(len(events) for fly_dict in filtered_events.values() for events in fly_dict.values())
             return filtered_count, all_count
+
         return None, None
 
     @property
@@ -233,6 +251,15 @@ class FlyTrackingData:
 
             for ball_idx in range(0, len(self.balltrack.objects)):
                 ball_data = self.balltrack.objects[ball_idx].dataset
+
+                # Ensure interaction_events is not None and contains the required keys
+                if (
+                    self.interaction_events is None
+                    or fly_idx not in self.interaction_events
+                    or ball_idx not in self.interaction_events[fly_idx]
+                ):
+                    warnings.warn(f"Interaction events missing for fly_idx={fly_idx}, ball_idx={ball_idx}.")
+                    continue
 
                 # Access events through the property to ensure they're calculated
                 interaction_events = self.interaction_events[fly_idx][ball_idx]
@@ -286,6 +313,10 @@ class FlyTrackingData:
             for onset in onsets:
                 if onset is None:
                     continue
+                if self.flytrack is None or self.flytrack.objects is None:
+                    warnings.warn("Flytrack or its objects are not initialized.")
+                    continue
+
                 start = max(0, onset - self.fly.config.frames_before_onset)
                 end = min(
                     len(self.flytrack.objects[fly_idx].dataset),
@@ -393,9 +424,17 @@ class FlyTrackingData:
         return True
 
     def check_dying(self):
-        # Check if in the fly tracking data, there is any time where the fly doesn't move more than 30 pixels for 15 min
+        """
+        Check if in the fly tracking data, there is any time where the fly doesn't move more than 30 pixels for 15 minutes.
+        """
+        # Ensure flytrack and its objects are not None
+        if self.flytrack is None or self.flytrack.objects is None:
+            warnings.warn("Flytrack or its objects are not initialized.")
+            return False
 
-        if self.flytrack is None:
+        # Ensure there is at least one object in flytrack
+        if len(self.flytrack.objects) == 0:
+            warnings.warn("Flytrack contains no objects.")
             return False
 
         fly_data = self.flytrack.objects[0].dataset
@@ -411,31 +450,24 @@ class FlyTrackingData:
 
         fly_data["velocity"] = velocity
 
-        # Check if the fly has a continuous period of 15 min where it doesn't move more than 30 pixels
-
         # Get the time points where the fly's velocity is less than 2 px/s
-
         low_velocity = fly_data[fly_data["velocity"] < 2]
 
         # Get consecutive time points where the fly's velocity is less than 2 px/s
-
-        consecutive_points = np.split(low_velocity, np.where(np.diff(low_velocity.index) != 1)[0] + 1)
+        consecutive_points = np.split(low_velocity.index, np.where(np.diff(low_velocity.index) != 1)[0] + 1)
 
         # Get the duration of each consecutive period
-
         durations = [len(group) for group in consecutive_points]
 
-        # Check if there is any consecutive period of 15 min where the fly's velocity is less than 2 px/s
-
-        for events in durations:
+        # Check if there is any consecutive period of 15 minutes where the fly's velocity is less than 2 px/s
+        for group, events in zip(consecutive_points, durations):
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time
-
-                time = fly_data.loc[consecutive_points[durations.index(events)].index[0]]["time"]
-
+                time = fly_data.loc[group[0], "time"]
                 print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
-
                 return True
+
+        return False
 
     def get_initial_position(self):
         """
@@ -467,6 +499,46 @@ class FlyTrackingData:
                 )
 
         raise ValueError(f"No valid position data found for {self.fly.metadata.name}.")
+
+    def check_yball_variation(self, event, threshold=None):
+        """
+        Check if the yball value varies more than a given threshold during an event.
+
+        Args:
+            event (list): A list containing the start and end indices of the event.
+            threshold (float): The maximum allowed variation in yball value.
+
+        Returns:
+            tuple: A boolean indicating if the variation exceeds the threshold, and the actual variation.
+        """
+        if self.balltrack is None or self.balltrack.objects is None:
+            warnings.warn("Balltrack or its objects are not initialized.")
+            return False, 0
+
+        # Set threshold using config
+
+        if threshold is None:
+            threshold = self.fly.config.significant_threshold
+
+        # Get the ball data
+        ball_data = self.balltrack.objects[0].dataset
+
+        # Ensure the event indices are within the bounds of the dataset
+        start_idx, end_idx = event
+        if start_idx < 0 or end_idx > len(ball_data):
+            warnings.warn(f"Event indices {event} are out of bounds.")
+            return False, 0
+
+        # Extract the yball values for the event
+        yball_values = ball_data["y_centre"].iloc[start_idx:end_idx]
+
+        # Calculate the variation
+        variation = yball_values.max() - yball_values.min()
+
+        # Check if the variation exceeds the threshold
+        exceeds_threshold = variation > threshold
+
+        return exceeds_threshold, variation
 
     def get_skeleton(self):
         """
@@ -515,12 +587,22 @@ class FlyTrackingData:
 
     def compute_adjusted_time(self):
         """
-        Compute adjusted time based on the fly's exit time if any, otherwise return NaN.
+        Compute adjusted time based on the fly's exit time if any, otherwise return None.
         """
         if self.exit_time is not None:
+            # Ensure flytrack and its objects are not None
+            if self.flytrack is None or self.flytrack.objects is None:
+                warnings.warn("Flytrack or its objects are not initialized.")
+                return None
+
+            # Ensure there is at least one object in flytrack
+            if len(self.flytrack.objects) == 0:
+                warnings.warn("Flytrack contains no objects.")
+                return None
 
             flydata = self.flytrack.objects[0].dataset
 
+            # Compute adjusted time
             flydata["adjusted_time"] = flydata["time"] - self.exit_time
 
             return flydata["adjusted_time"]

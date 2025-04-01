@@ -1,11 +1,20 @@
 from __future__ import annotations
 from pathlib import Path
+import cv2
+import datetime
+import numpy as np
+import pygame
+import os
+from moviepy.editor import VideoFileClip, VideoClip
+from moviepy.video.fx.speedx import speedx
 
 from utils_behavior import Utils
 
 from Ballpushing_utils.fly_trackingdata import FlyTrackingData
-
-print(FlyTrackingData)
+from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from Ballpushing_utils.learning_metrics import LearningMetrics
+from Ballpushing_utils.f1_metrics import F1Metrics
 
 
 class Fly:
@@ -17,9 +26,7 @@ class Fly:
         self,
         directory,
         experiment=None,
-        # experiment_type=None,
         as_individual=False,
-        # time_range=None,
     ):
         """
         Initialize a Fly object.
@@ -62,13 +69,15 @@ class Fly:
 
         self.metadata = FlyMetadata(self)
 
+        self.Genotype = self.metadata.arena_metadata.get("Genotype", "Unknown")
+
         self._tracking_data = None
 
         # Check if the fly has valid tracking data
-
         if as_individual:
-            if not self.tracking_data.valid_data:
-                print(f"Invalid data for: {self.metadata.name}. Skipping.")
+            if self.tracking_data is None or not self.tracking_data.valid_data:
+                if self.config.debugging:
+                    print(f"Invalid data for: {self.metadata.name}. Skipping.")
                 return
 
         self.flyball_positions = None
@@ -87,7 +96,8 @@ class Fly:
         if self._tracking_data is None:
             self._tracking_data = FlyTrackingData(self)
             if not self._tracking_data.valid_data:
-                print(f"Invalid data for: {self.metadata.name}. Skipping.")
+                if self.config.debugging:
+                    print(f"Invalid data for: {self.metadata.name}. Skipping.")
                 self._tracking_data = None
         return self._tracking_data
 
@@ -112,17 +122,35 @@ class Fly:
 
     @property
     def skeleton_metrics(self):
+        if self.tracking_data is None:
+            if self.config.debugging:
+                print("No tracking data available.")
+            return None
+
         if self.tracking_data.skeletontrack is None:
-            print("No skeleton data available.")
-        elif self._skeleton_metrics is None and self.tracking_data.skeletontrack is not None:
+            if self.config.debugging:
+                print("No skeleton data available.")
+            return None
+
+        if self._skeleton_metrics is None:
             self._skeleton_metrics = SkeletonMetrics(self)
+
         return self._skeleton_metrics
 
     def __str__(self):
-        # Get the genotype from the metadata
-        genotype = self.metadata.arena_metadata["Genotype"]
+        # Handle cases where tracking data might be None
+        flytrack = self.tracking_data.flytrack if self.tracking_data is not None else "No Flytrack"
+        balltrack = self.tracking_data.balltrack if self.tracking_data is not None else "No Balltrack"
 
-        return f"Fly: {self.metadata.name}\nArena: {self.metadata.arena}\nCorridor: {self.metadata.corridor}\nVideo: {self.metadata.video}\nFlytrack: {self.tracking_data.flytrack}\nBalltrack: {self.tracking_data.balltrack}\nGenotype: {genotype}"
+        return (
+            f"Fly: {self.metadata.name}\n"
+            f"Arena: {self.metadata.arena}\n"
+            f"Corridor: {self.metadata.corridor}\n"
+            f"Video: {self.metadata.video}\n"
+            f"Flytrack: {flytrack}\n"
+            f"Balltrack: {balltrack}\n"
+            f"Genotype: {self.Genotype}"
+        )
 
     def __repr__(self):
         return f"Fly({self.directory})"
@@ -134,7 +162,7 @@ class Fly:
         This method creates a video clip from the original video for the duration of the event. It also adds text to each frame indicating the event number and start time. If the 'yball' value varies more than a certain threshold during the event, a red dot is added to the frame.
 
         Args:
-            event (list or int): : A list containing the start and end indices of the event in the 'flyball_positions' DataFrame. Alternatively, an integer can be provided to indicate the index of the event in the 'interaction_events' list.
+            event (list or int): A list containing the start and end indices of the event in the 'flyball_positions' DataFrame. Alternatively, an integer can be provided to indicate the index of the event in the 'interaction_events' list.
             outpath (Path): The directory where the output video clip should be saved.
             fps (int): The frames per second of the original video.
             width (int): The width of the output video frames.
@@ -143,6 +171,17 @@ class Fly:
         Returns:
             str: The path to the output video clip.
         """
+        # Ensure tracking data is available
+        if self.tracking_data is None or self.tracking_data.interaction_events is None:
+            if self.config.debugging:
+                print(f"No tracking data or interaction events available for {self.metadata.name}.")
+            return None
+
+        # Ensure the video file exists
+        if not self.metadata.video or not Path(self.metadata.video).exists():
+            if self.config.debugging:
+                print(f"Video file not found for {self.metadata.name}.")
+            return None
 
         # If no outpath is provided, use a default path based on the fly's name and the event number
         if not outpath:
@@ -150,12 +189,17 @@ class Fly:
 
         # Check if the event is an integer or a list
         if isinstance(event, int):
-            event = self.tracking_data.interaction_events[event - 1]
+            try:
+                event = self.tracking_data.interaction_events[event - 1]
+            except IndexError:
+                if self.config.debugging:
+                    print(f"Invalid event index {event} for {self.metadata.name}.")
+                return None
 
         start_frame, end_frame = event[0], event[1]
         cap = cv2.VideoCapture(str(self.metadata.video))
 
-        # If no fps, width or height is provided, use the original video's fps, width and height
+        # If no fps, width, or height is provided, use the original video's fps, width, and height
         if not fps:
             fps = cap.get(cv2.CAP_PROP_FPS)
         if not width:
@@ -163,39 +207,61 @@ class Fly:
         if not height:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+        if not cap.isOpened():
+            if self.config.debugging:
+                print(f"Failed to open video file for {self.metadata.name}.")
+            return None
+
         try:
             start_time = start_frame / fps
             start_time_str = str(datetime.timedelta(seconds=int(start_time)))
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
 
             # Get the index of the event in the list to apply it to the output file name
-            event_index = self.tracking_data.interaction_events.index(event)
+            try:
+                if self.tracking_data is None or self.tracking_data.interaction_events is None:
+                    if self.config.debugging:
+                        print(f"No tracking data or interaction events available for {self.metadata.name}.")
+                    return None
+
+                # Ensure interaction_events is a list
+                if isinstance(self.tracking_data.interaction_events, list):
+                    event_index = self.tracking_data.interaction_events.index(event)
+                else:
+                    if self.config.debugging:
+                        print(f"interaction_events is not a list for {self.metadata.name}.")
+                    return None
+            except ValueError:
+                if self.config.debugging:
+                    print(f"Event not found in interaction events for {self.metadata.name}.")
+                return None
 
             if outpath == Utils.get_labserver() / "Videos":
                 clip_path = outpath.joinpath(f"{self.metadata.name}_{event_index}.mp4").as_posix()
             else:
                 clip_path = outpath.joinpath(f"output_{event_index}.mp4").as_posix()
-            out = cv2.VideoWriter(clip_path, fourcc, fps, (height, width))
+
+            out = cv2.VideoWriter(clip_path, fourcc, fps, (width, height))
             try:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-                for _ in range(start_frame, end_frame):
+                for frame_idx in range(start_frame, end_frame):
                     ret, frame = cap.read()
                     if not ret:
+                        if self.config.debugging:
+                            print(f"Failed to read frame {frame_idx} for {self.metadata.name}.")
                         break
 
                     # If tracks is True, add the tracking data to the frame
                     if tracks and self.flyball_positions is not None:
-                        # Get the tracking data for the current frame
-                        flyball_coordinates = self.flyball_positions.loc[_]
-
-                        # Use the draw_circles method to add the tracking data to the frame
-                        frame = self.draw_circles(frame, flyball_coordinates)
+                        if frame_idx in self.flyball_positions.index:
+                            flyball_coordinates = self.flyball_positions.loc[frame_idx]
+                            frame = self.draw_circles(frame, flyball_coordinates)
 
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
-                    # Write some Text
+                    # Write some text
                     font = cv2.FONT_HERSHEY_SIMPLEX
-                    text = f"Event:{event_index+1} - start:{start_time_str}"
+                    text = f"Event:{event_index + 1} - start:{start_time_str}"
                     font_scale = width / 150
                     thickness = int(4 * font_scale)
                     text_size, _ = cv2.getTextSize(text, font, font_scale, thickness)
@@ -215,33 +281,26 @@ class Fly:
                     )
 
                     # Check if yball value varies more than threshold
-                    if self.check_yball_variation(event)[0]:  # You need to implement this function
+                    if self.tracking_data.check_yball_variation(event)[0]:  # You need to implement this function
                         # Add red dot to segment
                         dot = np.zeros((10, 10, 3), dtype=np.uint8)
-                        dot[:, :, 0] = 0
-                        dot[:, :, 1] = 0
                         dot[:, :, 2] = 255
                         dot = cv2.resize(dot, (20, 20))
 
                         # Position the dot right next to the text at the top of the frame
-                        dot_x = (
-                            text_x + text_size[0] + 10
-                        )  # Position the dot right next to the text with a margin of 10
-
-                        # Adjusted position for dot_y to make it slightly higher
-                        dot_y_adjustment_factor = 1.2
-                        dot_y = text_y - int(dot.shape[0] * dot_y_adjustment_factor) + text_size[1] // 2
+                        dot_x = text_x + text_size[0] + 10
+                        dot_y = text_y - int(dot.shape[0] * 1.2) + text_size[1] // 2
 
                         frame[dot_y : dot_y + dot.shape[0], dot_x : dot_x + dot.shape[1]] = dot
 
                     # Write the frame into the output file
                     out.write(frame)
 
-            # Release everything when done
             finally:
                 out.release()
         finally:
             cap.release()
+
         return clip_path
 
     def concatenate_clips(self, clips, outpath, fps, width, height, vidname):
@@ -259,7 +318,7 @@ class Fly:
             vidname (str): The name of the output video file (without the extension).
 
         """
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore
         out = cv2.VideoWriter(outpath.joinpath(f"{vidname}.mp4").as_posix(), fourcc, fps, (height, width))
         try:
             for clip_path in clips:
@@ -286,11 +345,16 @@ class Fly:
         """
 
         if self.flyball_positions is None:
-            print(f"No tracking data available for {self.metadata.name}. Skipping...")
+            if self.config.debugging:
+                print(f"No tracking data available for {self.metadata.name}. Skipping...")
             return
 
         if outpath is None:
             outpath = self.directory
+        if self.tracking_data is None:
+            if self.config.debugging:
+                print(f"No tracking data available for {self.metadata.name}. Skipping...")
+            return
         events = self.tracking_data.interaction_events
         clips = []
 
@@ -300,6 +364,11 @@ class Fly:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
         vidname = f"{self.metadata.name}_{self.Genotype if self.Genotype else 'undefined'}"
+
+        if events is None:
+            if self.config.debugging:
+                print(f"No interaction events available for {self.metadata.name}. Skipping...")
+            return
 
         for i, event in enumerate(events):
             clip_path = self.generate_clip(event, outpath, fps, width, height, tracks)
@@ -375,18 +444,19 @@ class Fly:
             marked_clip = VideoClip(
                 lambda t: self.draw_circles(
                     clip.get_frame(t),
-                    self.flyball_positions.loc[round(t * clip.fps)],  # Ensure correct frame is accessed
+                    self.flyball_positions.loc[round(t * clip.fps)] if self.flyball_positions is not None else None,
                 ),
                 duration=clip.duration,
             )
         else:
             marked_clip = clip
 
-        # Apply speed effect
-        sped_up_clip = marked_clip.fx(vfx.speedx, speed)
+        sped_up_clip = marked_clip.fx(speedx, speed)
 
         # If saving, write the new video clip to a file
         if save:
+            if output_path is None:
+                raise ValueError("Output path must be provided when save is True.")
             print(f"Saving {self.metadata.video.name} at {speed}x speed in {output_path.parent}")
             sped_up_clip.write_videofile(str(output_path), fps=clip.fps)  # Save the sped-up clip
 

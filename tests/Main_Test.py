@@ -12,3 +12,9 @@ ExampleFly_path = Path(
 )
 
 ExampleFly = Fly(ExampleFly_path, as_individual=True)
+
+# Load an example experiment
+
+ExampleExperiment_path = Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked")
+
+ExampleExperiment = Experiment(ExampleExperiment_path)
