@@ -49,6 +49,9 @@ class FlyTrackingData:
         if self.valid_data or self.keep_idle:
             self.duration = self.balltrack.objects[0].dataset["time"].iloc[-1]
             self.start_x, self.start_y = self.get_initial_position()
+            if self.fly.config.debugging:
+                print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
+
             self.fly_skeleton = self.get_skeleton()
             self.exit_time = self.get_exit_time()
             self.adjusted_time = self.compute_adjusted_time()
@@ -475,28 +478,24 @@ class FlyTrackingData:
         If not available, use the skeleton data.
 
         Returns:
-            tuple: The initial x and y positions of the fly.
+            tuple: The median initial x and y positions of the fly over the first 10 frames.
         """
         # Check if fly tracking data is available
         if hasattr(self, "flytrack") and self.flytrack is not None:
             fly_data = self.flytrack.objects[0].dataset
             if "y_thorax" in fly_data.columns and "x_thorax" in fly_data.columns:
-                return fly_data["x_thorax"].iloc[0], fly_data["y_thorax"].iloc[0]
-            elif "y_thorax" in fly_data.columns and "x_thorax" in fly_data.columns:
-                return fly_data["x_thorax"].iloc[0], fly_data["y_thorax"].iloc[0]
+                # Compute the median over the first 10 frames
+                initial_x = fly_data["x_thorax"].iloc[:10].median()
+                initial_y = fly_data["y_thorax"].iloc[:10].median()
+                return initial_x, initial_y
 
         # Fallback to skeleton data if fly tracking data is not available
         if self.fly_skeleton is not None:
             if "y_thorax" in self.fly_skeleton.columns and "x_thorax" in self.fly_skeleton.columns:
-                return (
-                    self.fly_skeleton["x_thorax"].iloc[0],
-                    self.fly_skeleton["y_thorax"].iloc[0],
-                )
-            elif "y_thorax" in self.fly_skeleton.columns and "x_thorax" in self.fly_skeleton.columns:
-                return (
-                    self.fly_skeleton["x_thorax"].iloc[0],
-                    self.fly_skeleton["y_thorax"].iloc[0],
-                )
+                # Compute the median over the first 10 frames
+                initial_x = self.fly_skeleton["x_thorax"].iloc[:10].median()
+                initial_y = self.fly_skeleton["y_thorax"].iloc[:10].median()
+                return initial_x, initial_y
 
         raise ValueError(f"No valid position data found for {self.fly.metadata.name}.")
 

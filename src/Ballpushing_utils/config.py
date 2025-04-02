@@ -26,7 +26,7 @@ class Config:
 
     """
 
-    debugging: bool = False
+    debugging: bool = True
 
     # General configuration attributes
 
@@ -35,6 +35,7 @@ class Config:
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
+    chamber_radius: int = 50
 
     log_missing = True
     log_path = Utils.get_data_server() / "MD/MultiMazeRecorder"

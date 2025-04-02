@@ -1,4 +1,5 @@
 import numpy as np
+from utils_behavior import Processing
 
 
 class BallPushingMetrics:
@@ -6,6 +7,16 @@ class BallPushingMetrics:
 
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
+        # Iterate over the indices of the flytrack objects list
+        self.chamber_exit_times = {
+            fly_idx: self.get_chamber_exit_time(fly_idx, 0)
+            for fly_idx in range(len(self.tracking_data.flytrack.objects))
+        }
+
+        if self.fly.config.debugging:
+            for fly_idx, exit_time in self.chamber_exit_times.items():
+                print(f"Fly {fly_idx} chamber exit time: {exit_time}")
+
         self.metrics = {}
         self.compute_metrics()
         # TODO: Compute maximum distance pushed (corresponding to max_event)
@@ -110,12 +121,33 @@ class BallPushingMetrics:
                         print(f"Error in get_cumulated_breaks_duration: {e}")
 
                 try:
+                    chamber_time = self.get_chamber_time(fly_idx)
+                except Exception as e:
+                    chamber_time = np.nan
+                    if self.fly.config.debugging:
+                        print(f"Error in get_chamber_time: {e}")
+
+                try:
+                    chamber_ratio = self.chamber_ratio(fly_idx)
+                except Exception as e:
+                    chamber_ratio = np.nan
+                    if self.fly.config.debugging:
+                        print(f"Error in chamber_ratio: {e}")
+
+                try:
                     distance_moved = self.get_distance_moved(fly_idx, ball_idx)
                 except Exception as e:
                     distance_moved = np.nan
 
                     if self.fly.config.debugging:
                         print(f"Error in get_distance_moved: {e}")
+
+                try:
+                    distance_ratio = self.get_distance_ratio(fly_idx, ball_idx)
+                except Exception as e:
+                    distance_ratio = np.nan
+                    if self.fly.config.debugging:
+                        print(f"Error in get_distance_ratio: {e}")
 
                 try:
                     if aha_moment:
@@ -158,6 +190,8 @@ class BallPushingMetrics:
                     "insight_effect": insight_effect["raw_effect"],
                     "insight_effect_log": insight_effect["log_effect"],
                     "cumulated_breaks_duration": cumulated_breaks_duration,
+                    "chamber_time": chamber_time,
+                    "chamber_ratio": chamber_ratio,
                     "pushed": len(events_direction[0]),
                     "pulled": len(events_direction[1]),
                     "pulling_ratio": (
@@ -173,6 +207,7 @@ class BallPushingMetrics:
                         else np.nan
                     ),
                     "distance_moved": distance_moved,
+                    "distance_ratio": distance_ratio,
                     "exit_time": self.tracking_data.exit_time,
                 }
 
@@ -237,6 +272,47 @@ class BallPushingMetrics:
 
         return adjusted_nb_events
 
+    def _calculate_median_coordinates(self, data, start_idx=None, end_idx=None, window=10, keypoint="centre"):
+        """
+        Calculate the median coordinates for the start and/or end of a given range.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Data containing the x and y coordinate columns.
+        start_idx : int, optional
+            Start index of the range. If None, the start median is not calculated.
+        end_idx : int, optional
+            End index of the range. If None, the end median is not calculated.
+        window : int, optional
+            Number of frames to consider for the median calculation (default is 10).
+        keypoint : str, optional
+            Keypoint prefix for the x and y columns (e.g., "centre" for "x_centre" and "y_centre",
+            or "thorax" for "x_thorax" and "y_thorax"). Default is "centre".
+
+        Returns
+        -------
+        tuple
+            Median coordinates for the start and/or end of the range. If `start_idx` or `end_idx`
+            is None, the corresponding value in the tuple will be None.
+        """
+        x_col = f"x_{keypoint}"
+        y_col = f"y_{keypoint}"
+
+        start_x, start_y, end_x, end_y = None, None, None, None
+
+        # Calculate the median position of the first `window` frames if start_idx is provided
+        if start_idx is not None:
+            start_x = data[x_col].iloc[start_idx : start_idx + window].median()
+            start_y = data[y_col].iloc[start_idx : start_idx + window].median()
+
+        # Calculate the median position of the last `window` frames if end_idx is provided
+        if end_idx is not None:
+            end_x = data[x_col].iloc[end_idx - window : end_idx].median()
+            end_y = data[y_col].iloc[end_idx - window : end_idx].median()
+
+        return start_x, start_y, end_x, end_y
+
     def find_event_by_distance(self, fly_idx, ball_idx, threshold, distance_type="max"):
         """
         Find the event at which the ball has been moved a given amount of pixels for a given fly and ball.
@@ -260,11 +336,6 @@ class BallPushingMetrics:
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        # ball_data["euclidean_distance"] = np.sqrt(
-        #     (ball_data["x_centre"] - ball_data["x_centre"].iloc[0]) ** 2
-        #     + (ball_data["y_centre"] - ball_data["y_centre"].iloc[0]) ** 2
-        # )
-
         if distance_type == "max":
             max_distance = ball_data["euclidean_distance"].max() - threshold
             distance_check = (
@@ -286,9 +357,57 @@ class BallPushingMetrics:
 
         return event, event_index
 
+    # TODO: Implement adjustment by computing time to exit chamber and subtract it from the time of the event (perhaps keep both?)
+    def get_chamber_exit_time(self, fly_idx, ball_idx):
+        """
+        Compute the time at which the fly left the chamber for a given fly and ball.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+
+        Returns:
+            float or None: The exit time in seconds, or None if the fly never left the chamber.
+        """
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Calculate the distance from the fly start position for each frame
+        distances = Processing.calculate_euclidian_distance(
+            fly_data["x_thorax"], fly_data["y_thorax"], self.tracking_data.start_x, self.tracking_data.start_y
+        )
+
+        # Debugging: Print distances
+        if self.fly.config.debugging:
+            print(f"Distances for fly {fly_idx}, ball {ball_idx}: {distances}")
+
+        # Determine the frames where the fly is within a certain radius of the start position
+        in_chamber = distances <= self.fly.config.chamber_radius
+
+        # Debugging: Print in_chamber array
+        if self.fly.config.debugging:
+            print(f"In-chamber status for fly {fly_idx}, ball {ball_idx}: {in_chamber}")
+
+        # Check if the fly ever leaves the chamber
+        if not np.any(~in_chamber):  # If all values in `in_chamber` are True
+            if self.fly.config.debugging:
+                print(f"Fly {fly_idx} never left the chamber.")
+            return None
+
+        # Get the first frame where the fly is outside the chamber
+        exit_frame = np.argmax(~in_chamber)  # Find the first `False` in `in_chamber`
+
+        # Debugging: Print exit_frame
+        if self.fly.config.debugging:
+            print(f"Exit frame for fly {fly_idx}, ball {ball_idx}: {exit_frame}")
+
+        exit_time = exit_frame / self.fly.experiment.fps
+
+        return exit_time
+
     def get_max_event(self, fly_idx, ball_idx, threshold=None):
         """
-        Get the event at which the ball was moved at its maximum distance for a given fly and ball. Maximum here doesn't mean the ball has reached the end of the corridor.
+        Get the event at which the ball was moved at its maximum distance for a given fly and ball.
+        Maximum here doesn't mean the ball has reached the end of the corridor.
 
         Parameters
         ----------
@@ -309,14 +428,25 @@ class BallPushingMetrics:
 
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
+        # Find the event with the maximum distance
         max_event, max_event_idx = self.find_event_by_distance(fly_idx, ball_idx, threshold, distance_type="max")
 
+        # Get the chamber exit time for the current fly
+        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+
+        # Calculate the time of the maximum event
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            max_event_time = max_event[0] / self.fly.experiment.fps if max_event else None
+            if max_event:
+                max_event_time = max_event[0] / self.fly.experiment.fps
+                if chamber_exit_time is not None:
+                    max_event_time -= chamber_exit_time
+            else:
+                max_event_time = None
         else:
-            max_event_time = (
-                (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time if max_event else None
-            )
+            if max_event:
+                max_event_time = (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+            else:
+                max_event_time = None
 
         return max_event_idx, max_event_time
 
@@ -338,36 +468,67 @@ class BallPushingMetrics:
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        max_distance = np.sqrt(
-            (ball_data["x_centre"] - ball_data["x_centre"].iloc[0]) ** 2
-            + (ball_data["y_centre"] - ball_data["y_centre"].iloc[0]) ** 2
-        ).max()
+        # Calculate the median initial position
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(ball_data, start_idx=0, window=10)
 
-        return max_distance
+        # Calculate the Euclidean distance from the initial position
+        distances = Processing.calculate_euclidian_distance(
+            ball_data["x_centre"], ball_data["y_centre"], initial_x, initial_y
+        )
+
+        # Return the maximum distance
+        return distances.max()
 
     def get_final_event(self, fly_idx, ball_idx, threshold=None, init=False):
+        """
+        Get the final event for a given fly and ball based on a distance threshold.
 
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+        threshold : float, optional
+            Distance threshold for the final event (default is None).
+        init : bool, optional
+            Whether to use initial conditions (default is False).
+
+        Returns
+        -------
+        tuple
+            Final event index and final event time.
+        """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
+        # Get the chamber exit time for the current fly
+        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+
+        # Determine the appropriate threshold
+        if threshold is None:
+            if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
+                threshold = self.fly.config.final_event_threshold
+            else:
+                threshold = self.fly.config.final_event_F1_threshold
+
+        # Find the final event based on the threshold
+        final_event, final_event_idx = self.find_event_by_distance(
+            fly_idx, ball_idx, threshold, distance_type="threshold"
+        )
+
+        # Calculate the time of the final event
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            threshold = self.fly.config.final_event_threshold
-
-            final_event, final_event_idx = self.find_event_by_distance(
-                fly_idx, ball_idx, threshold, distance_type="threshold"
-            )
-
-            final_event_time = final_event[0] / self.fly.experiment.fps if final_event else None
-
+            if final_event:
+                final_event_time = final_event[0] / self.fly.experiment.fps
+                if chamber_exit_time is not None:
+                    final_event_time -= chamber_exit_time
+            else:
+                final_event_time = None
         else:
-            threshold = self.fly.config.final_event_F1_threshold
-
-            final_event, final_event_idx = self.find_event_by_distance(
-                fly_idx, ball_idx, threshold, distance_type="threshold"
-            )
-
-            final_event_time = (
-                (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time if final_event else None
-            )
+            if final_event:
+                final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+            else:
+                final_event_time = None
 
         return final_event_idx, final_event_time
 
@@ -450,7 +611,69 @@ class BallPushingMetrics:
         cumulated_breaks_duration = sum([break_[2] for break_ in breaks])
         return cumulated_breaks_duration
 
+    def get_chamber_time(self, fly_idx):
+        """
+        Compute the time spent by the fly in the chamber. The chamber is defined as the area within a certain radius of the fly start position.
+
+        Args:
+            fly_idx (int): Index of the fly.
+
+        Returns:
+            float: Time spent in the chamber in seconds.
+        """
+        # Get fly data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Get the fly start position using the median of the first 10 frames
+        start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+
+        # Calculate the distance from the fly start position for each frame
+        distances = Processing.calculate_euclidian_distance(
+            fly_data["x_thorax"], fly_data["y_thorax"], start_x, start_y
+        )
+
+        # Determine the frames where the fly is within a certain radius of the start position
+        in_chamber = distances <= self.fly.config.chamber_radius
+
+        # Calculate the time spent in the chamber
+        time_in_chamber = np.sum(in_chamber) / self.fly.experiment.fps
+
+        return time_in_chamber
+
+    # TODO: Maybe use the non smoothed data to compute this kind of thing as it looks like there's a slight lag in the smoothed data.
+
+    def chamber_ratio(self, fly_idx):
+        """Compute the ratio of time spent in the chamber to the total time of the experiment.
+        Args:
+            fly_idx (int): Index of the fly.
+        """
+
+        # Get the time spent in the chamber
+        time_in_chamber = self.get_chamber_time(fly_idx)
+
+        # Get the total time of the experiment
+        total_time = self.tracking_data.duration
+
+        # Calculate the ratio
+        if total_time > 0:
+            ratio = time_in_chamber / total_time
+        else:
+            ratio = np.nan
+
+        return ratio
+
     def find_events_direction(self, fly_idx, ball_idx):
+        """
+        Categorize significant events as pushing or pulling based on the change in distance
+        between the ball and the fly during each event.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+
+        Returns:
+            tuple: Two lists - pushing_events and pulling_events.
+        """
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
@@ -465,15 +688,22 @@ class BallPushingMetrics:
             start_roi = event[0]
             end_roi = event[1]
 
-            start_distance = np.sqrt(
-                (ball_data.loc[start_roi, "x_centre"] - fly_data.loc[start_roi, "x_thorax"]) ** 2
-                + (ball_data.loc[start_roi, "y_centre"] - fly_data.loc[start_roi, "y_thorax"]) ** 2
-            )
-            end_distance = np.sqrt(
-                (ball_data.loc[end_roi, "x_centre"] - fly_data.loc[start_roi, "x_thorax"]) ** 2
-                + (ball_data.loc[end_roi, "y_centre"] - fly_data.loc[start_roi, "y_thorax"]) ** 2
+            # Calculate the median positions for the start and end of the event
+            start_ball_x, start_ball_y, end_ball_x, end_ball_y = self._calculate_median_coordinates(
+                ball_data, start_idx=start_roi, end_idx=end_roi, window=10, keypoint="centre"
             )
 
+            start_fly_x, start_fly_y, _, _ = self._calculate_median_coordinates(
+                fly_data, start_idx=start_roi, window=10, keypoint="thorax"
+            )
+
+            # Calculate the distances using the median positions
+            start_distance = Processing.calculate_euclidian_distance(
+                start_ball_x, start_ball_y, start_fly_x, start_fly_y
+            )
+            end_distance = Processing.calculate_euclidian_distance(end_ball_x, end_ball_y, start_fly_x, start_fly_y)
+
+            # Categorize the event based on the change in distance
             if end_distance > start_distance:
                 pushing_events.append(event)
             else:
@@ -482,18 +712,72 @@ class BallPushingMetrics:
         return pushing_events, pulling_events
 
     def get_distance_moved(self, fly_idx, ball_idx, subset=None):
+        """
+        Calculate the total distance moved by the ball for a given fly and ball,
+        using the median position of the first and last 10 frames of each event
+        to reduce the impact of tracking aberrations.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+            subset (list, optional): List of events to consider. Defaults to all interaction events.
+
+        Returns:
+            float: Total distance moved by the ball.
+        """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
         if subset is None:
             subset = self.tracking_data.interaction_events[fly_idx][ball_idx]
 
+        total_distance = 0
+
         for event in subset:
-            ball_data.loc[event[0] : event[1], "euclidean_distance"] = np.sqrt(
-                (ball_data["x_centre"].iloc[event[1]] - ball_data["x_centre"].iloc[event[0]]) ** 2
-                + (ball_data["y_centre"].iloc[event[1]] - ball_data["y_centre"].iloc[event[0]]) ** 2
+            start_idx, end_idx = event[0], event[1]
+
+            # Ensure the event duration is long enough to calculate medians
+            if end_idx - start_idx < 10:
+                continue
+
+            # Use the helper method to calculate median coordinates
+            start_x, start_y, end_x, end_y = self._calculate_median_coordinates(
+                ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
             )
 
-        return ball_data["euclidean_distance"].sum()
+            # Calculate the Euclidean distance between the start and end positions
+            distance = Processing.calculate_euclidian_distance(start_x, start_y, end_x, end_y)
+
+            total_distance += distance
+
+        return total_distance
+
+    def get_distance_ratio(self, fly_idx, ball_idx):
+        """
+        Calculate the ratio between the maximum distance moved from the start position
+        and the total distance moved by the ball. This ratio highlights discrepancies
+        caused by behaviors like pulling and pushing the ball repeatedly.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+
+        Returns:
+            float: The distance ratio. A value closer to 1 indicates consistent movement
+                in one direction, while a lower value indicates more back-and-forth movement.
+        """
+        # Get the maximum distance moved from the start position
+        max_distance = self.get_max_distance(fly_idx, ball_idx)
+
+        # Get the total distance moved
+        total_distance = self.get_distance_moved(fly_idx, ball_idx)
+
+        # Calculate the ratio
+        if total_distance > 0:
+            distance_ratio = total_distance / max_distance
+        else:
+            distance_ratio = np.nan  # Handle cases where total distance is zero
+
+        return distance_ratio
 
     def get_aha_moment(self, fly_idx, ball_idx, distance=None):
         """
@@ -629,25 +913,40 @@ class BallPushingMetrics:
             return np.nan
 
     def get_success_direction(self, fly_idx, ball_idx, threshold=None):
+        """
+        Determine the success direction (push, pull, or both) based on the ball's movement.
 
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+            threshold (float, optional): Distance threshold for success. Defaults to the configured threshold.
+
+        Returns:
+            str: "push", "pull", "both", or None if no success direction is determined.
+        """
         if threshold is None:
             threshold = self.fly.config.success_direction_threshold
 
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        initial_y = ball_data["y_centre"].iloc[0]
-
-        ball_data["euclidean_distance"] = np.sqrt(
-            (ball_data["x_centre"] - ball_data["x_centre"].iloc[0]) ** 2
-            + (ball_data["y_centre"] - ball_data["y_centre"].iloc[0]) ** 2
+        # Get the median initial position of the ball
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, window=10, keypoint="centre"
         )
 
+        # Calculate the Euclidean distance from the initial position
+        ball_data["euclidean_distance"] = Processing.calculate_euclidian_distance(
+            ball_data["x_centre"], ball_data["y_centre"], initial_x, initial_y
+        )
+
+        # Filter the data for frames where the ball has moved beyond the threshold
         moved_data = ball_data[ball_data["euclidean_distance"] >= threshold]
 
         if moved_data.empty:
             return None
 
-        if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
+        # Determine the success direction based on the y-coordinate movement
+        if abs(initial_x - self.tracking_data.start_x) < 100:
             pushed = any(moved_data["y_centre"] < initial_y)
             pulled = any(moved_data["y_centre"] > initial_y)
         else:
@@ -662,31 +961,3 @@ class BallPushingMetrics:
             return "pull"
         else:
             return None
-
-    def get_time_chamber(self):
-        """
-        Get the time spent by the fly in the chamber, meaning within a 50 px radius of the fly start position.
-
-        Returns
-        -------
-        float
-            Time spent in the chamber in seconds.
-        """
-        # Get the tracking data for the fly
-        tracking_data = self.tracking_data
-
-        # Determine the start position by averaging the first 10-20 frames
-        num_frames_to_average = 20
-        start_position_x = np.mean(tracking_data.x[:num_frames_to_average])
-        start_position_y = np.mean(tracking_data.y[:num_frames_to_average])
-
-        # Calculate the distance from the start position for each frame
-        distances = np.sqrt((tracking_data.x - start_position_x) ** 2 + (tracking_data.y - start_position_y) ** 2)
-
-        # Determine the frames where the fly is within a 50 px radius of the start position
-        in_chamber = distances <= 50
-
-        # Calculate the time spent in the chamber
-        time_in_chamber = np.sum(in_chamber) / self.fly.experiment.fps
-
-        return time_in_chamber

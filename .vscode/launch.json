@@ -3,7 +3,7 @@
     "configurations": [
         {
             "name": "Python: Debug Tests",
-            "type": "python",
+            "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "purpose": [
@@ -13,6 +13,38 @@
             "justMyCode": false,
             "env": {
                 "PYTEST_ADDOPTS": "--no-cov -n0 --dist no",
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Interaction Based Metrics Fly",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/interaction_based_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Interaction Based Metrics Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/interaction_based_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked"
+            ],
+            "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
         }
