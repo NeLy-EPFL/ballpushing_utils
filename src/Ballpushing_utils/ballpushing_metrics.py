@@ -105,7 +105,9 @@ class BallPushingMetrics:
                 aha_moment = metrics["aha_moment"]()
                 events_direction = metrics["events_direction"]()
                 insight_effect = metrics["insight_effect"]()
-                pause_metrics = safe_call(self.compute_pause_metrics, fly_idx)
+                pause_metrics = safe_call(
+                    self.compute_pause_metrics, fly_idx, default={"number_of_pauses": 0, "total_pause_duration": 0.0}
+                )
                 interaction_persistence = safe_call(self.compute_interaction_persistence, fly_idx, ball_idx)
                 learning_slope = safe_call(self.compute_learning_slope, fly_idx, ball_idx)
                 logistic_features = safe_call(self.compute_logistic_features, fly_idx, ball_idx)
@@ -1058,6 +1060,13 @@ class BallPushingMetrics:
         """
         # Detect pauses
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
+
+        # If no pauses are detected, return default values
+        if not pauses:
+            return {
+                "number_of_pauses": 0,
+                "total_pause_duration": 0.0,
+            }
 
         # Compute metrics
         number_of_pauses = len(pauses)

@@ -26,13 +26,13 @@ class Config:
 
     """
 
-    debugging: bool = True
+    debugging: bool = False
 
     # General configuration attributes
 
-    experiment_type: str = "Learning"
+    experiment_type: str = "Ctrl"
     time_range: Optional[tuple] = None
-    success_cutoff: bool = False
+    success_cutoff: bool = True
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
     chamber_radius: int = 50
