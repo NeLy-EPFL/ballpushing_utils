@@ -64,11 +64,16 @@ class Config:
     dead_threshold: int = 30
     adjusted_events_normalisation: int = 1000
     significant_threshold: int = 5
+    success_threshold: int = 5
     aha_moment_threshold: int = 20
     success_direction_threshold: int = 25
     final_event_threshold: int = 170
     final_event_F1_threshold: int = 100
     max_event_threshold: int = 10
+
+    pause_threshold: int = 5
+    pause_window: int = 5
+    pause_min_duration: int = 2
 
     # Skeleton tracking configuration attributes
 

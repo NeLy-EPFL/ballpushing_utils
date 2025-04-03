@@ -1,4 +1,8 @@
 import numpy as np
+import pandas as pd
+from typing import Any
+from sklearn.linear_model import LinearRegression
+from scipy.optimize import curve_fit
 from utils_behavior import Processing
 
 
@@ -19,179 +23,119 @@ class BallPushingMetrics:
 
         self.metrics = {}
         self.compute_metrics()
-        # TODO: Compute maximum distance pushed (corresponding to max_event)
 
     def compute_metrics(self):
         """
         Compute and store various metrics for each pair of fly and ball.
         """
+
+        def safe_call(method, *args, default: Any = np.nan, **kwargs) -> Any:
+            """
+            Helper function to safely call a method and handle exceptions.
+
+            Parameters
+            ----------
+            method : callable
+                The method to call.
+            *args : tuple
+                Positional arguments to pass to the method.
+            default : Any, optional
+                Default value to return in case of an exception (default is np.nan).
+            **kwargs : dict
+                Keyword arguments to pass to the method.
+
+            Returns
+            -------
+            Any
+                The result of the method call, or the default value if an exception occurs.
+            """
+            try:
+                return method(*args, **kwargs)
+            except Exception as e:
+                if self.fly.config.debugging:
+                    print(f"Error in {method.__name__}: {e}")
+                return default
+
         for fly_idx, ball_dict in self.tracking_data.interaction_events.items():
             for ball_idx, events in ball_dict.items():
                 key = f"fly_{fly_idx}_ball_{ball_idx}"
 
-                try:
-                    nb_events = self.get_adjusted_nb_events(fly_idx, ball_idx, signif=False)
-                except Exception as e:
-                    nb_events = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_adjusted_nb_events: {e}")
-
-                try:
-                    max_event = self.get_max_event(fly_idx, ball_idx)
-                except Exception as e:
-                    max_event = (np.nan, np.nan)
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_max_event: {e}")
-
-                try:
-                    max_distance = self.get_max_distance(fly_idx, ball_idx)
-                except Exception as e:
-                    max_distance = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_max_distance: {e}")
-
-                try:
-                    significant_events = self.get_significant_events(fly_idx, ball_idx)
-                except Exception as e:
-                    significant_events = []
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_significant_events: {e}")
-
-                try:
-                    if self.fly.config.experiment_type == "F1":
-                        nb_significant_events = self.get_adjusted_nb_events(fly_idx, ball_idx, signif=True)
-                    else:
-                        nb_significant_events = len(significant_events)
-                except Exception as e:
-                    nb_significant_events = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_adjusted_nb_events: {e}")
-
-                try:
-                    first_significant_event = self.get_first_significant_event(fly_idx, ball_idx)
-                except Exception as e:
-                    first_significant_event = (np.nan, np.nan)
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_first_significant_event: {e}")
-
-                try:
-                    aha_moment = self.get_aha_moment(fly_idx, ball_idx)
-                except Exception as e:
-                    aha_moment = (np.nan, np.nan)
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_aha_moment: {e}")
-
-                try:
-                    events_direction = self.find_events_direction(fly_idx, ball_idx)
-                except Exception as e:
-                    events_direction = ([], [])
-
-                    if self.fly.config.debugging:
-                        print(f"Error in find_events_direction: {e}")
-
-                try:
-                    final_event = self.get_final_event(fly_idx, ball_idx)
-                except Exception as e:
-                    final_event = (np.nan, np.nan)
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_final_event: {e}")
-
-                try:
-                    success_direction = self.get_success_direction(fly_idx, ball_idx)
-                except Exception as e:
-                    success_direction = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_success_direction: {e}")
-
-                try:
-                    cumulated_breaks_duration = self.get_cumulated_breaks_duration(fly_idx, ball_idx)
-                except Exception as e:
-                    cumulated_breaks_duration = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_cumulated_breaks_duration: {e}")
-
-                try:
-                    chamber_time = self.get_chamber_time(fly_idx)
-                except Exception as e:
-                    chamber_time = np.nan
-                    if self.fly.config.debugging:
-                        print(f"Error in get_chamber_time: {e}")
-
-                try:
-                    chamber_ratio = self.chamber_ratio(fly_idx)
-                except Exception as e:
-                    chamber_ratio = np.nan
-                    if self.fly.config.debugging:
-                        print(f"Error in chamber_ratio: {e}")
-
-                try:
-                    distance_moved = self.get_distance_moved(fly_idx, ball_idx)
-                except Exception as e:
-                    distance_moved = np.nan
-
-                    if self.fly.config.debugging:
-                        print(f"Error in get_distance_moved: {e}")
-
-                try:
-                    distance_ratio = self.get_distance_ratio(fly_idx, ball_idx)
-                except Exception as e:
-                    distance_ratio = np.nan
-                    if self.fly.config.debugging:
-                        print(f"Error in get_distance_ratio: {e}")
-
-                try:
-                    if aha_moment:
-                        insight_effect = self.get_insight_effect(fly_idx, ball_idx)
-                    else:
-                        # Ensure insight_effect is always a dictionary with default values
-                        insight_effect = {
+                # Define metrics and their corresponding methods
+                metrics = {
+                    "nb_events": lambda: safe_call(self.get_adjusted_nb_events, fly_idx, ball_idx, signif=False),
+                    "max_event": lambda: safe_call(self.get_max_event, fly_idx, ball_idx),
+                    "max_distance": lambda: safe_call(self.get_max_distance, fly_idx, ball_idx),
+                    "significant_events": lambda: safe_call(self.get_significant_events, fly_idx, ball_idx, default=[]),
+                    "nb_significant_events": lambda: (
+                        safe_call(self.get_adjusted_nb_events, fly_idx, ball_idx, signif=True)
+                        if self.fly.config.experiment_type == "F1"
+                        else len(safe_call(self.get_significant_events, fly_idx, ball_idx, default=[]))
+                    ),
+                    "first_significant_event": lambda: safe_call(self.get_first_significant_event, fly_idx, ball_idx),
+                    "aha_moment": lambda: safe_call(self.get_aha_moment, fly_idx, ball_idx),
+                    "events_direction": lambda: safe_call(
+                        self.find_events_direction, fly_idx, ball_idx, default=([], [])
+                    ),
+                    "final_event": lambda: safe_call(self.get_final_event, fly_idx, ball_idx),
+                    "success_direction": lambda: safe_call(self.get_success_direction, fly_idx, ball_idx),
+                    "cumulated_breaks_duration": lambda: safe_call(
+                        self.get_cumulated_breaks_duration, fly_idx, ball_idx
+                    ),
+                    "chamber_time": lambda: safe_call(self.get_chamber_time, fly_idx),
+                    "chamber_ratio": lambda: safe_call(self.chamber_ratio, fly_idx),
+                    "distance_moved": lambda: safe_call(self.get_distance_moved, fly_idx, ball_idx),
+                    "distance_ratio": lambda: safe_call(self.get_distance_ratio, fly_idx, ball_idx),
+                    "insight_effect": lambda: (
+                        safe_call(self.get_insight_effect, fly_idx, ball_idx)
+                        if safe_call(self.get_aha_moment, fly_idx, ball_idx)
+                        else {
                             "raw_effect": np.nan,
                             "log_effect": np.nan,
                             "classification": "none",
                             "first_event": False,
                             "post_aha_count": 0,
                         }
-                except Exception as e:
-                    insight_effect = {
-                        "raw_effect": np.nan,
-                        "log_effect": np.nan,
-                        "classification": "none",
-                        "first_event": False,
-                        "post_aha_count": 0,
-                    }
+                    ),
+                }
 
-                    if self.fly.config.debugging:
-                        print(f"Error in get_insight_effect: {e}")
+                # Compute metrics
+                nb_events = metrics["nb_events"]()
+                max_event = metrics["max_event"]()
+                significant_events = metrics["significant_events"]()
+                aha_moment = metrics["aha_moment"]()
+                events_direction = metrics["events_direction"]()
+                insight_effect = metrics["insight_effect"]()
+                pause_metrics = safe_call(self.compute_pause_metrics, fly_idx)
+                interaction_persistence = safe_call(self.compute_interaction_persistence, fly_idx, ball_idx)
+                learning_slope = safe_call(self.compute_learning_slope, fly_idx, ball_idx)
+                logistic_features = safe_call(self.compute_logistic_features, fly_idx, ball_idx)
+                event_influence = safe_call(self.compute_event_influence, fly_idx, ball_idx)
+                normalized_velocity = safe_call(self.compute_normalized_velocity, fly_idx, ball_idx)
+                velocity_during_interactions = safe_call(self.compute_velocity_during_interactions, fly_idx, ball_idx)
+                velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
 
+                # Store metrics in the dictionary
                 self.metrics[key] = {
                     "nb_events": nb_events,
                     "max_event": max_event[0],
                     "max_event_time": max_event[1],
-                    "max_distance": max_distance,
-                    "final_event": final_event[0],
-                    "final_event_time": final_event[1],
-                    "nb_significant_events": nb_significant_events,
-                    "significant_ratio": (nb_significant_events / nb_events if nb_events > 0 else np.nan),
-                    "first_significant_event": first_significant_event[0],
-                    "first_significant_event_time": first_significant_event[1],
+                    "max_distance": metrics["max_distance"](),
+                    "final_event": metrics["final_event"]()[0],
+                    "final_event_time": metrics["final_event"]()[1],
+                    "nb_significant_events": metrics["nb_significant_events"](),
+                    "significant_ratio": (
+                        len(metrics["significant_events"]()) / len(events) if len(events) > 0 else np.nan
+                    ),
+                    "first_significant_event": metrics["first_significant_event"]()[0],
+                    "first_significant_event_time": metrics["first_significant_event"]()[1],
                     "aha_moment": aha_moment[0],
                     "aha_moment_time": aha_moment[1],
                     "aha_moment_first": insight_effect["first_event"],
                     "insight_effect": insight_effect["raw_effect"],
                     "insight_effect_log": insight_effect["log_effect"],
-                    "cumulated_breaks_duration": cumulated_breaks_duration,
-                    "chamber_time": chamber_time,
-                    "chamber_ratio": chamber_ratio,
+                    "cumulated_breaks_duration": metrics["cumulated_breaks_duration"](),
+                    "chamber_time": metrics["chamber_time"](),
+                    "chamber_ratio": metrics["chamber_ratio"](),
                     "pushed": len(events_direction[0]),
                     "pulled": len(events_direction[1]),
                     "pulling_ratio": (
@@ -199,16 +143,32 @@ class BallPushingMetrics:
                         if (len(events_direction[0]) + len(events_direction[1])) > 0
                         else np.nan
                     ),
-                    "success_direction": success_direction,
+                    "success_direction": metrics["success_direction"](),
                     "interaction_proportion": (
                         sum([event[2] for event in events])
-                        / (sum([event[2] for event in events]) + cumulated_breaks_duration)
-                        if cumulated_breaks_duration > 0
+                        / (sum([event[2] for event in events]) + metrics["cumulated_breaks_duration"]())
+                        if metrics["cumulated_breaks_duration"]() > 0
                         else np.nan
                     ),
-                    "distance_moved": distance_moved,
-                    "distance_ratio": distance_ratio,
+                    "interaction_persistence": interaction_persistence,
+                    "distance_moved": metrics["distance_moved"](),
+                    "distance_ratio": metrics["distance_ratio"](),
                     "exit_time": self.tracking_data.exit_time,
+                    "chamber_exit_time": self.chamber_exit_times[fly_idx],
+                    "number_of_pauses": pause_metrics["number_of_pauses"],
+                    "total_pause_duration": pause_metrics["total_pause_duration"],
+                    "learning_slope": learning_slope["slope"],
+                    "learning_slope_r2": learning_slope["r2"],
+                    "logistic_L": logistic_features["L"],
+                    "logistic_k": logistic_features["k"],
+                    "logistic_t0": logistic_features["t0"],
+                    "logistic_r2": logistic_features["r2"],
+                    "avg_displacement_after_success": event_influence["avg_displacement_after_success"],
+                    "avg_displacement_after_failure": event_influence["avg_displacement_after_failure"],
+                    "influence_ratio": event_influence["influence_ratio"],
+                    "normalized_velocity": normalized_velocity,
+                    "velocity_during_interactions": velocity_during_interactions,
+                    "velocity_trend": velocity_trend,
                 }
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
@@ -233,6 +193,9 @@ class BallPushingMetrics:
             events = self.get_significant_events(fly_idx, ball_idx)
         else:
             events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        if self.fly.config.debugging:
+            print(f"Events for fly {fly_idx} ball {ball_idx}, signif:{signif}: {len(events)}; {events}")
 
         adjusted_nb_events = 0  # Initialize to 0 in case there are no events
 
@@ -265,7 +228,9 @@ class BallPushingMetrics:
 
         else:
             adjusted_nb_events = (
-                len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
+                len(events)
+                * self.fly.config.adjusted_events_normalisation
+                / (self.tracking_data.duration - self.chamber_exit_times[fly_idx])
                 if self.tracking_data.duration > 0
                 else 0
             )
@@ -544,16 +509,40 @@ class BallPushingMetrics:
         return significant_events
 
     def get_first_significant_event(self, fly_idx, ball_idx, distance=5):
+        """
+        Get the first significant event for a given fly and ball based on a distance threshold.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+        distance : float, optional
+            Distance threshold for significant events (default is 5).
+
+        Returns
+        -------
+        tuple
+            First significant event index and first significant event time.
+        """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
+        # Get the chamber exit time for the current fly
+        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+
+        # Get significant events
         significant_events = self.get_significant_events(fly_idx, ball_idx, distance=distance)
 
         if significant_events:
             first_significant_event = significant_events[0]
             first_significant_event_idx = first_significant_event[1]
 
+            # Calculate the time of the first significant event
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
                 first_significant_event_time = first_significant_event[0][0] / self.fly.experiment.fps
+                if chamber_exit_time is not None:
+                    first_significant_event_time -= chamber_exit_time
             else:
                 first_significant_event_time = (
                     first_significant_event[0][0] / self.fly.experiment.fps
@@ -961,3 +950,431 @@ class BallPushingMetrics:
             return "pull"
         else:
             return None
+
+    def detect_pauses(self, fly_idx, threshold=None, window=None, minimum_duration=None):
+        """
+        Detect pauses in the fly's movement based on skeleton keypoints.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause (default is 5).
+        window : int, optional
+            Number of frames to use for calculating movement (default is 5).
+
+        Returns
+        -------
+        list of tuple
+            List of pauses, where each pause is represented as a tuple (start_frame, end_frame, duration).
+        """
+
+        if threshold is None:
+            threshold = self.fly.config.pause_threshold
+        if window is None:
+            window = self.fly.config.pause_window
+        if minimum_duration is None:
+            minimum_duration = self.fly.config.pause_min_duration
+
+        # Get the skeleton data for the fly
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+
+        # Extract all keypoints (assuming columns are named like "x_<keypoint>" and "y_<keypoint>")
+        keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+
+        # Initialize a boolean array to track movement
+        is_static = np.ones(len(skeleton_data), dtype=bool)
+
+        for keypoint in keypoints:
+            # Calculate the velocity (magnitude of movement) for each keypoint over a rolling window
+            x_velocity = skeleton_data[f"x_{keypoint}"].diff().rolling(window=window).mean().abs()
+            y_velocity = skeleton_data[f"y_{keypoint}"].diff().rolling(window=window).mean().abs()
+
+            # Check if the velocity is below the threshold
+            keypoint_static = (x_velocity <= threshold) & (y_velocity <= threshold)
+
+            # Combine with the overall static status
+            is_static &= keypoint_static
+
+        # Smooth the static status using a rolling window to avoid noise
+        is_static_smoothed = pd.Series(is_static).rolling(window=window, min_periods=1).mean() == 1
+
+        # Identify chunks of static frames
+        pauses = []
+        pauses_timestamps = []
+        start_frame = None
+
+        for i, static in enumerate(is_static_smoothed):
+            if static and start_frame is None:
+                start_frame = i
+            elif not static and start_frame is not None:
+                end_frame = i
+                duration = (end_frame - start_frame) / self.fly.experiment.fps
+                if duration >= minimum_duration:
+                    pauses.append((start_frame, end_frame, duration))
+                start_frame = None
+
+        # Handle the case where a pause extends to the end of the recording
+        if start_frame is not None:
+            end_frame = len(is_static_smoothed)
+            duration = (end_frame - start_frame) / self.fly.experiment.fps
+            if duration >= minimum_duration:
+                pauses.append((start_frame, end_frame, duration))
+
+        # Convert frame indices to timestamps
+        for pause in pauses:
+            start_frame, end_frame, duration = pause
+            start_time = start_frame / self.fly.experiment.fps
+            end_time = end_frame / self.fly.experiment.fps
+            pauses_timestamps.append((start_time, end_time, duration))
+
+        if self.fly.config.debugging:
+            print(f"Detected pauses for fly {fly_idx}: {pauses_timestamps}")
+
+        return pauses
+
+    def compute_pause_metrics(self, fly_idx, threshold=5, window=5, minimum_duration=2):
+        """
+        Compute the number of pauses and total duration of pauses for a given fly.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause (default is 5).
+        window : int, optional
+            Number of frames to use for calculating movement (default is 5).
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for a pause to be considered valid (default is 2).
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - "number_of_pauses": int, the total number of pauses.
+            - "total_pause_duration": float, the total duration of all pauses in seconds.
+        """
+        # Detect pauses
+        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
+
+        # Compute metrics
+        number_of_pauses = len(pauses)
+        total_pause_duration = sum(pause[2] for pause in pauses)  # Sum the durations of all pauses
+
+        return {
+            "number_of_pauses": number_of_pauses,
+            "total_pause_duration": total_pause_duration,
+        }
+
+    def compute_interaction_persistence(self, fly_idx, ball_idx):
+        """
+        Compute the interaction persistence for a given fly and ball.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            The average duration of interaction events in seconds, or np.nan if no events exist.
+        """
+        # Get the interaction events for the fly and ball
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        if not events:
+            # Return NaN if there are no interaction events
+            return np.nan
+
+        # Calculate the duration of each event
+        event_durations = [(event[1] - event[0]) / self.fly.experiment.fps for event in events]
+
+        # Compute the average duration
+        average_duration = np.mean(event_durations)
+
+        return average_duration
+
+    def compute_learning_slope(self, fly_idx, ball_idx):
+        """
+        Compute the learning slope and R² for a given fly and ball based on ball position over time.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - "slope": float, the slope of the linear regression.
+            - "r2": float, the R² of the linear regression.
+        """
+        # Get the ball position data
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Extract time (in seconds) and position (e.g., y_centre)
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps  # Time in seconds
+        position = ball_data["y_centre"].values  # Replace with "x_centre" if needed
+
+        # Check if there is enough data to fit a regression
+        if len(time) < 2 or np.all(position == position[0]):  # No movement
+            return {"slope": np.nan, "r2": np.nan}
+
+        # Fit a linear regression model
+        model = LinearRegression()
+        model.fit(time.reshape(-1, 1), position)
+
+        # Calculate R²
+        r2 = model.score(time.reshape(-1, 1), position)
+
+        # Return the slope and R²
+        return {"slope": model.coef_[0], "r2": r2}
+
+    def compute_logistic_features(self, fly_idx, ball_idx):
+        """
+        Compute logistic features and R² for a given fly and ball based on ball position over time.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - "L": float, maximum value (plateau).
+            - "k": float, growth rate (steepness of the curve).
+            - "t0": float, midpoint (time at which the curve reaches half of L).
+            - "r2": float, R² of the logistic regression.
+        """
+        # Get the ball position data
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Extract time (in seconds) and position (e.g., y_centre)
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps  # Time in seconds
+        position = ball_data["y_centre"].values  # Replace with "x_centre" if needed
+
+        # Check if there is enough data to fit a logistic function
+        if len(time) < 3 or np.all(position == position[0]):  # No movement
+            return {"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan}
+
+        # Initial guesses for logistic parameters
+        initial_guess = [position.max(), 1, time.mean()]  # L, k, t0
+
+        try:
+            # Fit the logistic function to the data
+            params, _ = curve_fit(Processing.logistic_function, time, position, p0=initial_guess, maxfev=10000)
+            L, k, t0 = params
+
+            # Calculate predicted values
+            predicted = Processing.logistic_function(time, L, k, t0)
+
+            # Calculate R²
+            ss_res = np.sum((position - predicted) ** 2)  # Residual sum of squares
+            ss_tot = np.sum((position - np.mean(position)) ** 2)  # Total sum of squares
+            r2 = 1 - (ss_res / ss_tot)
+
+        except RuntimeError:
+            # If the fit fails, return NaN
+            return {"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan}
+
+        return {"L": L, "k": k, "t0": t0, "r2": r2}
+
+    def compute_event_influence(self, fly_idx, ball_idx, success_threshold=None):
+        """
+        Compute the influence of event n-1 on event n for a given fly and ball.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+        success_threshold : float, optional
+            Threshold for significant ball displacement to classify an event as successful (default is 5).
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - "avg_displacement_after_success": float, average displacement of events following successful events.
+            - "avg_displacement_after_failure": float, average displacement of events following unsuccessful events.
+            - "influence_ratio": float, ratio of the two averages (success/failure).
+        """
+        if success_threshold is None:
+            success_threshold = self.fly.config.success_threshold
+
+        # Get the interaction events for the fly and ball
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        if len(events) < 2:
+            # Not enough events to compute influence
+            return {
+                "avg_displacement_after_success": np.nan,
+                "avg_displacement_after_failure": np.nan,
+                "influence_ratio": np.nan,
+            }
+
+        # Helper function to calculate displacement for an event
+        def calculate_displacement(event):
+            start_idx, end_idx = event[0], event[1]
+            start_x, start_y, end_x, end_y = self._calculate_median_coordinates(
+                ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+            )
+            return Processing.calculate_euclidian_distance(start_x, start_y, end_x, end_y)
+
+        # Classify events as successful or unsuccessful
+        event_success = []
+        for event in events:
+            displacement = calculate_displacement(event)
+            event_success.append(displacement >= success_threshold)
+
+        # Analyze the influence of event n-1 on event n
+        displacements_after_success = []
+        displacements_after_failure = []
+
+        for i in range(1, len(events)):
+            displacement_n = calculate_displacement(events[i])
+            if event_success[i - 1]:  # If event n-1 was successful
+                displacements_after_success.append(displacement_n)
+            else:  # If event n-1 was unsuccessful
+                displacements_after_failure.append(displacement_n)
+
+        # Compute averages
+        avg_displacement_after_success = np.mean(displacements_after_success) if displacements_after_success else np.nan
+        avg_displacement_after_failure = np.mean(displacements_after_failure) if displacements_after_failure else np.nan
+
+        # Compute influence ratio
+        if avg_displacement_after_failure > 0:
+            influence_ratio = avg_displacement_after_success / avg_displacement_after_failure
+        else:
+            influence_ratio = np.nan
+
+        return {
+            "avg_displacement_after_success": avg_displacement_after_success,
+            "avg_displacement_after_failure": avg_displacement_after_failure,
+            "influence_ratio": influence_ratio,
+        }
+
+    def compute_normalized_velocity(self, fly_idx, ball_idx):
+        """
+        Compute the fly's velocity normalized by the available space.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            The average velocity normalized by the available space.
+        """
+        # Get the fly and ball data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Calculate the available space as the distance between the ball and the fly's starting position
+        initial_ball_x, initial_ball_y, _, _ = self._calculate_median_coordinates(ball_data, start_idx=0, window=10)
+        ball_distances = Processing.calculate_euclidian_distance(
+            ball_data["x_centre"], ball_data["y_centre"], initial_ball_x, initial_ball_y
+        )
+
+        # Calculate the fly's velocity
+        fly_velocity = (
+            np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
+        )  # Convert to velocity in pixels/second
+
+        # Normalize velocity by the available space
+        normalized_velocity = fly_velocity / (ball_distances + 1e-6)  # Add epsilon to avoid division by zero
+
+        # Return the average normalized velocity
+        return np.nanmean(normalized_velocity)
+
+    def compute_velocity_during_interactions(self, fly_idx, ball_idx):
+        """
+        Compute the fly's average velocity during interaction events.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            The average velocity during interaction events.
+        """
+        # Get the fly data and interaction events
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        if not events:
+            return np.nan
+
+        # Calculate the fly's velocity
+        fly_velocity = (
+            np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
+        )  # Convert to velocity in pixels/second
+
+        # Extract velocity during interaction events
+        velocities_during_events = []
+        for event in events:
+            start_idx, end_idx = event[0], event[1]
+            velocities_during_events.extend(fly_velocity[start_idx:end_idx])
+
+        # Return the average velocity during interaction events
+        return np.nanmean(velocities_during_events)
+
+    def compute_velocity_trend(self, fly_idx):
+        """
+        Compute the trend (slope) of the fly's velocity over time.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        float
+            The slope of the velocity trend over time.
+        """
+        # Get the fly data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Calculate the fly's velocity
+        fly_velocity = (
+            np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
+        )  # Convert to velocity in pixels/second
+
+        # Remove NaN values
+        valid_indices = ~np.isnan(fly_velocity)
+        time = np.arange(len(fly_velocity))[valid_indices] / self.fly.experiment.fps  # Time in seconds
+        velocity = fly_velocity[valid_indices]
+
+        if len(time) < 2:
+            return np.nan
+
+        # Fit a linear regression to the velocity trend
+        model = LinearRegression()
+        model.fit(time.reshape(-1, 1), velocity)
+
+        # Return the slope of the trend
+        return model.coef_[0]
