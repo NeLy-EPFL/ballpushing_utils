@@ -59,7 +59,7 @@ class Config:
     events_min_length: int = 1  # Default was 2
 
     frames_before_onset = 10  # Default was 20
-    frames_after_onset = 290  # Default was 20
+    frames_after_onset = 115  # Default was 20
 
     dead_threshold: int = 30
     adjusted_events_normalisation: int = 1000
