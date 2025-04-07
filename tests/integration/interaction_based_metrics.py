@@ -8,8 +8,12 @@ def process_fly(fly_path):
     # Load an example fly
     ExampleFly = Fly(fly_path, as_individual=True)
 
+    # Get the fly's interaction metrics
+
+    print(f"Individual events metrics: {ExampleFly.events_metrics}")
+
     # Get the fly's ballpushing metrics
-    ExampleFly.events_metrics
+    ExampleFly.summary_metrics
 
     # Make a dataset using the fly's ballpushing metrics
     ExampleData = Dataset(ExampleFly, dataset_type="summary")
@@ -98,6 +102,26 @@ def check_metric(metric, path, mode):
                 print(dataset.data[column].head())
     else:
         print("Dataset is empty. Cannot check metrics.")
+
+    individual_dataset = Dataset(data_object, dataset_type="event_metrics")
+
+    # Check if the individual dataset contains data
+    if individual_dataset.data is not None:
+        if metric:
+            # If a specific metric is provided, print its values
+            if metric in individual_dataset.data.columns:
+                print(f"Individual Metric '{metric}' values:")
+                print(individual_dataset.data[metric].head())
+            else:
+                print(f"Individual Metric '{metric}' not found in the dataset.")
+        else:
+            # If no metric is provided, print all metrics
+            print("No specific metric provided. Printing all metrics:")
+            for column in individual_dataset.data.columns:
+                print(f"\nIndividual Metric '{column}' values:")
+                print(individual_dataset.data[column].head())
+    else:
+        print("Individual dataset is empty. Cannot check metrics.")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
 from Ballpushing_utils.learning_metrics import LearningMetrics
 from Ballpushing_utils.f1_metrics import F1Metrics
+from Ballpushing_utils.interactions_metrics import InteractionsMetrics
 
 
 class Fly:
@@ -83,7 +84,9 @@ class Fly:
         self.flyball_positions = None
         self.fly_skeleton = None
 
-        self._events_metrics = None
+        self._event_metrics = None
+
+        self._event_summaries = None
 
         self._f1_metrics = None
 
@@ -102,11 +105,18 @@ class Fly:
         return self._tracking_data
 
     @property
-    def events_metrics(self):
-        if self._events_metrics is None:
+    def event_metrics(self):
+        if self._event_metrics is None:
             # print("Computing events metrics...")
-            self._events_metrics = BallPushingMetrics(self.tracking_data).metrics
-        return self._events_metrics
+            self._event_metrics = InteractionsMetrics(self.tracking_data).metrics
+        return self._event_metrics
+
+    @property
+    def event_summaries(self):
+        if self._event_summaries is None:
+            # print("Computing events metrics...")
+            self._event_summaries = BallPushingMetrics(self.tracking_data).metrics
+        return self._event_summaries
 
     @property
     def f1_metrics(self):

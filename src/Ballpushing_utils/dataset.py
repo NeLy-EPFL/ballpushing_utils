@@ -178,6 +178,12 @@ class Dataset:
                     if not data.empty:
                         Dataset.append(data)
 
+            elif metrics == "event_metrics":
+                for fly in self.flies:
+                    data = self._prepare_dataset_event_metrics(fly)
+                    if not data.empty:
+                        Dataset.append(data)
+
             elif metrics == "summary":
                 for fly in self.flies:
                     # print("Preparing dataset for", fly.name)
@@ -386,6 +392,49 @@ class Dataset:
 
         return combined_data
 
+    def _prepare_dataset_event_metrics(self, fly):
+        """
+        Prepare a dataset with all events and their associated metrics for a given fly.
+
+        Args:
+            fly (Fly): A Fly object.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing all events and their associated metrics.
+        """
+
+        # Initialize the InteractionsMetrics object
+        interaction_metrics = fly.event_metrics
+
+        if interaction_metrics is None:
+            print(f"No interaction metrics found for fly {fly.metadata.name}")
+            return pd.DataFrame()
+
+        # Initialize an empty list to store event data
+        event_data = []
+
+        # Iterate over all fly-ball combinations
+        for key, events in interaction_metrics.items():
+            fly_idx, ball_idx = map(int, key.split("_")[1::2])  # Extract fly_idx and ball_idx from the key
+
+            # Iterate over all events for this fly-ball combination
+            for event_idx, metrics in events.items():
+                # Add fly_idx, ball_idx, and event_idx to the metrics
+                metrics["fly_idx"] = fly_idx
+                metrics["ball_idx"] = ball_idx
+                metrics["event_idx"] = event_idx
+
+                # Append the metrics to the event data
+                event_data.append(metrics)
+
+        # Convert the event data to a DataFrame
+        event_df = pd.DataFrame(event_data)
+
+        # Add metadata to the dataset
+        event_df = self._add_metadata(event_df, fly)
+
+        return event_df
+
     def _prepare_dataset_summary_metrics(
         self,
         fly,
@@ -406,10 +455,10 @@ class Dataset:
 
         # If no specific metrics are provided, include all available metrics
         if not metrics:
-            metrics = list(fly.events_metrics[next(iter(fly.events_metrics))].keys())
+            metrics = list(fly.event_summaries[next(iter(fly.event_summaries))].keys())
 
         # For each pair of fly and ball, get the metrics from the Fly metrics
-        for key, metric_dict in fly.events_metrics.items():
+        for key, metric_dict in fly.event_summaries.items():
 
             for metric in metrics:
                 if metric in metric_dict:
@@ -427,11 +476,11 @@ class Dataset:
             dataset["F1_condition"] = fly.metadata.F1_condition
 
             if dataset["F1_condition"].iloc[0] == "control":
-                for key in fly.events_metrics.keys():
+                for key in fly.event_summaries.keys():
                     if key == "fly_0_ball_0":
                         dataset.at[key, "ball_condition"] = "test"
             else:
-                for key in fly.events_metrics.keys():
+                for key in fly.event_summaries.keys():
                     if key == "fly_0_ball_0":
                         dataset.at[key, "ball_condition"] = "training"
                     elif key == "fly_0_ball_1":
@@ -502,10 +551,10 @@ class Dataset:
         dataset = self._add_metadata(dataset, fly)
 
         if fly.metadata.F1_condition == "control":
-            dataset["success_direction"] = fly.events_metrics["fly_0_ball_0"]["success_direction"]
+            dataset["success_direction"] = fly.event_summaries["fly_0_ball_0"]["success_direction"]
 
         else:
-            dataset["success_direction"] = fly.events_metrics["fly_0_ball_1"]["success_direction"]
+            dataset["success_direction"] = fly.event_summaries["fly_0_ball_1"]["success_direction"]
 
         return dataset
 

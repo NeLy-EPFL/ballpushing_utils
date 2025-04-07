@@ -9,6 +9,7 @@ from .experiment import Experiment
 from .config import Config
 from .fly_metadata import FlyMetadata
 from .fly_trackingdata import FlyTrackingData
+from .interactions_metrics import InteractionsMetrics
 from .ballpushing_metrics import BallPushingMetrics
 from .skeleton_metrics import SkeletonMetrics
 from .learning_metrics import LearningMetrics
@@ -23,6 +24,7 @@ __all__ = [
     "Config",
     "FlyMetadata",
     "FlyTrackingData",
+    "InteractionsMetrics",
     "BallPushingMetrics",
     "SkeletonMetrics",
     "LearningMetrics",
