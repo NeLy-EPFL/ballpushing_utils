@@ -1,3 +1,11 @@
+import pandas as pd
+from Ballpushing_utils import utilities
+import numpy as np
+from utils_behavior import Sleap_utils
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
+from matplotlib import pyplot as plt
+
+
 class SkeletonMetrics:
     """
     A class for computing metrics from the skeleton data. It requires to have a fly object with a valid skeleton data, and check whether there is a "preprocessed" ball data available.
@@ -31,17 +39,13 @@ class SkeletonMetrics:
 
         self.events_based_contacts = self.compute_events_based_contacts()
 
-    def resize_coordinates(
-        self, x, y, original_width, original_height, new_width, new_height
-    ):
+    def resize_coordinates(self, x, y, original_width, original_height, new_width, new_height):
         """Resize the coordinates according to the new frame size."""
         x_scale = new_width / original_width
         y_scale = new_height / original_height
         return int(x * x_scale), int(y * y_scale)
 
-    def apply_arena_mask_to_labels(
-        self, x, y, mask_padding, crop_top, crop_bottom, new_height
-    ):
+    def apply_arena_mask_to_labels(self, x, y, mask_padding, crop_top, crop_bottom, new_height):
         """Adjust the coordinates according to the cropping and padding applied to the frame."""
         # Crop from top and bottom
         if crop_top <= y < (new_height - crop_bottom):
@@ -68,14 +72,10 @@ class SkeletonMetrics:
     ):
         """Resize and transform the coordinate to match the preprocessed frame."""
         # Resize the coordinate
-        x, y = self.resize_coordinates(
-            x, y, original_width, original_height, new_width, new_height
-        )
+        x, y = self.resize_coordinates(x, y, original_width, original_height, new_width, new_height)
 
         # Apply cropping offset and padding
-        x, y = self.apply_arena_mask_to_labels(
-            x, y, mask_padding, crop_top, crop_bottom, new_height
-        )
+        x, y = self.apply_arena_mask_to_labels(x, y, mask_padding, crop_top, crop_bottom, new_height)
 
         return x, y
 
@@ -84,9 +84,7 @@ class SkeletonMetrics:
 
         ball_data = self.ball.objects[0].dataset
 
-        ball_coords = [
-            (x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])
-        ]
+        ball_coords = [(x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])]
 
         # Apply resizing, cropping, and padding to the ball tracking data
         ball_coords = [
@@ -104,12 +102,8 @@ class SkeletonMetrics:
             for x, y in ball_coords
         ]
 
-        ball_data["x_centre_preprocessed"] = [
-            x for x, y in ball_coords if x is not None and y is not None
-        ]
-        ball_data["y_centre_preprocessed"] = [
-            y for x, y in ball_coords if x is not None and y is not None
-        ]
+        ball_data["x_centre_preprocessed"] = [x for x, y in ball_coords if x is not None and y is not None]
+        ball_data["y_centre_preprocessed"] = [y for x, y in ball_coords if x is not None and y is not None]
 
         # Add x_centre_preprocessed and y_centre_preprocessed in the node_names
 
@@ -120,9 +114,7 @@ class SkeletonMetrics:
 
         self.ball
 
-    def find_contact_events(
-        self, threshold=None, gap_between_events=None, event_min_length=None
-    ):
+    def find_contact_events(self, threshold=None, gap_between_events=None, event_min_length=None):
         if threshold is None:
             threshold = self.fly.experiment.config.contact_threshold
         if gap_between_events is None:
@@ -134,7 +126,7 @@ class SkeletonMetrics:
         ball_data = self.ball.objects[0].dataset
 
         # Find all contact events
-        contact_events = find_interaction_events(
+        contact_events = utilities.find_interaction_events(
             fly_data,
             ball_data,
             nodes1=self.fly.experiment.config.contact_nodes,
@@ -168,27 +160,15 @@ class SkeletonMetrics:
         if distance_type == "max":
             max_distance = ball_data["euclidean_distance"].max() - threshold
             distance_check = (
-                lambda event: ball_data.loc[
-                    event[0] : event[1], "euclidean_distance"
-                ].max()
-                >= max_distance
+                lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= max_distance
             )
         elif distance_type == "threshold":
-            distance_check = (
-                lambda event: ball_data.loc[
-                    event[0] : event[1], "euclidean_distance"
-                ].max()
-                >= threshold
-            )
+            distance_check = lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= threshold
         else:
             raise ValueError("Invalid distance_type. Use 'max' or 'threshold'.")
 
         try:
-            event, event_index = next(
-                (event, i)
-                for i, event in enumerate(self.all_contacts)
-                if distance_check(event)
-            )
+            event, event_index = next((event, i) for i, event in enumerate(self.all_contacts) if distance_check(event))
         except StopIteration:
             event, event_index = None, None
 
@@ -211,10 +191,9 @@ class SkeletonMetrics:
                 ball_idx,
             ), event_list in self.fly.tracking_data.standardized_interactions.items():
                 for event in event_list:
-
-                    start = event[0]
-                    end = event[1]
-                    all_event_intervals.append((start, end))
+                    start_frame = event[0]
+                    end_frame = event[1]
+                    all_event_intervals.append((start_frame, end_frame))
 
         else:
             print("No standardized interactions found")
@@ -242,9 +221,7 @@ class SkeletonMetrics:
                     end_idx = end_frame
 
                     # Validate indices
-                    if start_idx >= len(self.fly_centered_tracks) or end_idx > len(
-                        self.fly_centered_tracks
-                    ):
+                    if start_idx >= len(self.fly_centered_tracks) or end_idx > len(self.fly_centered_tracks):
                         print(
                             f"Invalid event bounds {start_idx}-{end_idx} for track length {len(self.fly_centered_tracks)}"
                         )
@@ -254,9 +231,7 @@ class SkeletonMetrics:
                     event_data = self.fly_centered_tracks.iloc[start_idx:end_idx].copy()
 
                     event_data["event_id"] = event_counter
-                    event_data["time_rel_onset"] = (
-                        event_data.index - start
-                    ) / self.fly.experiment.fps
+                    event_data["time_rel_onset"] = (event_data.index - start_idx) / self.fly.experiment.fps
                     event_data["fly_idx"] = fly_idx
                     event_data["ball_idx"] = ball_idx
                     event_data["adjusted_frame"] = range(end_idx - start_idx)
@@ -264,16 +239,8 @@ class SkeletonMetrics:
 
                     # Calculate ball displacement
                     ball_disp = np.sqrt(
-                        (
-                            event_data["x_centre_preprocessed"]
-                            - event_data["x_centre_preprocessed"].iloc[0]
-                        )
-                        ** 2
-                        + (
-                            event_data["y_centre_preprocessed"]
-                            - event_data["y_centre_preprocessed"].iloc[0]
-                        )
-                        ** 2
+                        (event_data["x_centre_preprocessed"] - event_data["x_centre_preprocessed"].iloc[0]) ** 2
+                        + (event_data["y_centre_preprocessed"] - event_data["y_centre_preprocessed"].iloc[0]) ** 2
                     )
                     event_data["ball_displacement"] = ball_disp
 
@@ -282,7 +249,7 @@ class SkeletonMetrics:
                     # Generate random negative example if requested
                     if generate_random:
                         random_data = self._generate_random_chunk(
-                            desired_length=end - start,
+                            desired_length=end_idx - start_idx,
                             exclude_intervals=all_event_intervals,
                             exclude_interactions=self.fly.config.random_exclude_interactions,
                             interaction_map=self.fly.config.random_interaction_map,
@@ -340,21 +307,13 @@ class SkeletonMetrics:
                             for onset in onsets
                         ]
                     else:
-                        raise ValueError(
-                            "Invalid interaction_map. Use 'full' or 'onset'."
-                        )
+                        raise ValueError("Invalid interaction_map. Use 'full' or 'onset'.")
 
                     # Ensure interaction_frames is a list of tuples
                     if isinstance(interaction_frames, dict):
-                        interaction_frames = [
-                            (start, end) for start, end in interaction_frames.items()
-                        ]
-                    elif isinstance(interaction_frames, list) and all(
-                        isinstance(i, int) for i in interaction_frames
-                    ):
-                        interaction_frames = [
-                            (i, i + desired_length) for i in interaction_frames
-                        ]
+                        interaction_frames = [(start, end) for start, end in interaction_frames.items()]
+                    elif isinstance(interaction_frames, list) and all(isinstance(i, int) for i in interaction_frames):
+                        interaction_frames = [(i, i + desired_length) for i in interaction_frames]
 
                     for ex_start, ex_end in interaction_frames:
                         if (random_start < ex_end) and (random_end > ex_start):
@@ -362,24 +321,14 @@ class SkeletonMetrics:
                             break
 
                 if not overlap:
-                    random_data = self.fly_centered_tracks.iloc[
-                        random_start:random_end
-                    ].copy()
+                    random_data = self.fly_centered_tracks.iloc[random_start:random_end].copy()
                     random_data["time_rel_onset"] = np.nan
                     random_data["adjusted_frame"] = range(desired_length)
 
                     # Calculate ball displacement (should be near zero for non-events)
                     ball_disp = np.sqrt(
-                        (
-                            random_data["x_centre_preprocessed"]
-                            - random_data["x_centre_preprocessed"].iloc[0]
-                        )
-                        ** 2
-                        + (
-                            random_data["y_centre_preprocessed"]
-                            - random_data["y_centre_preprocessed"].iloc[0]
-                        )
-                        ** 2
+                        (random_data["x_centre_preprocessed"] - random_data["x_centre_preprocessed"].iloc[0]) ** 2
+                        + (random_data["y_centre_preprocessed"] - random_data["y_centre_preprocessed"].iloc[0]) ** 2
                     )
                     random_data["ball_displacement"] = ball_disp
 
@@ -391,13 +340,9 @@ class SkeletonMetrics:
         if threshold is None:
             threshold = self.fly.config.final_event_threshold
 
-        final_contact, final_contact_idx = self.find_contact_by_distance(
-            threshold, distance_type="threshold"
-        )
+        final_contact, final_contact_idx = self.find_contact_by_distance(threshold, distance_type="threshold")
 
-        final_contact_time = (
-            final_contact[0] / self.fly.experiment.fps if final_contact else None
-        )
+        final_contact_time = final_contact[0] / self.fly.experiment.fps if final_contact else None
 
         # print(f"final_contact_idx from skeleton metric: {final_contact_idx}")
 
@@ -415,9 +360,7 @@ class SkeletonMetrics:
             ball_positions = self.ball.objects[0].dataset.loc[event[0] : event[1]]
             # Get the derivative of the ball positions
 
-            ball_velocity = np.mean(
-                abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0))
-            )
+            ball_velocity = np.mean(abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0)))
 
             self.ball_displacements.append(ball_velocity)
 
@@ -434,12 +377,8 @@ class SkeletonMetrics:
         tracking_data = self.fly.tracking_data.skeletontrack.objects[0].dataset.copy()
 
         # Add ball coordinates to tracking data
-        tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset[
-            "x_centre_preprocessed"
-        ]
-        tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset[
-            "y_centre_preprocessed"
-        ]
+        tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset["x_centre_preprocessed"]
+        tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset["y_centre_preprocessed"]
 
         # Get reference points
         thorax_x = tracking_data["x_Thorax"].values
@@ -460,11 +399,7 @@ class SkeletonMetrics:
         sin_theta[~valid] = 0
 
         # Get all trackable nodes (excluding existing '_fly' columns)
-        nodes = [
-            col[2:]
-            for col in tracking_data.columns
-            if col.startswith("x_") and not col.endswith("_fly")
-        ]
+        nodes = [col[2:] for col in tracking_data.columns if col.startswith("x_") and not col.endswith("_fly")]
 
         # Create transformed dataframe
         transformed = tracking_data.copy()
@@ -484,9 +419,7 @@ class SkeletonMetrics:
             transformed[f"{y_col}_fly"] = x_trans * sin_theta + y_trans * cos_theta
 
             # Handle invalid frames using config value
-            transformed.loc[~valid, [f"{x_col}_fly", f"{y_col}_fly"]] = (
-                self.fly.config.hidden_value
-            )
+            transformed.loc[~valid, [f"{x_col}_fly", f"{y_col}_fly"]] = self.fly.config.hidden_value
 
         return transformed
 
@@ -498,12 +431,8 @@ class SkeletonMetrics:
         tracking_data = self.fly.tracking_data.skeletontrack.objects[0].dataset
         # Add the ball tracking data
 
-        tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset[
-            "x_centre_preprocessed"
-        ]
-        tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset[
-            "y_centre_preprocessed"
-        ]
+        tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset["x_centre_preprocessed"]
+        tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset["y_centre_preprocessed"]
 
         thorax = tracking_data[["x_Thorax", "y_Thorax"]].values
         head = tracking_data[["x_Head", "y_Head"]].values
@@ -522,16 +451,11 @@ class SkeletonMetrics:
         # Transform all points using matrix operations
         translated = tracking_data.filter(like="x_").values - thorax[:, 0][:, None]
         rotated = np.empty_like(translated)
-        rotated[valid] = (
-            translated[valid] * cos_theta[valid, None]
-            - translated[valid] * sin_theta[valid, None]
-        )
+        rotated[valid] = translated[valid] * cos_theta[valid, None] - translated[valid] * sin_theta[valid, None]
 
         # Create transformed dataframe
         transformed = tracking_data.copy()
-        for i, col in enumerate(
-            [c for c in tracking_data.columns if c.startswith("x_")]
-        ):
+        for i, col in enumerate([c for c in tracking_data.columns if c.startswith("x_")]):
             transformed[f"{col}_fly"] = rotated[:, i]
 
         return transformed
@@ -589,9 +513,7 @@ class SkeletonMetrics:
                 font="Arial",  # Specify a font that's definitely installed
                 method="label",
             )
-            annotation = annotation.set_position(("center", "bottom")).set_duration(
-                clip.duration
-            )
+            annotation = annotation.set_position(("center", "bottom")).set_duration(clip.duration)
 
             # Overlay the annotation on the video clip
             annotated_clip = CompositeVideoClip([clip, annotation])

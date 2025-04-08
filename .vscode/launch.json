@@ -47,6 +47,38 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: Transformed dataset Fly",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/transformed_dataset.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Transformed dataset Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/transformed_dataset.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

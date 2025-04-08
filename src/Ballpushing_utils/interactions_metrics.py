@@ -57,7 +57,13 @@ class InteractionsMetrics:
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
+        # Calculate the initial position of the ball
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, end_idx=len(ball_data), window=10, keypoint="centre"
+        )
+
         metrics = {}
+        previous_success = None  # To store the success of the previous event
 
         for event_idx, event in enumerate(events):
             start_idx, end_idx = event[0], event[1]
@@ -71,11 +77,29 @@ class InteractionsMetrics:
             )
             displacement = self._calculate_euclidean_distance(start_x, start_y, end_x, end_y)
 
+            # Start distance and end distance from the initial position
+            start_distance = self._calculate_euclidean_distance(start_x, start_y, initial_x, initial_y)
+            end_distance = self._calculate_euclidean_distance(end_x, end_y, initial_x, initial_y)
+
             # Direction (push or pull)
             direction = self._determine_event_direction(fly_idx, ball_idx, start_idx, end_idx)
 
             # Significance (1 if displacement > threshold, else 0)
             significant = int(displacement > self.fly.config.significant_threshold)
+
+            # Major event (1 if displacement > major event threshold, else 0)
+            major_event = int(displacement > self.fly.config.major_event_threshold)
+
+            # Ball velocity during the interaction
+            ball_velocity = displacement / duration if duration > 0 else 0
+
+            # Correlation with the previous event
+            efficiency_diff = None
+            if previous_success is not None:
+                efficiency_diff = ball_velocity - previous_success
+
+            # Update the previous success for the next iteration
+            previous_success = ball_velocity
 
             # Store metrics for this event
             metrics[event_idx] = {
@@ -83,8 +107,13 @@ class InteractionsMetrics:
                 "end_time": end_idx / self.fly.experiment.fps,
                 "duration": duration,
                 "displacement": displacement,
+                "start_distance": start_distance,
+                "end_distance": end_distance,
                 "direction": direction,
                 "significant": significant,
+                "major_event": major_event,
+                "ball_velocity": ball_velocity,
+                "efficiency_diff": efficiency_diff,
             }
 
         return metrics
