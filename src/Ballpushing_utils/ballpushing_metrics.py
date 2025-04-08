@@ -72,7 +72,7 @@ class BallPushingMetrics:
                         else len(safe_call(self.get_significant_events, fly_idx, ball_idx, default=[]))
                     ),
                     "first_significant_event": lambda: safe_call(self.get_first_significant_event, fly_idx, ball_idx),
-                    "aha_moment": lambda: safe_call(self.get_aha_moment, fly_idx, ball_idx),
+                    "major_event": lambda: safe_call(self.get_major_event, fly_idx, ball_idx),
                     "events_direction": lambda: safe_call(
                         self.find_events_direction, fly_idx, ball_idx, default=([], [])
                     ),
@@ -87,7 +87,7 @@ class BallPushingMetrics:
                     "distance_ratio": lambda: safe_call(self.get_distance_ratio, fly_idx, ball_idx),
                     "insight_effect": lambda: (
                         safe_call(self.get_insight_effect, fly_idx, ball_idx)
-                        if safe_call(self.get_aha_moment, fly_idx, ball_idx)
+                        if safe_call(self.get_major_event, fly_idx, ball_idx)
                         else {
                             "raw_effect": np.nan,
                             "log_effect": np.nan,
@@ -102,7 +102,7 @@ class BallPushingMetrics:
                 nb_events = metrics["nb_events"]()
                 max_event = metrics["max_event"]()
                 significant_events = metrics["significant_events"]()
-                aha_moment = metrics["aha_moment"]()
+                major_event = metrics["major_event"]()
                 events_direction = metrics["events_direction"]()
                 insight_effect = metrics["insight_effect"]()
                 pause_metrics = safe_call(
@@ -130,9 +130,9 @@ class BallPushingMetrics:
                     ),
                     "first_significant_event": metrics["first_significant_event"]()[0],
                     "first_significant_event_time": metrics["first_significant_event"]()[1],
-                    "aha_moment": aha_moment[0],
-                    "aha_moment_time": aha_moment[1],
-                    "aha_moment_first": insight_effect["first_event"],
+                    "major_event": major_event[0],
+                    "major_event_time": major_event[1],
+                    "major_event_first": insight_effect["first_event"],
                     "insight_effect": insight_effect["raw_effect"],
                     "insight_effect_log": insight_effect["log_effect"],
                     "cumulated_breaks_duration": metrics["cumulated_breaks_duration"](),
@@ -770,7 +770,7 @@ class BallPushingMetrics:
 
         return distance_ratio
 
-    def get_aha_moment(self, fly_idx, ball_idx, distance=None):
+    def get_major_event(self, fly_idx, ball_idx, distance=None):
         """
         Identify the aha moment for a given fly and ball.
 
@@ -789,30 +789,30 @@ class BallPushingMetrics:
             Aha moment index and aha moment time.
         """
         if distance is None:
-            distance = self.fly.config.aha_moment_threshold
+            distance = self.fly.config.major_event_threshold
 
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        aha_moment = [
+        major_event = [
             (event, i)
             for i, event in enumerate(self.tracking_data.interaction_events[fly_idx][ball_idx])
             if self.check_yball_variation(event, ball_data, threshold=distance)
         ]
 
-        if aha_moment:
+        if major_event:
             # Select the event right before the event at which the ball was moved more than the threshold
-            aha_moment_event, aha_moment_idx = aha_moment[0]
-            if aha_moment_idx > 0:
-                previous_event = self.tracking_data.interaction_events[fly_idx][ball_idx][aha_moment_idx - 1]
-                aha_moment_event = previous_event
-                aha_moment_idx -= 1
+            major_event_instance, major_event_idx = major_event[0]
+            if major_event_idx > 0:
+                previous_event = self.tracking_data.interaction_events[fly_idx][ball_idx][major_event_idx - 1]
+                major_event_instance = previous_event
+                major_event_idx -= 1
 
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                aha_moment_time = aha_moment_event[0] / self.fly.experiment.fps
+                major_event_time = major_event_instance[0] / self.fly.experiment.fps
             else:
-                aha_moment_time = (aha_moment_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+                major_event_time = (major_event_instance[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
 
-            return aha_moment_idx, aha_moment_time
+            return major_event_idx, major_event_time
         else:
             return None, None
 
@@ -842,7 +842,7 @@ class BallPushingMetrics:
             - post_aha_count: Number of post-aha events
         """
         significant_events = [event[0] for event in self.get_significant_events(fly_idx, ball_idx)]
-        aha_moment_index, _ = self.get_aha_moment(fly_idx, ball_idx)
+        major_event_index, _ = self.get_major_event(fly_idx, ball_idx)
 
         # Handle no significant events case early
         if not significant_events:
@@ -855,7 +855,7 @@ class BallPushingMetrics:
             }
 
         # Handle no aha moment case early
-        if aha_moment_index is None:
+        if major_event_index is None:
             return {
                 "raw_effect": np.nan,
                 "log_effect": np.nan,
@@ -865,15 +865,15 @@ class BallPushingMetrics:
             }
 
         # Segment events with aha moment in before period
-        before_aha = significant_events[: aha_moment_index + 1]
-        after_aha = significant_events[aha_moment_index + 1 :]
+        before_aha = significant_events[: major_event_index + 1]
+        after_aha = significant_events[major_event_index + 1 :]
 
         # Calculate average distances with safety checks
         avg_before = self._calculate_avg_distance(fly_idx, ball_idx, before_aha)
         avg_after = self._calculate_avg_distance(fly_idx, ball_idx, after_aha)
 
         # Core insight calculation
-        if aha_moment_index == 0:
+        if major_event_index == 0:
             insight_effect = 1.0
         elif avg_before == 0:
             insight_effect = np.nan
@@ -888,7 +888,7 @@ class BallPushingMetrics:
             "raw_effect": insight_effect,
             "log_effect": log_effect,
             "classification": classification,
-            "first_event": aha_moment_index == 0,
+            "first_event": major_event_index == 0,
             "post_aha_count": len(after_aha),
         }
 

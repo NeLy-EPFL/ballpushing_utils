@@ -18,7 +18,7 @@ class Config:
     dead_threshold: int: The threshold value (in pixels traveled) for the fly to be considered dead. Defaults to 30.
     adjusted_events_normalisation: int: The normalisation value for the adjusted number of events. It's an arbitrary value that multiplies all the adjusted events values to make it more easily readable. Defaults to 1000.
     significant_threshold: int: The threshold value (in pixels) for an event to be considered significant. Defaults to 5.
-    aha_moment_threshold: int: The threshold value (in pixels) for an event to be considered an Aha moment. Defaults to 20.
+    major_event_threshold: int: The threshold value (in pixels) for an event to be considered an Aha moment. Defaults to 20.
     success_direction_threshold: int: The threshold value (in pixels) for an event to be considered a success direction, which is used to check whether a fly is a "pusher" or a "puller", or "both. Defaults to 25.
     final_event_threshold: int: The threshold value (in pixels) for an event to be considered a final event. Defaults to 170.
     final_event_F1_threshold: int: The threshold value (in pixels) for an event to be considered a final event in the F1 condition. Defaults to 100.
@@ -65,7 +65,7 @@ class Config:
     adjusted_events_normalisation: int = 1000
     significant_threshold: int = 5
     success_threshold: int = 5
-    aha_moment_threshold: int = 20
+    major_event_threshold: int = 20
     success_direction_threshold: int = 25
     final_event_threshold: int = 170
     final_event_F1_threshold: int = 100

@@ -10,10 +10,12 @@ def process_fly(fly_path):
 
     # Get the fly's interaction metrics
 
-    print(f"Individual events metrics: {ExampleFly.events_metrics}")
+    if ExampleFly.event_metrics is not None:
+        print(f"Individual events metrics: {ExampleFly.event_metrics}")
 
     # Get the fly's ballpushing metrics
-    ExampleFly.summary_metrics
+    if ExampleFly.event_summaries is not None:
+        print(f"Summary metrics: {ExampleFly.event_summaries}")
 
     # Make a dataset using the fly's ballpushing metrics
     ExampleData = Dataset(ExampleFly, dataset_type="summary")
@@ -53,9 +55,9 @@ def check_metric(metric, path, mode):
         "significant_ratio",
         "first_significant_event",
         "first_significant_event_time",
-        "aha_moment",
-        "aha_moment_time",
-        "aha_moment_first",
+        "major_event",
+        "major_event_time",
+        "major_event_first",
         "insight_effect",
         "insight_effect_log",
         "cumulated_breaks_duration",
