@@ -127,3 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+tests/integration/outputs/transformed_dataset_columns.csv
+tests/integration/outputs/transposed_dataset_columns.csv
+tests/integration/outputs/.~lock.transposed_dataset_columns.csv#

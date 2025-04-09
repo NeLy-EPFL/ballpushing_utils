@@ -32,6 +32,8 @@ def process_fly(fly_path):
     else:
         print("TransformedData.data is None. Cannot call 'head()'.")
 
+    return TransformedData
+
 
 def process_experiment(experiment_path):
     """
@@ -53,6 +55,8 @@ def process_experiment(experiment_path):
     else:
         print("TransformedData.data is None. Cannot call 'head()'.")
 
+    return TransformedData
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a single fly or an experiment.")
@@ -67,6 +71,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.mode == "fly":
-        process_fly(Path(args.path))
+        transformed_dataset = process_fly(Path(args.path))
     elif args.mode == "experiment":
-        process_experiment(Path(args.path))
+        transformed_dataset = process_experiment(Path(args.path))
+
+    # Save the column names of the transformed dataset in a csv file
+    if transformed_dataset.data is not None:
+        column_names = transformed_dataset.data.columns.tolist()
+        output_dir = Path(__file__).parent / "outputs"
+        output_dir.mkdir(exist_ok=True)  # Ensure the 'outputs' directory exists
+        output_path = output_dir / "transformed_dataset_columns.csv"
+        transformed_dataset.data.to_csv(output_path, index=False, header=column_names)
+        print(f"Column names saved to {output_path}")
+    else:
+        print("No data available to save.")

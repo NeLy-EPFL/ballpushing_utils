@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import cv2
 from scipy.fft import fft
+import re
 
 
 from moviepy.editor import (
@@ -211,6 +212,13 @@ class Dataset:
                     data = self._prepare_dataset_standardized_contacts(fly)
                     if not data.empty:
                         Dataset.append(data)
+
+            elif metrics == "transposed":
+                for fly in self.flies:
+                    data = self._prepare_framewise_dataset(fly)
+                    if not data.empty:
+                        Dataset.append(data)
+
             elif metrics == "transformed":
                 for fly in self.flies:
                     data = self._prepare_transformed_dataset(fly)
@@ -409,7 +417,7 @@ class Dataset:
                 # Add fly_idx, ball_idx, and event_idx to the metrics
                 metrics["fly_idx"] = fly_idx
                 metrics["ball_idx"] = ball_idx
-                metrics["event_idx"] = event_idx
+                metrics["event_id"] = event_idx  # Add event_id explicitly
 
                 # Append the metrics to the event data
                 event_data.append(metrics)
@@ -683,48 +691,73 @@ class Dataset:
 
         return dataset
 
-    def _prepare_dataset_event_metrics(self, fly):
-        """
-        Prepares a dataset with all events and their associated metrics for a given fly.
+    def _prepare_framewise_dataset(self, fly):
+        """Prepares a dataset regrouping individual interactions metrics including standardized contacts, tracking data, displacements, duration, etc."""
 
-        Args:
-            fly (Fly): A Fly object.
+        # Extract the events-based contacts data
+        data = fly.skeleton_metrics.events_based_contacts
 
-        Returns:
-            pandas.DataFrame: A DataFrame containing all events and their associated metrics.
-        """
+        # Identify keypoint and metadata columns
+        keypoint_columns = data.filter(regex="^(x|y)_").columns
+        metadata_columns = data.columns.difference(keypoint_columns)
 
-        # Initialize the InteractionsMetrics object
-        interaction_metrics = fly.event_metrics
+        print(f"Fly config:{fly.config.fly_only}")
 
-        if interaction_metrics is None:
-            print(f"No interaction metrics found for fly {fly.metadata.name}")
-            return pd.DataFrame()
+        # If fly_only is True, exclude columns matching the centre patterns
+        if fly.config.fly_only:
+            keypoint_columns = [col for col in keypoint_columns if "centre" not in col]
 
-        # Initialize an empty list to store event data
-        event_data = []
+        print(f"Keypoint columns: {keypoint_columns}")
 
-        # Iterate over all fly-ball combinations
-        for key, events in interaction_metrics.items():
-            fly_idx, ball_idx = map(int, key.split("_")[1::2])  # Extract fly_idx and ball_idx from the key
+        # Group data by event_id, and optionally event_type
+        groups = (
+            list(data.groupby(["event_id", "event_type"]))
+            if "event_type" in data.columns
+            else list(data.groupby(["event_id"]))
+        )
 
-            # Iterate over all events for this fly-ball combination
-            for event_idx, metrics in events.items():
-                # Add fly_idx, ball_idx, and event_idx to the metrics
-                metrics["fly_idx"] = fly_idx
-                metrics["ball_idx"] = ball_idx
-                metrics["event_idx"] = event_idx
+        framewise_data = []
 
-                # Append the metrics to the event data
-                event_data.append(metrics)
+        for group_key, group in groups:
 
-        # Convert the event data to a DataFrame
-        event_df = pd.DataFrame(event_data)
+            # Initialize the row with basic metadata and duration
+            row = {
+                "fly": fly.metadata.name,
+                "event_id": group_key[0],
+                "event_type": group_key[1] if len(group_key) > 1 else None,
+            }
 
-        # Add metadata to the dataset
-        event_df = self._add_metadata(event_df, fly)
+            # Add the transposed keypoints
+            transposed_keypoints = self._transpose_keypoints(fly, event_id=group_key[0])
+            # Filter out centre-related keypoints if fly_only is True
+            row.update(transposed_keypoints)
 
-        return event_df
+            # Add frame-based features (velocity, angles, etc.)
+            frame_features = self._calculate_frame_features(fly, event_id=group_key[0])
+            row.update(frame_features)
+
+            # Add statistical measures
+            statistical_measures = self._calculate_statistical_measures(fly, keypoint_columns, event_id=group_key[0])
+            row.update(statistical_measures)
+
+            # Add Fourier features
+            fourier_features = self._calculate_fourier_features(fly, keypoint_columns, event_id=group_key[0])
+            row.update(fourier_features)
+
+            # Append the row to the transformed data
+            framewise_data.append(row)
+
+        # Convert the transformed data into a DataFrame
+        framewise_df = pd.DataFrame(framewise_data)
+
+        # Add trial information if applicable
+        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
+            framewise_df = self._add_trial_information(framewise_df, fly)
+
+        # Add metadata to the transformed dataset (only once)
+        framewise_df = self._add_metadata(framewise_df, fly)
+
+        return framewise_df
 
     def _prepare_transformed_dataset(self, fly):
         """Prepares a dataset regrouping individual interactions metrics including standardized contacts, tracking data, displacements, duration, etc."""
@@ -745,6 +778,9 @@ class Dataset:
 
         transformed_data = []
 
+        # Fetch event-level metrics once to avoid redundant calculations
+        event_metrics_df = self._prepare_dataset_event_metrics(fly)
+
         for group_key, group in groups:
             # Compute duration and metadata for the group
             duration = group["frame"].max() - group["frame"].min() + 1
@@ -759,27 +795,13 @@ class Dataset:
                 "end": group["time"].iloc[-1],
                 "start_frame": group["frame"].iloc[0],
                 "end_frame": group["frame"].iloc[-1],
+                "duration": duration,
             }
 
-            # Add the transposed keypoints
-            transposed_keypoints = self.transpose_keypoints(fly)
-            row.update(transposed_keypoints)
-
-            # Add relative positions
-            relative_positions = self.calculate_relative_positions(fly, keypoint_columns)
-            row.update(relative_positions)
-
-            # Add frame-based features (velocity, angles, etc.)
-            frame_features = self.calculate_frame_features(fly)
-            row.update(frame_features)
-
-            # Add statistical measures
-            statistical_measures = self.calculate_statistical_measures(fly, keypoint_columns)
-            row.update(statistical_measures)
-
-            # Add Fourier features
-            fourier_features = self.calculate_fourier_features(fly, keypoint_columns)
-            row.update(fourier_features)
+            # Add event-level metrics (avoiding duplicates)
+            if "event_id" in event_metrics_df.columns:
+                event_metrics = event_metrics_df[event_metrics_df["event_id"] == group_key[0]].iloc[0].to_dict()
+                row.update(event_metrics)
 
             # Add metadata columns
             for col in metadata_columns:
@@ -795,26 +817,34 @@ class Dataset:
         if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
             transformed_df = self._add_trial_information(transformed_df, fly)
 
-        # Add metadata to the transformed dataset
+        # Add metadata to the transformed dataset (only once)
         transformed_df = self._add_metadata(transformed_df, fly)
 
         return transformed_df
 
-    def transpose_keypoints(self, fly):
-        """Transpose tracking keypoints to end up with one row per event"""
-        if not hasattr(fly, "skeleton_metrics") or fly.skeleton_metrics is None:
-            return pd.DataFrame()
+    def _transpose_keypoints(self, fly, event_id):
+        """Transpose tracking keypoints to end up with one row per event."""
 
-        events_df = fly.skeleton_metrics.events_based_contacts
+        events_data = fly.skeleton_metrics.events_based_contacts
+        event_df = events_data[events_data["event_id"] == event_id]
+
+        if fly.config.fly_only:
+            event_df = event_df.drop(columns=[col for col in event_df.columns if "centre" in col])
 
         x_fly_pattern = r"^x_.*_fly$"
         y_fly_pattern = r"^y_.*_fly$"
-        centre_pattern = r"^[xy]_centre_preprocessed$"
+        y_centre_pattern = r"^y_.*_centre_preprocessed$"
+        x_centre_pattern = r"^x_.*_centre_preprocessed$"
 
-        keypoint_columns = events_df.filter(regex=f"({x_fly_pattern}|{y_fly_pattern}|{centre_pattern})").columns
+        # Filter keypoint columns based on fly_only
+        keypoint_columns = event_df.filter(
+            regex=f"({x_fly_pattern}|{y_fly_pattern}|{x_centre_pattern}|{y_centre_pattern})"
+        ).columns
+
         transposed = {}
 
-        data = events_df.assign(frame_count=events_df.groupby(["event_id", "adjusted_frame"]).cumcount())
+        # Add frame count for pivoting
+        data = event_df.assign(frame_count=event_df.groupby(["event_id", "adjusted_frame"]).cumcount())
 
         for keypoint in keypoint_columns:
             parts = keypoint.split("_")
@@ -824,54 +854,85 @@ class Dataset:
                 keypoint_name = "_".join(parts[1:-1])
             elif "preprocessed" in parts:
                 keypoint_name = "_".join(parts[1:-1])
-            else:
-                print(f"Keypoint {keypoint} not recognized")
-                continue
 
+            # Pivot the data for the keypoint
             keypoint_df = data.pivot(
                 index=["event_id"],
                 columns=["adjusted_frame", "frame_count"],
                 values=keypoint,
             )
 
+            # Replace NaN values with the hidden value
+            keypoint_df = keypoint_df.fillna(fly.config.hidden_value)
+
+            # Rename columns to include frame and axis information
             keypoint_df.columns = [f"{keypoint_name}_frame{frame}_{axis}" for (frame, _) in keypoint_df.columns]
 
+            # Update the transposed dictionary
             transposed.update(keypoint_df.iloc[0].to_dict())
+
+        # If fly_only is True, filter out centre-related keypoints from the transposed dictionary
+        if fly.config.fly_only:
+            transposed = {
+                k: v
+                for k, v in transposed.items()
+                if not (re.search(y_centre_pattern, k) or re.search(x_centre_pattern, k))
+            }
 
         return transposed
 
-    def calculate_frame_features(self, fly):
+    def _calculate_frame_features(self, fly, event_id):
         """Calculate per-frame velocity and angles using original coordinates."""
         features = {}
 
-        event_df = fly.skeleton_metrics.events_based_contacts
+        events_data = fly.skeleton_metrics.events_based_contacts
 
-        group = event_df.sort_values("adjusted_frame").reset_index(drop=True)
+        event_df = events_data[events_data["event_id"] == event_id]
 
-        base_keypoints = {
-            "Head",
-            "Thorax",
-            "Abdomen",
-            "Rfront",
-            "Lfront",
-            "Rmid",
-            "Lmid",
-            "Rhind",
-            "Lhind",
-            "Rwing",
-            "Lwing",
-            "centre",
-        }
+        if fly.config.fly_only:
+            event_df = event_df.drop(columns=[col for col in event_df.columns if "centre" in col])
+
+        event_df = event_df.sort_values("adjusted_frame").reset_index(drop=True)
+
+        if fly.config.fly_only is True:
+            base_keypoints = {
+                "Head",
+                "Thorax",
+                "Abdomen",
+                "Rfront",
+                "Lfront",
+                "Rmid",
+                "Lmid",
+                "Rhind",
+                "Lhind",
+                "Rwing",
+                "Lwing",
+            }
+        else:
+            base_keypoints = {
+                "Head",
+                "Thorax",
+                "Abdomen",
+                "Rfront",
+                "Lfront",
+                "Rmid",
+                "Lmid",
+                "Rhind",
+                "Lhind",
+                "Rwing",
+                "Lwing",
+                "centre",
+            }
 
         for kp in base_keypoints:
             x_col = f"x_{kp}"
             y_col = f"y_{kp}"
 
-            if x_col not in group.columns or y_col not in group.columns:
+            if x_col not in event_df.columns or y_col not in event_df.columns:
                 continue
 
-            x_vals = group[x_col].values
-            y_vals = group[y_col].values
+            x_vals = event_df[x_col].values
+            y_vals = event_df[y_col].values
 
             dx = np.diff(x_vals, prepend=x_vals[0])
             dy = np.diff(y_vals, prepend=y_vals[0])
@@ -880,94 +941,71 @@ class Dataset:
             angles = np.degrees(np.arctan2(dx, dy)) % 360
             angular_velocity = np.diff(angles, prepend=angles[0])
 
-            for i, frame in enumerate(group["adjusted_frame"]):
+            for i, frame in enumerate(event_df["adjusted_frame"]):
                 features[f"{kp}_frame{frame}_velocity"] = velocities[i]
                 features[f"{kp}_frame{frame}_angle"] = angles[i]
                 features[f"{kp}_frame{frame}_angular_velocity"] = angular_velocity[i]
 
+        # Replace NaN values with the hidden value
+        for key in features:
+            if np.isnan(features[key]):
+                features[key] = fly.config.hidden_value
+
         return features
 
-    def calculate_relative_positions(self, fly, keypoint_columns):
-        """Calculate relative positions and distances."""
-
-        event_df = fly.skeleton_metrics.events_based_contacts
-
-        start_position = fly.tracking_data.get_initial_position()
-
-        initial_x = event_df["x_centre_preprocessed"].iloc[0]
-        initial_y = event_df["y_centre_preprocessed"].iloc[0]
-        group = event_df.copy()
-        group["euclidean_distance"] = np.sqrt(
-            (group["x_centre_preprocessed"] - initial_x) ** 2 + (group["y_centre_preprocessed"] - initial_y) ** 2
-        )
-
-        initial_positions = group[keypoint_columns].iloc[0]
-        displacements = group[keypoint_columns] - initial_positions
-
-        median_euclidean_distance = group["euclidean_distance"].median()
-
-        initial_distance = group["euclidean_distance"].iloc[0]
-        final_distance = group["euclidean_distance"].iloc[-1]
-        direction = 1 if final_distance > initial_distance else -1
-
-        final_x = group["x_centre_preprocessed"].iloc[-1]
-        final_y = group["y_centre_preprocessed"].iloc[-1]
-        raw_displacement = np.sqrt((final_x - initial_x) ** 2 + (final_y - initial_y) ** 2)
-
-        contact_start_x = group["x_centre_preprocessed"].iloc[0]
-        contact_start_y = group["y_centre_preprocessed"].iloc[0]
-        contact_end_x = group["x_centre_preprocessed"].iloc[-1]
-        contact_end_y = group["y_centre_preprocessed"].iloc[-1]
-
-        start_distance = np.sqrt(
-            (contact_start_x - start_position[0]) ** 2 + (contact_start_y - start_position[1]) ** 2
-        )
-
-        end_distance = np.sqrt((contact_end_x - start_position[0]) ** 2 + (contact_end_y - start_position[1]) ** 2)
-
-        return (
-            {f"{col}_disp_mean": displacements[col].mean() for col in keypoint_columns}
-            | {f"{col}_disp_std": displacements[col].std() for col in keypoint_columns}
-            | {
-                "median_euclidean_distance": median_euclidean_distance,
-                "direction": direction,
-                "raw_displacement": raw_displacement,
-                "start_distance": start_distance,
-                "end_distance": end_distance,
-            }
-        )
-
-    def calculate_statistical_measures(self, fly, keypoint_columns, fly_relative=True):
+    def _calculate_statistical_measures(self, fly, keypoint_columns, event_id, fly_relative=True):
         """Calculate statistical measures for keypoints."""
 
-        event_df = fly.skeleton_metrics.events_based_contacts
+        events_data = fly.skeleton_metrics.events_based_contacts
+        event_df = events_data[events_data["event_id"] == event_id]
+
+        if fly.config.fly_only:
+            event_df = event_df.drop(columns=[col for col in event_df.columns if "centre" in col])
 
         if fly_relative:
             fly_relative_columns = [col for col in keypoint_columns if "_fly" in col]
         else:
             fly_relative_columns = keypoint_columns
-        return (
+
+        # Calculate statistical measures
+        results = (
             {f"{col}_mean": event_df[col].mean() for col in fly_relative_columns}
             | {f"{col}_std": event_df[col].std() for col in fly_relative_columns}
             | {f"{col}_skew": event_df[col].skew() for col in fly_relative_columns}
             | {f"{col}_kurt": event_df[col].kurtosis() for col in fly_relative_columns}
         )
 
-    def calculate_fourier_features(self, fly, keypoint_columns, fly_relative=True):
+        # Replace NaN values in the results with the hidden value
+        results = {key: (value if not pd.isna(value) else fly.config.hidden_value) for key, value in results.items()}
+
+        return results
+
+    def _calculate_fourier_features(self, fly, keypoint_columns, event_id, fly_relative=True):
         """Calculate Fourier features for keypoints."""
 
-        event_df = fly.skeleton_metrics.events_based_contacts
+        events_data = fly.skeleton_metrics.events_based_contacts
+        event_df = events_data[events_data["event_id"] == event_id]
+
+        if fly.config.fly_only:
+            event_df = event_df.drop(columns=[col for col in event_df.columns if "centre" in col])
 
         if fly_relative:
             fly_relative_columns = [col for col in keypoint_columns if "_fly" in col]
         else:
             fly_relative_columns = keypoint_columns
+
         fft_results = {}
         for col in fly_relative_columns:
             fft_vals = fft(event_df[col].values)
             dominant_freq = np.abs(fft_vals[1 : len(fft_vals) // 2]).argmax() + 1
             fft_results[f"{col}_dom_freq"] = dominant_freq
             fft_results[f"{col}_dom_freq_magnitude"] = np.abs(fft_vals[dominant_freq])
+
+        # Replace NaN values in the results with the hidden value
+        fft_results = {
+            key: (value if not pd.isna(value) else fly.config.hidden_value) for key, value in fft_results.items()
+        }
+
         return fft_results
 
     def generate_clip(self, fly, event, outpath):

@@ -104,6 +104,8 @@ class Config:
     # gap_between_contacts: int = 3 / 2
     # contact_min_length: int = 2
 
+    fly_only = True
+
     # hidden_value: int = -1
     hidden_value: int = 9999
 

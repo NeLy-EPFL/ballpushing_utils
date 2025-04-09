@@ -177,11 +177,11 @@ class InteractionsMetrics:
         end_distance = self._calculate_euclidean_distance(start_fly_x, start_fly_y, end_ball_x, end_ball_y)
 
         if end_distance > start_distance:
-            return "push"
+            return 1
         elif end_distance < start_distance:
-            return "pull"
+            return -1
         else:
-            return "unknown"
+            return None
 
     def get_chamber_exit_time(self, fly_idx, ball_idx):
         """
