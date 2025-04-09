@@ -1,5 +1,6 @@
 from __future__ import annotations
 from Ballpushing_utils.config import Config
+from Ballpushing_utils.behavior_umap import BehaviorUMAP
 
 import os
 import pandas as pd
@@ -84,6 +85,8 @@ class Dataset:
         self.metadata = []
 
         self.data = None
+
+        self.dataset_type = dataset_type
 
         self.generate_dataset(metrics=dataset_type)
 
@@ -219,6 +222,12 @@ class Dataset:
                     if not data.empty:
                         Dataset.append(data)
 
+            elif metrics == "behavior_umap":
+                data = self.generate_UMAP()
+                if data is not None:
+                    self.data = data
+                    return self.data
+
             elif metrics == "transformed":
                 for fly in self.flies:
                     data = self._prepare_transformed_dataset(fly)
@@ -237,6 +246,28 @@ class Dataset:
             self.data = pd.DataFrame()  # Return an empty DataFrame in case of error
 
         return self.data
+
+    def generate_UMAP(self):
+
+        # Check if self.data already exists and if self.dataset_type is "transposed"
+        if self.data is None or self.dataset_type != "transposed":
+            print("No data available for UMAP generation. Generating dataset...")
+            input_data = self.generate_dataset(metrics="transposed")
+        else:
+            input_data = self.data
+
+        # Check if the input data is empty
+        if input_data.empty:
+            print("Input data is empty. Cannot generate UMAP.")
+            return None
+
+        # Create the behavior UMAP object
+        behavior_umap = BehaviorUMAP()
+
+        # Generate UMAP embeddings
+        embeddings = behavior_umap.generate_umap_and_clusters(input_data)
+
+        return embeddings
 
     def _prepare_dataset_coordinates(self, fly, downsampling_factor=None, annotate_events=True):
         """

@@ -7,7 +7,15 @@ from Ballpushing_utils import dataset
 
 
 class BehaviorUMAP:
-    def __init__(self, n_neighbors=15, min_dist=0.1, n_components=2, explained_variance_threshold=0.95, n_clusters=8):
+    def __init__(
+        self,
+        n_neighbors=15,
+        min_dist=0.1,
+        n_components=2,
+        explained_variance_threshold=0.95,
+        n_clusters=3,
+        filter_features=True,
+    ):
         """
         Initialize the BehaviorUMAP class.
 
@@ -25,8 +33,9 @@ class BehaviorUMAP:
         self.n_clusters = n_clusters
         self.umap_model = None
         self.kmeans = None
+        self.filter_features = filter_features
 
-    def prepare_features(self, data, feature_groups, include_ball=False):
+    def prepare_features(self, data, feature_groups=None, include_ball=False):
         """
         Prepare features for UMAP based on selected feature groups.
 
@@ -49,8 +58,13 @@ class BehaviorUMAP:
 
         # Create combined regex pattern
         regex_parts = []
+
+        if feature_groups is None:
+            feature_groups = list(feature_config.keys())
+
         for group in feature_groups:
             regex_parts.extend(feature_config.get(group, []))
+
         feature_pattern = "|".join(regex_parts)
 
         # Extract features and metadata
@@ -62,8 +76,25 @@ class BehaviorUMAP:
         if len(feature_columns) == 0:
             raise ValueError("No features found matching the selected feature groups")
 
-        features = data[feature_columns].fillna(9999).values
+        features = data[feature_columns]
         metadata = data.drop(columns=feature_columns, errors="ignore")
+
+        if self.filter_features:
+            # Filter features based on variance
+            feature_variance = features.var(axis=0)
+            selected_features = feature_variance[feature_variance > 0.01].index.tolist()
+            features = features[selected_features]
+            # Filter features based on correlation
+            corr_matrix = features.corr().abs()
+            upper_triangle = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+            to_drop = [column for column in upper_triangle.columns if any(upper_triangle[column] > 0.95)]
+            features = features.drop(columns=to_drop, errors="ignore")
+            print(f"Filtered features: {len(to_drop)} features removed based on correlation.")
+            print(f"Remaining features after filtering: {len(features.columns)}")
+        else:
+            print("Feature filtering is disabled. All features will be used.")
+            print(f"Total features selected: {len(features.columns)}")
+            print(f"Feature columns: {features.columns.tolist()}")
 
         return features, metadata
 
@@ -117,7 +148,7 @@ class BehaviorUMAP:
         self.kmeans = KMeans(n_clusters=self.n_clusters, random_state=42)
         return self.kmeans.fit_predict(embeddings)
 
-    def generate_umap_and_clusters(self, data, feature_groups, include_ball=False, use_pca=True, savepath=None):
+    def generate_umap_and_clusters(self, data, feature_groups=None, include_ball=False, use_pca=False, savepath=None):
         """
         Generate UMAP embeddings and cluster labels for the dataset.
 
