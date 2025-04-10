@@ -152,7 +152,7 @@ def find_interaction_events(
     return interaction_events
 
 
-def find_interaction_start(
+def find_interaction_boundaries(
     data,
     distance_col,
     frame_col,
@@ -162,6 +162,12 @@ def find_interaction_start(
     peak_prominence=1,
     peak_window_size=10,
 ):
+    """
+    Find both the start and end of an interaction based on distance data.
+
+    Returns:
+        tuple: (start_index, end_index)
+    """
     # Work on a copy to avoid modifying original data
     data = data.copy()
 
@@ -180,29 +186,42 @@ def find_interaction_start(
 
     # Initialize plateau markers
     data["plateau_start"] = 0
+    data["plateau_end"] = 0
     valid_plateaus = data[plateau_mask].groupby(plateau_groups).filter(lambda x: len(x) >= min_plateau_length)
     if not valid_plateaus.empty:
         start_indices = valid_plateaus.groupby(plateau_groups).head(1).index
+        end_indices = valid_plateaus.groupby(plateau_groups).tail(1).index
         data.loc[start_indices, "plateau_start"] = 1
+        data.loc[end_indices, "plateau_end"] = 1
 
     # Peak detection with stricter prominence
     peaks, _ = find_peaks(-data["smoothed_distance"], prominence=peak_prominence, width=3)
+    troughs, _ = find_peaks(data["smoothed_distance"], prominence=peak_prominence, width=3)
 
     # Refine peak detection for better alignment
     refined_peaks = []
     for peak in peaks:
         if peak > 0 and peak < len(data) - 1:
-            # Perform local search around the detected peak to refine position
             local_region = data.iloc[max(0, peak - peak_window_size) : min(len(data), peak + peak_window_size)]
             true_peak_idx = local_region[distance_col].idxmin()  # Find true minimum in this region
             refined_peaks.append(true_peak_idx)
 
+    refined_troughs = []
+    for trough in troughs:
+        if trough > 0 and trough < len(data) - 1:
+            local_region = data.iloc[max(0, trough - peak_window_size) : min(len(data), trough + peak_window_size)]
+            true_trough_idx = local_region[distance_col].idxmax()  # Find true maximum in this region
+            refined_troughs.append(true_trough_idx)
+
     # Combine plateau and refined peak detections
-    plateau_indices = data[data["plateau_start"] == 1].index
-    all_candidates = sorted(list(plateau_indices) + refined_peaks)
+    plateau_start_indices = data[data["plateau_start"] == 1].index
+    plateau_end_indices = data[data["plateau_end"] == 1].index
 
-    # Fallback to minimum distance if no markers found
-    if not all_candidates:
-        return data[distance_col].idxmin()
+    start_candidates = sorted(list(plateau_start_indices) + refined_peaks)
+    end_candidates = sorted(list(plateau_end_indices) + refined_troughs)
 
-    return all_candidates[0]
+    # Fallback to minimum/maximum distance if no markers found
+    start_index = start_candidates[0] if start_candidates else data[distance_col].idxmin()
+    end_index = end_candidates[-1] if end_candidates else data[distance_col].idxmax()
+
+    return start_index, end_index

@@ -133,6 +133,7 @@ class FlyTrackingData:
         for attr in [
             "_interaction_events",
             "_interactions_onsets",
+            "_interactions_offsets",
             "_std_interactions",
         ]:
             if hasattr(self, attr):
@@ -237,16 +238,26 @@ class FlyTrackingData:
         For each interaction event, get the onset of the fly interaction with the ball.
         """
         if not hasattr(self, "_interactions_onsets"):
-            self._interactions_onsets = self._calculate_interactions_onsets()
+            self._interactions_onsets = self._calculate_interactions_boundaries()[0]
         return self._interactions_onsets
 
-    def _calculate_interactions_onsets(self):
-        """Calculate interaction onsets."""
+    @property
+    def interactions_offsets(self):
+        """
+        For each interaction event, get the onset of the fly interaction with the ball.
+        """
+        if not hasattr(self, "_interactions_offsets"):
+            self._interactions_offsets = self._calculate_interactions_boundaries()[1]
+        return self._interactions_offsets
+
+    def _calculate_interactions_boundaries(self):
+        """Calculate interaction onsets and offsets."""
         if self.flytrack is None or self.balltrack is None:
             print(f"Skipping interaction events for {self.fly.metadata.name} due to missing tracking data.")
-            return {}
+            return {}, {}
 
         interactions_onsets = {}
+        interactions_offsets = {}
         event_count = 0
 
         for fly_idx in range(0, len(self.flytrack.objects)):
@@ -269,6 +280,7 @@ class FlyTrackingData:
                 event_count += len(interaction_events)
 
                 onsets = []
+                offsets = []
                 for event in interaction_events:
                     event_data = fly_data.loc[event[0] : event[1]]
                     event_data["adjusted_frame"] = range(len(event_data))
@@ -278,13 +290,14 @@ class FlyTrackingData:
                         + (event_data["y_thorax"] - ball_data["y_centre"]) ** 2
                     )
 
-                    onset = utilities.find_interaction_start(event_data, "distance", "adjusted_frame")
+                    onset, offset = utilities.find_interaction_boundaries(event_data, "distance", "adjusted_frame")
                     onsets.append(onset)
+                    offsets.append(offset)
 
                 interactions_onsets[(fly_idx, ball_idx)] = onsets
+                interactions_offsets[(fly_idx, ball_idx)] = offsets
 
-        # print(f"Found {event_count} interaction events with onsets for {self.fly.metadata.name}")
-        return interactions_onsets
+        return interactions_onsets, interactions_offsets
 
     @property
     def standardized_interactions(self):
