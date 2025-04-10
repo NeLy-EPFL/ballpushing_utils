@@ -3,6 +3,9 @@ import os
 import json
 import gc
 import psutil
+import concurrent.futures
+from tqdm import tqdm  # For progress bar
+import time
 import pandas as pd
 import yaml  # Import PyYAML for parsing YAML files
 import argparse  # For command-line arguments
@@ -45,7 +48,9 @@ CONFIG = {
 }
 
 # Print the current ball pushing configurations
-current_config = config.Config.print_config()
+current_config = config.Config()
+print("Current ball pushing configurations:")
+current_config.print_config()
 
 # Automatically set output_data_dir based on output_summary_dir
 CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
@@ -54,7 +59,9 @@ CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_D
 # LOGGING CONFIGURATION
 # ==================================================================
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", handlers=[logging.StreamHandler()]
+    level=logging.ERROR,  # Change this to WARNING or ERROR to reduce log verbosity
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 
 
@@ -209,6 +216,8 @@ def process_experiment(folder, metrics, output_data):
 # MAIN PROCESSING SCRIPT
 # ==================================================================
 if __name__ == "__main__":
+    start_time = time.time()
+
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Dataset Builder Script")
     parser.add_argument("--yaml", type=str, help="Path to the YAML file specifying directories", default=None)
@@ -355,9 +364,52 @@ if __name__ == "__main__":
             log_memory_usage(f"After processing {exp_name}")
 
     elif args.mode == "fly":
-        # New fly-level processing
+        # Main processing loop for fly mode
+        checkpoint_file = output_summary / "fly_processing_checkpoint.json"
+
+        # Load checkpoint if exists
+        if checkpoint_file.exists():
+            with open(checkpoint_file, "r") as f:
+                processed_experiments = set(json.load(f))
+            logging.info(f"Resuming from checkpoint, {len(processed_experiments)} experiments already processed")
+        else:
+            processed_experiments = set()
+
         for folder in Exp_folders:
-            process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
+            exp_name = folder.name
+            experiment_pkl_path = output_summary / f"{exp_name}.pkl"
+
+            # Skip if the experiment has already been processed
+            if exp_name in processed_experiments:
+                logging.info(f"Skipping already processed experiment: {exp_name}")
+                continue
+
+            # Check if the experiment-level datasets already exist
+            all_datasets_exist = True
+            for metric in CONFIG["PROCESSING"]["metrics"]:
+                dataset_path = output_data / metric / f"{exp_name}_{metric}.feather"
+                if not dataset_path.exists():
+                    all_datasets_exist = False
+                    break
+
+            if all_datasets_exist:
+                logging.info(f"All datasets for {exp_name} already exist. Skipping.")
+                processed_experiments.add(exp_name)
+                # Save checkpoint after skipping
+                with open(checkpoint_file, "w") as f:
+                    json.dump(list(processed_experiments), f)
+                continue
+
+            # Process the experiment folder
+            logging.info(f"Processing experiment folder: {exp_name}")
+            try:
+                process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
+                processed_experiments.add(exp_name)
+                # Save checkpoint after successful processing
+                with open(checkpoint_file, "w") as f:
+                    json.dump(list(processed_experiments), f)
+            except Exception as e:
+                logging.error(f"Error processing experiment {exp_name}: {str(e)}")
 
     logging.info("Processing complete!")
 
@@ -410,3 +462,8 @@ if __name__ == "__main__":
             logging.info(f"Pooled {metric} dataset already exists: {pooled_path.name}")
 
     logging.info("Pooled dataset creation complete!")
+
+    end_time = time.time()
+
+    runtime = end_time - start_time
+    logging.info(f"Script completed in {runtime:.2f} seconds")

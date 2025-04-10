@@ -134,8 +134,6 @@ class Config:
             self.trial_peak_distance = 500  # Minimum distance between peaks
             self.trial_skip_frames = 500  # Initial frames to skip in a trial
             self.trial_min_count = 2  # Minimum number of trials for a valid fly
-        else:
-            print(f"{experiment_type} has no particular configuration.")
 
     def set_property(self, property_name, value):
         """
