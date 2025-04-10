@@ -224,4 +224,14 @@ def find_interaction_boundaries(
     start_index = start_candidates[0] if start_candidates else data[distance_col].idxmin()
     end_index = end_candidates[-1] if end_candidates else data[distance_col].idxmax()
 
+    # Ensure end_index is after start_index
+    if end_index <= start_index:
+        # Find the next valid end candidate after the start_index
+        end_candidates_after_start = [idx for idx in end_candidates if idx > start_index]
+        if end_candidates_after_start:
+            end_index = end_candidates_after_start[0]
+        else:
+            # If no valid end candidate exists, fallback to the last frame
+            end_index = data.index[-1]
+
     return start_index, end_index

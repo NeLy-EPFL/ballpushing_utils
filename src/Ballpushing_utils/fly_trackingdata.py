@@ -235,7 +235,7 @@ class FlyTrackingData:
     @property
     def interactions_onsets(self):
         """
-        For each interaction event, get the onset of the fly interaction with the ball.
+        For each interaction event, get the standardized onset of the fly interaction with the ball.
         """
         if not hasattr(self, "_interactions_onsets"):
             self._interactions_onsets = self._calculate_interactions_boundaries()[0]
@@ -244,26 +244,28 @@ class FlyTrackingData:
     @property
     def interactions_offsets(self):
         """
-        For each interaction event, get the onset of the fly interaction with the ball.
+        For each interaction event, get the standardized offset of the fly interaction with the ball.
         """
         if not hasattr(self, "_interactions_offsets"):
             self._interactions_offsets = self._calculate_interactions_boundaries()[1]
         return self._interactions_offsets
 
     def _calculate_interactions_boundaries(self):
-        """Calculate interaction onsets and offsets."""
+        """
+        Calculate standardized interaction onsets, offsets, and centers based on event centers.
+        """
         if self.flytrack is None or self.balltrack is None:
             print(f"Skipping interaction events for {self.fly.metadata.name} due to missing tracking data.")
-            return {}, {}
+            return {}, {}, {}
 
         interactions_onsets = {}
         interactions_offsets = {}
-        event_count = 0
+        interactions_centers = {}
 
-        for fly_idx in range(0, len(self.flytrack.objects)):
+        for fly_idx in range(len(self.flytrack.objects)):
             fly_data = self.flytrack.objects[fly_idx].dataset
 
-            for ball_idx in range(0, len(self.balltrack.objects)):
+            for ball_idx in range(len(self.balltrack.objects)):
                 ball_data = self.balltrack.objects[ball_idx].dataset
 
                 # Ensure interaction_events is not None and contains the required keys
@@ -275,29 +277,28 @@ class FlyTrackingData:
                     warnings.warn(f"Interaction events missing for fly_idx={fly_idx}, ball_idx={ball_idx}.")
                     continue
 
-                # Access events through the property to ensure they're calculated
                 interaction_events = self.interaction_events[fly_idx][ball_idx]
-                event_count += len(interaction_events)
 
                 onsets = []
                 offsets = []
+                centers = []
                 for event in interaction_events:
-                    event_data = fly_data.loc[event[0] : event[1]]
-                    event_data["adjusted_frame"] = range(len(event_data))
+                    # Calculate the center of the event
+                    event_center = (event[0] + event[1]) // 2
 
-                    event_data["distance"] = np.sqrt(
-                        (event_data["x_thorax"] - ball_data["x_centre"]) ** 2
-                        + (event_data["y_thorax"] - ball_data["y_centre"]) ** 2
-                    )
+                    # Calculate standardized onset and offset without clamping
+                    onset = event_center - self.fly.config.frames_before_onset
+                    offset = event_center + self.fly.config.frames_after_onset
 
-                    onset, offset = utilities.find_interaction_boundaries(event_data, "distance", "adjusted_frame")
                     onsets.append(onset)
                     offsets.append(offset)
+                    centers.append(event_center)
 
                 interactions_onsets[(fly_idx, ball_idx)] = onsets
                 interactions_offsets[(fly_idx, ball_idx)] = offsets
+                interactions_centers[(fly_idx, ball_idx)] = centers
 
-        return interactions_onsets, interactions_offsets
+        return interactions_onsets, interactions_offsets, interactions_centers
 
     @property
     def standardized_interactions(self):
