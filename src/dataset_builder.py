@@ -6,9 +6,25 @@ import psutil
 import pandas as pd
 import yaml  # Import PyYAML for parsing YAML files
 import argparse  # For command-line arguments
+from concurrent.futures import ThreadPoolExecutor
+import logging  # For improved logging
 import Ballpushing_utils
-from Ballpushing_utils import utilities
+from Ballpushing_utils import utilities, config
 
+# ==================================================================
+# INTRODUCTION AND EXAMPLE USAGE
+# ==================================================================
+
+# This script processes datasets for ball-pushing experiments, generating
+# datasets for individual flies or entire experiments. It can be run in
+# two modes: "experiment" or "fly". In "experiment" mode, it processes
+# all flies in a given experiment folder, while in "fly" mode, it processes
+# individual flies. The script can also create pooled datasets for
+# easier analysis.
+
+# Example usage:
+# python dataset_builder.py --mode experiment --yaml config.yaml
+# python dataset_builder.py --mode fly --yaml config.yaml
 
 # ==================================================================
 # CONFIGURATION SECTION - EDIT THESE VALUES TO MODIFY BEHAVIOR
@@ -18,18 +34,33 @@ CONFIG = {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
         "output_summary_dir": "250403_BallpushingMetrics",
-        "output_data_dir": "250403_BallpushingMetrics_Data",
         "excluded_folders": [],
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "pooled_prefix": "250403_pooled",  # Base name for combined datasets
-        "metrics": ["summary"],  # Metrics to process (add/remove as needed)
+        "pooled_prefix": "pooled",  # Base name for combined datasets
+        "metrics": ["transposed"],  # Metrics to process (add/remove as needed)
     },
 }
 
+# Print the current ball pushing configurations
+current_config = config.Config.print_config()
 
+# Automatically set output_data_dir based on output_summary_dir
+CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
+
+# ==================================================================
+# LOGGING CONFIGURATION
+# ==================================================================
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s", handlers=[logging.StreamHandler()]
+)
+
+
+# ==================================================================
+# UTILITY FUNCTIONS
+# ==================================================================
 def load_yaml_config(yaml_path):
     """
     Load directories from a YAML file and update the CONFIG dictionary.
@@ -44,17 +75,134 @@ def load_yaml_config(yaml_path):
     list
         List of directories specified in the YAML file.
     """
-    with open(yaml_path, "r") as yaml_file:
-        yaml_data = yaml.safe_load(yaml_file)
-    directories = yaml_data.get("directories", [])
-    return [Path(directory) for directory in directories]
+    try:
+        with open(yaml_path, "r") as yaml_file:
+            yaml_data = yaml.safe_load(yaml_file)
+        directories = yaml_data.get("directories", [])
+        logging.info(f"Loaded {len(directories)} directories from YAML file: {yaml_path}")
+        return [Path(directory) for directory in directories]
+    except FileNotFoundError:
+        logging.error(f"YAML file not found: {yaml_path}")
+        return []
+    except yaml.YAMLError as e:
+        logging.error(f"Error parsing YAML file: {e}")
+        return []
 
 
 def log_memory_usage(label):
-    """Log current memory usage"""
+    """
+    Log current memory usage.
+
+    Parameters
+    ----------
+    label : str
+        Label to identify the memory usage log.
+    """
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
-    print(f"Memory usage at {label}: {memory_info.rss / 1024 / 1024:.2f} MB")
+    logging.info(f"Memory usage at {label}: {memory_info.rss / 1024 / 1024:.2f} MB")
+
+
+def process_fly(fly_path, metric, output_data):
+    """
+    Process an individual fly and save its dataset.
+
+    Parameters
+    ----------
+    fly_path : Path
+        Path to the fly's .h5 file.
+    metric : str
+        Metric to process.
+    output_data : Path
+        Output directory for the dataset.
+
+    Returns
+    -------
+    Path or None
+        Path to the saved dataset or None if processing failed.
+    """
+    try:
+        logging.info(f"Processing fly: {fly_path.name} for metric: {metric}")
+        # Load the fly data
+        fly = Ballpushing_utils.Fly(fly_path, as_individual=True)
+        dataset = Ballpushing_utils.Dataset(fly, dataset_type=metric)
+
+        if dataset.data is not None and not dataset.data.empty:
+            # Save the dataset
+            dataset_path = output_data / metric / f"{fly.metadata.name}_{metric}.feather"
+            dataset_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
+            dataset.data.to_feather(dataset_path)
+            logging.info(f"Saved {metric} dataset for {fly.metadata.name} to {dataset_path}")
+            return dataset_path
+        else:
+            logging.warning(f"No data available for {fly.metadata.name} with metric {metric}")
+            return None
+    except Exception as e:
+        logging.error(f"Error processing {fly_path} for metric {metric}: {str(e)}")
+        return None
+
+
+def process_experiment(folder, metrics, output_data):
+    """
+    Process an experiment folder in fly mode.
+
+    Parameters
+    ----------
+    folder : Path
+        Path to the experiment folder.
+    metrics : list
+        List of metrics to process.
+    output_data : Path
+        Output directory for datasets.
+    """
+    logging.info(f"Processing experiment folder: {folder.name}")
+
+    # Find all directories containing .h5 files (corridor folders)
+    corridor_folders = [
+        subfolder for subfolder in folder.rglob("*") if subfolder.is_dir() and any(subfolder.glob("*.h5"))
+    ]
+    if not corridor_folders:
+        logging.warning(f"No corridor folders with .h5 files found in {folder.name}")
+        return
+
+    # Prepare tasks for parallel processing
+    tasks = []
+    for fly_path in corridor_folders:
+        for metric in metrics:
+            tasks.append((fly_path, metric))
+
+    # Process each fly with each metric in parallel
+    with ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(process_fly, fly_path, metric, output_data): (fly_path, metric)
+            for fly_path, metric in tasks
+        }
+
+        # Use tqdm to track progress
+        for future in tqdm(
+            concurrent.futures.as_completed(futures), total=len(futures), desc=f"Processing {folder.name}"
+        ):
+            try:
+                future.result()
+            except Exception as e:
+                fly_path, metric = futures[future]
+                logging.error(f"Error processing fly {fly_path} for metric {metric}: {str(e)}")
+
+    # Filter out None results and concatenate the datasets by metric
+    for metric in metrics:
+        metric_files = list((output_data / metric).glob("*.feather"))
+        if metric_files:
+            # Concatenate all datasets for the current metric
+            combined_df = pd.concat([pd.read_feather(f) for f in metric_files], ignore_index=True)
+            combined_path = output_data / metric / f"{folder.name}_{metric}.feather"
+            combined_df.to_feather(combined_path)
+            logging.info(f"Saved combined {metric} dataset for {folder.name} to {combined_path}")
+
+            # Optionally delete individual files to save disk space
+            for file in metric_files:
+                file.unlink()
+        else:
+            logging.warning(f"No datasets found for {metric} in {folder.name}")
 
 
 # ==================================================================
@@ -64,6 +212,19 @@ if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Dataset Builder Script")
     parser.add_argument("--yaml", type=str, help="Path to the YAML file specifying directories", default=None)
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["experiment", "fly"],
+        default="experiment",
+        help="Processing mode: 'experiment' (default) or 'fly'",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=4,
+        help="Number of threads to use for parallel processing (default: 4)",
+    )
     args = parser.parse_args()
 
     # Build derived paths from configuration
@@ -81,9 +242,7 @@ if __name__ == "__main__":
         yaml_dirs = load_yaml_config(args.yaml)
         Exp_folders.extend(yaml_dirs)
     else:
-
         for root in CONFIG["PATHS"]["data_root"]:
-            # Iterate over subdirectories in each root directory
             Exp_folders.extend(
                 folder
                 for folder in root.iterdir()
@@ -94,103 +253,113 @@ if __name__ == "__main__":
     if CONFIG["PATHS"]["excluded_folders"]:
         Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
 
-    print(f"Folders to analyze: {[f.name for f in Exp_folders]}")
+    logging.info(f"Folders to analyze: {[f.name for f in Exp_folders]}")
 
     # Create metric subdirectories
     for metric in CONFIG["PROCESSING"]["metrics"]:
         (output_data / metric).mkdir(exist_ok=True)
 
-    # Main processing loop
-    checkpoint_file = output_summary / "processing_checkpoint.json"
+    if args.mode == "experiment":
+        # Main processing loop
+        checkpoint_file = output_summary / "processing_checkpoint.json"
 
-    # Load checkpoint if exists
-    if checkpoint_file.exists():
-        with open(checkpoint_file, "r") as f:
-            processed_folders = set(json.load(f))
-        print(f"Resuming from checkpoint, {len(processed_folders)} folders already processed")
-    else:
-        processed_folders = set()
+        # Load checkpoint if exists
+        if checkpoint_file.exists():
+            with open(checkpoint_file, "r") as f:
+                processed_folders = set(json.load(f))
+            logging.info(f"Resuming from checkpoint, {len(processed_folders)} folders already processed")
+        else:
+            processed_folders = set()
 
-    # Process each folder
-    for folder in Exp_folders:
-        exp_name = folder.name
-        experiment_pkl_path = output_summary / f"{exp_name}.pkl"
-        experiment = None  # Initialize experiment to avoid unbound variable issues
+        # Process each folder
+        for folder in Exp_folders:
+            exp_name = folder.name
+            experiment_pkl_path = output_summary / f"{exp_name}.pkl"
+            experiment = None  # Initialize experiment to avoid unbound variable issues
 
-        # Skip if already processed
-        if exp_name in processed_folders:
-            print(f"Skipping already processed experiment: {exp_name}")
-            continue
+            # Skip if already processed
+            if exp_name in processed_folders:
+                logging.info(f"Skipping already processed experiment: {exp_name}")
+                continue
 
-        log_memory_usage(f"Before processing {exp_name}")
+            log_memory_usage(f"Before processing {exp_name}")
 
-        try:
-            # Check if the experiment exists
-            if experiment_pkl_path.exists():
-                print(f"Experiment {exp_name} already exists.")
-                # Check if all datasets for this experiment exist
-                all_datasets_exist = True
+            try:
+                # Check if the experiment exists
+                if experiment_pkl_path.exists():
+                    logging.info(f"Experiment {exp_name} already exists.")
+                    # Check if all datasets for this experiment exist
+                    all_datasets_exist = True
+                    for metric in CONFIG["PROCESSING"]["metrics"]:
+                        dataset_path = output_data / metric / f"{exp_name}_{metric}.feather"
+                        if not dataset_path.exists():
+                            all_datasets_exist = False
+                            break
+
+                    if all_datasets_exist:
+                        logging.info(f"All datasets for {exp_name} already exist. Skipping.")
+                        continue
+                    else:
+                        logging.info(f"Some datasets for {exp_name} are missing. Loading experiment.")
+                        experiment = utilities.load_object(experiment_pkl_path)
+                else:
+                    # If the experiment doesn't exist, create it
+                    logging.info(f"Creating new experiment: {exp_name}")
+                    experiment = Ballpushing_utils.Experiment(folder)
+                    utilities.save_object(experiment, experiment_pkl_path)
+                    logging.info(f"Saved new experiment: {exp_name}")
+
+                    # Save config if first experiment
+                    if not (output_summary / CONFIG["PATHS"]["config_path"]).exists():
+                        config_dict = (
+                            experiment.config if isinstance(experiment.config, dict) else vars(experiment.config)
+                        )
+                        config_json_path = output_summary / CONFIG["PATHS"]["config_path"]
+                        with open(config_json_path, "w") as config_file:
+                            json.dump(config_dict, config_file, indent=4)
+                        logging.info(f"Saved config for {exp_name} to {config_json_path}")
+
+                # Generate and save datasets
+                all_metrics_processed = True
                 for metric in CONFIG["PROCESSING"]["metrics"]:
                     dataset_path = output_data / metric / f"{exp_name}_{metric}.feather"
-                    if not dataset_path.exists():
-                        all_datasets_exist = False
-                        break
 
-                if all_datasets_exist:
-                    print(f"All datasets for {exp_name} already exist. Skipping.")
-                    continue
-                else:
-                    print(f"Some datasets for {exp_name} are missing. Loading experiment.")
-                    experiment = utilities.load_object(experiment_pkl_path)
-            else:
-                # If the experiment doesn't exist, create it
-                print(f"Creating new experiment: {exp_name}")
-                experiment = Ballpushing_utils.Experiment(folder)
-                utilities.save_object(experiment, experiment_pkl_path)
-                print(f"Saved new experiment: {exp_name}")
+                    if dataset_path.exists():
+                        logging.info(f"Dataset {dataset_path} already exists. Skipping.")
+                        continue
 
-                # Save config if first experiment
-                if not (output_summary / CONFIG["PATHS"]["config_path"]).exists():
-                    config_dict = experiment.config if isinstance(experiment.config, dict) else vars(experiment.config)
-                    config_json_path = output_summary / CONFIG["PATHS"]["config_path"]
-                    with open(config_json_path, "w") as config_file:
-                        json.dump(config_dict, config_file, indent=4)
-                    print(f"Saved config for {exp_name} to {config_json_path}")
+                    try:
+                        dataset = Ballpushing_utils.Dataset(experiment, dataset_type=metric)
+                        if dataset.data is not None and not dataset.data.empty:
+                            dataset.data.to_feather(dataset_path)
+                            logging.info(f"Saved {metric} dataset for {exp_name}")
+                        else:
+                            logging.warning(f"Empty {metric} data for {exp_name}")
+                    except Exception as e:
+                        logging.error(f"Error generating {metric} for {exp_name}: {str(e)}")
+                        all_metrics_processed = False
 
-            # Generate and save datasets
-            all_metrics_processed = True
-            for metric in CONFIG["PROCESSING"]["metrics"]:
-                dataset_path = output_data / metric / f"{exp_name}_{metric}.feather"
+                # Mark as processed only if all metrics were processed
+                if all_metrics_processed:
+                    processed_folders.add(exp_name)
+                    # Save checkpoint after each successful experiment
+                    with open(checkpoint_file, "w") as f:
+                        json.dump(list(processed_folders), f)
 
-                if dataset_path.exists():
-                    print(f"Dataset {dataset_path} already exists. Skipping.")
-                    continue
+            except Exception as e:
+                logging.error(f"Error processing {exp_name}: {str(e)}")
 
-                try:
-                    dataset = Ballpushing_utils.Dataset(experiment, dataset_type=metric)
-                    if dataset.data is not None and not dataset.data.empty:
-                        dataset.data.to_feather(dataset_path)
-                        print(f"Saved {metric} dataset for {exp_name}")
-                    else:
-                        print(f"Empty {metric} data for {exp_name}")
-                except Exception as e:
-                    print(f"Error generating {metric} for {exp_name}: {str(e)}")
-                    all_metrics_processed = False
+            # Explicit cleanup
+            del experiment
+            gc.collect()
+            log_memory_usage(f"After processing {exp_name}")
 
-            # Mark as processed only if all metrics were processed
-            if all_metrics_processed:
-                processed_folders.add(exp_name)
-                # Save checkpoint after each successful experiment
-                with open(checkpoint_file, "w") as f:
-                    json.dump(list(processed_folders), f)
+    elif args.mode == "fly":
+        # New fly-level processing
+        for folder in Exp_folders:
+            process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
 
-        except Exception as e:
-            print(f"Error processing {exp_name}: {str(e)}")
-
-        # Explicit cleanup
-        del experiment
-        gc.collect()
-        log_memory_usage(f"After processing {exp_name}")
+    logging.info("Processing complete!")
 
     # ==================================================================
     # Create pooled datasets
@@ -202,20 +371,21 @@ if __name__ == "__main__":
             try:
                 metric_files = list((output_data / metric).glob("*.feather"))
                 if not metric_files:
-                    print(f"No {metric} files found for pooling")
+                    logging.warning(f"No {metric} files found for pooling. Skipping.")
                     continue
 
                 # Use chunking for pooling to avoid loading all files at once
                 chunk_size = 5  # Adjust based on file sizes
                 total_chunks = (len(metric_files) + chunk_size - 1) // chunk_size
 
+                logging.info(f"Pooling {len(metric_files)} files for metric '{metric}' into {pooled_path.name}")
                 first_chunk = True
                 for chunk_idx in range(total_chunks):
                     start_idx = chunk_idx * chunk_size
                     end_idx = min((chunk_idx + 1) * chunk_size, len(metric_files))
                     chunk_files = metric_files[start_idx:end_idx]
 
-                    print(f"Processing chunk {chunk_idx+1}/{total_chunks} for {metric}")
+                    logging.info(f"Processing chunk {chunk_idx + 1}/{total_chunks} for metric '{metric}'")
                     chunk_df = pd.concat([pd.read_feather(f) for f in chunk_files])
 
                     if first_chunk:
@@ -231,12 +401,12 @@ if __name__ == "__main__":
 
                     del chunk_df
                     gc.collect()
-                    log_memory_usage(f"After pooling chunk {chunk_idx+1} for {metric}")
+                    log_memory_usage(f"After pooling chunk {chunk_idx + 1} for metric '{metric}'")
 
-                print(f"Created pooled {metric} dataset: {pooled_path.name}")
+                logging.info(f"Created pooled {metric} dataset: {pooled_path.name}")
             except Exception as e:
-                print(f"Error pooling {metric}: {str(e)}")
+                logging.error(f"Error pooling {metric}: {str(e)}")
         else:
-            print(f"Pooled {metric} dataset already exists")
+            logging.info(f"Pooled {metric} dataset already exists: {pooled_path.name}")
 
-    print("Processing complete!")
+    logging.info("Pooled dataset creation complete!")
