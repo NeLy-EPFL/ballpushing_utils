@@ -92,7 +92,7 @@ class Experiment:
 
         else:
             fps = 30
-            print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
+            #print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
 
         return fps
 
@@ -230,8 +230,12 @@ def load_fly(
             experiment=experiment,
             # experiment_type=experiment_type,
         )
-        if fly.tracking_data and fly.tracking_data.valid_data:
-            return fly
+        try:
+            if fly.tracking_data and fly.tracking_data.valid_data:
+                return fly
+        except Exception as e:
+            print(f"Error while validating tracking data for {mp4_file.parent}: {e}")
+        return None
     except TypeError as e:
         print(f"Error while loading fly from {mp4_file.parent}: {e}")
     return None

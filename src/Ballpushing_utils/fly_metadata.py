@@ -68,7 +68,7 @@ class FlyMetadata:
                 self.simplified_nickname = brain_regions.iloc[matched_index]["Simplified Nickname"]
                 self.split = brain_regions.iloc[matched_index]["Split"]
             except KeyError:
-                print(f"Genotype {genotype} not found in brain regions table for {self.name}. Defaulting to PR")
+                #print(f"Genotype {genotype} not found in brain regions table for {self.name}. Defaulting to PR")
                 self.nickname = "PR"
                 self.brain_region = "Control"
                 self.simplified_nickname = "PR"

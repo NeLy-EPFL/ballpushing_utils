@@ -423,6 +423,10 @@ class FlyTrackingData:
         # Use the flytrack dataset
         fly_data = self.flytrack.objects[0].dataset
 
+        if "y_thorax" not in fly_data.columns or "x_thorax" not in fly_data.columns:
+            warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping data quality check.")
+            return False
+
         # Check if any of the smoothed fly x and y coordinates are more than 30 pixels away from their initial position
         moved_y = np.any(abs(fly_data["y_thorax"] - fly_data["y_thorax"].iloc[0]) > self.fly.config.dead_threshold)
         moved_x = np.any(abs(fly_data["x_thorax"] - fly_data["x_thorax"].iloc[0]) > self.fly.config.dead_threshold)
@@ -456,6 +460,10 @@ class FlyTrackingData:
 
         fly_data = self.flytrack.objects[0].dataset
 
+        if "y_thorax" not in fly_data.columns or "x_thorax" not in fly_data.columns:
+            warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping dying check.")
+            return False
+
         # Get the velocity of the fly
         velocity = np.sqrt(
             np.diff(fly_data["x_thorax"], prepend=np.nan) ** 2 + np.diff(fly_data["y_thorax"], prepend=np.nan) ** 2
@@ -481,7 +489,7 @@ class FlyTrackingData:
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time
                 time = fly_data.loc[group[0], "time"]
-                print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
+                #print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
                 return True
 
         return False
@@ -502,6 +510,9 @@ class FlyTrackingData:
                 initial_x = fly_data["x_thorax"].iloc[:10].median()
                 initial_y = fly_data["y_thorax"].iloc[:10].median()
                 return initial_x, initial_y
+            else:
+                warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping.")
+                return None, None
 
         # Fallback to skeleton data if fly tracking data is not available
         if self.fly_skeleton is not None:
@@ -510,6 +521,9 @@ class FlyTrackingData:
                 initial_x = self.fly_skeleton["x_thorax"].iloc[:10].median()
                 initial_y = self.fly_skeleton["y_thorax"].iloc[:10].median()
                 return initial_x, initial_y
+            else:
+                warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping.")
+                return None, None
 
         raise ValueError(f"No valid position data found for {self.fly.metadata.name}.")
 
@@ -586,10 +600,18 @@ class FlyTrackingData:
         # Get the initial x position of the fly
         initial_x = self.start_x
 
+        if "x_thorax" not in fly_data.columns:
+            warnings.warn(f"'x_thorax' missing for {self.fly.metadata.name}. Skipping exit time calculation.")
+            return None
+
         # Get the x position of the fly
         x = fly_data["x_thorax"]
 
         # Find the first time at which the fly x position has been 100 px away from the initial fly x position
+        if initial_x is None:
+            warnings.warn(f"Initial x position is None for {self.fly.metadata.name}. Skipping exit time calculation.")
+            return None
+
         exit_condition = x > initial_x + 100
         if not exit_condition.any():
             return None

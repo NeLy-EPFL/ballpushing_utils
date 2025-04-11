@@ -13,7 +13,7 @@ class BehaviorUMAP:
         min_dist=0.1,
         n_components=2,
         explained_variance_threshold=0.95,
-        n_clusters=3,
+        n_clusters=10,
         filter_features=True,
     ):
         """
@@ -188,7 +188,7 @@ class BehaviorUMAP:
         # Save the dataset if savepath is provided
         if savepath:
             os.makedirs(os.path.dirname(savepath), exist_ok=True)
-            result_df.to_csv(savepath, index=False)
+            result_df.to_feather(savepath)
             print(f"Dataset with UMAP and cluster labels saved to {savepath}")
 
         return result_df

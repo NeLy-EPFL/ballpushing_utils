@@ -36,14 +36,14 @@ CONFIG = {
     "PATHS": {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
-        "output_summary_dir": "250403_BallpushingMetrics",
+        "output_summary_dir": "250410_BallpushingMetrics",
         "excluded_folders": [],
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
         "pooled_prefix": "pooled",  # Base name for combined datasets
-        "metrics": ["transposed"],  # Metrics to process (add/remove as needed)
+        "metrics": ["event_metrics"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -59,7 +59,7 @@ CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_D
 # LOGGING CONFIGURATION
 # ==================================================================
 logging.basicConfig(
-    level=logging.ERROR,  # Change this to WARNING or ERROR to reduce log verbosity
+    level=logging.INFO,  # Change this to WARNING or ERROR to reduce log verbosity
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler()],
 )
@@ -198,18 +198,32 @@ def process_experiment(folder, metrics, output_data):
     # Filter out None results and concatenate the datasets by metric
     for metric in metrics:
         metric_files = list((output_data / metric).glob("*.feather"))
-        if metric_files:
-            # Concatenate all datasets for the current metric
-            combined_df = pd.concat([pd.read_feather(f) for f in metric_files], ignore_index=True)
+        valid_files = []
+
+        # Validate Feather files
+        for file in metric_files:
+            try:
+                # Attempt to read the file to ensure it's valid
+                df = pd.read_feather(file)
+                if not df.empty:
+                    valid_files.append(file)
+                else:
+                    logging.warning(f"Empty Feather file skipped: {file}")
+            except Exception as e:
+                logging.error(f"Invalid Feather file skipped: {file}, Error: {e}")
+
+        if valid_files:
+            # Concatenate all valid datasets for the current metric
+            combined_df = pd.concat([pd.read_feather(f) for f in valid_files], ignore_index=True)
             combined_path = output_data / metric / f"{folder.name}_{metric}.feather"
             combined_df.to_feather(combined_path)
             logging.info(f"Saved combined {metric} dataset for {folder.name} to {combined_path}")
 
             # Optionally delete individual files to save disk space
-            for file in metric_files:
+            for file in valid_files:
                 file.unlink()
         else:
-            logging.warning(f"No datasets found for {metric} in {folder.name}")
+            logging.warning(f"No valid datasets found for {metric} in {folder.name}")
 
 
 # ==================================================================

@@ -75,11 +75,15 @@ class Fly:
         self._tracking_data = None
 
         # Check if the fly has valid tracking data
-        if as_individual:
-            if self.tracking_data is None or not self.tracking_data.valid_data:
-                if self.config.debugging:
-                    print(f"Invalid data for: {self.metadata.name}. Skipping.")
-                return
+        try:
+            if as_individual:
+                if self.tracking_data is None or not self.tracking_data.valid_data:
+                    if self.config.debugging:
+                        print(f"Invalid data for: {self.metadata.name}. Skipping.")
+                    return
+        except Exception as e:
+            print(f"Error initializing tracking data for {self.metadata.name}: {e}")
+            return
 
         self.flyball_positions = None
         self.fly_skeleton = None
