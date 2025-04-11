@@ -351,6 +351,150 @@ class FlyTrackingData:
 
         return standardized
 
+    @property
+    def random_events(self):
+        """Random chunks of time with the same lengths as interaction events."""
+        if not hasattr(self, "_random_events"):
+            self._random_events = self._generate_random_events()
+        return self._random_events
+
+    def _generate_random_events(self):
+        """Generate random events of the same lengths as interaction events."""
+        if not self.interaction_events:
+            warnings.warn(f"No interaction events found for {self.fly.metadata.name}. Cannot generate random events.")
+            return {}
+
+        random_events = {}
+        total_frames = len(self.flytrack.objects[0].dataset) if self.flytrack else 0
+
+        for fly_idx, ball_events in self.interaction_events.items():
+            random_events[fly_idx] = {}
+            for ball_idx, events in ball_events.items():
+                random_events[fly_idx][ball_idx] = []
+                for event in events:
+                    event_duration = event[1] - event[0]
+                    max_start = total_frames - event_duration
+
+                    # Generate a random start frame
+                    random_start = np.random.randint(0, max_start)
+                    random_end = random_start + event_duration
+
+                    # Ensure no overlap with existing interaction events
+                    while any(
+                        random_start <= existing_event[1] and random_end >= existing_event[0]
+                        for existing_event in events
+                    ):
+                        random_start = np.random.randint(0, max_start)
+                        random_end = random_start + event_duration
+
+                    random_events[fly_idx][ball_idx].append((random_start, random_end))
+
+        return random_events
+
+    @property
+    def random_events_onsets(self):
+        """Standardized onsets for random events."""
+        if not hasattr(self, "_random_events_onsets"):
+            self._random_events_onsets = self._calculate_random_events_boundaries()[0]
+        return self._random_events_onsets
+
+    @property
+    def random_events_offsets(self):
+        """Standardized offsets for random events."""
+        if not hasattr(self, "_random_events_offsets"):
+            self._random_events_offsets = self._calculate_random_events_boundaries()[1]
+        return self._random_events_offsets
+
+    def _calculate_random_events_boundaries(self):
+        """Calculate standardized onsets, offsets, and centers for random events."""
+        if self.flytrack is None or self.balltrack is None:
+            print(f"Skipping random events for {self.fly.metadata.name} due to missing tracking data.")
+            return {}, {}, {}
+
+        random_onsets = {}
+        random_offsets = {}
+        random_centers = {}
+
+        for fly_idx in range(len(self.flytrack.objects)):
+            for ball_idx in range(len(self.balltrack.objects)):
+                if (
+                    self.random_events is None
+                    or fly_idx not in self.random_events
+                    or ball_idx not in self.random_events[fly_idx]
+                ):
+                    warnings.warn(f"Random events missing for fly_idx={fly_idx}, ball_idx={ball_idx}.")
+                    continue
+
+                random_events = self.random_events[fly_idx][ball_idx]
+
+                onsets = []
+                offsets = []
+                centers = []
+                for event in random_events:
+                    # Calculate the center of the event
+                    event_center = (event[0] + event[1]) // 2
+
+                    # Calculate standardized onset and offset without clamping
+                    onset = event_center - self.fly.config.frames_before_onset
+                    offset = event_center + self.fly.config.frames_after_onset
+
+                    onsets.append(onset)
+                    offsets.append(offset)
+                    centers.append(event_center)
+
+                random_onsets[(fly_idx, ball_idx)] = onsets
+                random_offsets[(fly_idx, ball_idx)] = offsets
+                random_centers[(fly_idx, ball_idx)] = centers
+
+        return random_onsets, random_offsets, random_centers
+
+    @property
+    def standardized_random_events(self):
+        """Standardized random events based on frames before and after onset."""
+        if not hasattr(self, "_std_random_events"):
+            if not self.random_events or not any(
+                events for fly_dict in self.random_events.values() for events in fly_dict.values()
+            ):
+                print(f"No random events found for {self.fly.metadata.name}")
+                self._std_random_events = {}
+            else:
+                self._std_random_events = self._calculate_standardized_random_events()
+        return self._std_random_events
+
+    def _calculate_standardized_random_events(self):
+        standardized = {}
+
+        # Check if onsets exist
+        if not self.random_events_onsets:
+            print(f"No random event onsets found for {self.fly.metadata.name}")
+            return {}
+
+        for (fly_idx, ball_idx), onsets in self.random_events_onsets.items():
+            events = []
+            for onset in onsets:
+                if onset is None:
+                    continue
+                if self.flytrack is None or self.flytrack.objects is None:
+                    warnings.warn("Flytrack or its objects are not initialized.")
+                    continue
+
+                start = max(0, onset - self.fly.config.frames_before_onset)
+                end = min(
+                    len(self.flytrack.objects[fly_idx].dataset),
+                    onset + self.fly.config.frames_after_onset,
+                )
+                events.append((start, end))
+
+            # Add deduplication here
+            unique_events = []
+            for event in events:
+                if event not in unique_events:
+                    unique_events.append(event)
+
+            standardized[(fly_idx, ball_idx)] = unique_events
+
+        return standardized
+
     def detect_trials(self):
         """
         Detect trials for learning experiments.
@@ -424,7 +568,9 @@ class FlyTrackingData:
         fly_data = self.flytrack.objects[0].dataset
 
         if "y_thorax" not in fly_data.columns or "x_thorax" not in fly_data.columns:
-            warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping data quality check.")
+            warnings.warn(
+                f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping data quality check."
+            )
             return False
 
         # Check if any of the smoothed fly x and y coordinates are more than 30 pixels away from their initial position
@@ -489,7 +635,7 @@ class FlyTrackingData:
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time
                 time = fly_data.loc[group[0], "time"]
-                #print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
+                # print(f"Warning: {self.fly.metadata.name} is inactive at {time}")
                 return True
 
         return False

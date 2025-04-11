@@ -4,14 +4,15 @@ from typing import Any
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
 from utils_behavior import Processing
+from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 
 
 class InteractionsMetrics:
 
     def __init__(self, tracking_data):
-
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
+        self.summary = BallPushingMetrics(self.fly.tracking_data)
         # Iterate over the indices of the flytrack objects list
         self.chamber_exit_times = {
             fly_idx: self.get_chamber_exit_time(fly_idx, 0)
@@ -27,33 +28,49 @@ class InteractionsMetrics:
 
     def compute_all_event_metrics(self):
         """
-        Compute metrics for all combinations of fly and ball.
+        Compute metrics for all combinations of fly and ball, including interaction and random events.
 
         Returns:
             dict: Nested dictionary containing metrics for each fly-ball combination and their events.
         """
         all_metrics = {}
 
+        # Compute metrics for interaction events
         for fly_idx, ball_dict in self.tracking_data.interaction_events.items():
             for ball_idx, events in ball_dict.items():
-                key = f"fly_{fly_idx}_ball_{ball_idx}"
-                all_metrics[key] = self.compute_event_metrics(fly_idx, ball_idx)
+                key = f"fly_{fly_idx}_ball_{ball_idx}_interaction"
+                all_metrics[key] = self.compute_event_metrics(fly_idx, ball_idx, event_type="interaction")
+
+        if self.fly.config.generate_random:
+            # Compute metrics for random events if available
+            if hasattr(self.tracking_data, "random_events"):
+                for fly_idx, ball_dict in self.tracking_data.random_events.items():
+                    for ball_idx, events in ball_dict.items():
+                        key = f"fly_{fly_idx}_ball_{ball_idx}_random"
+                        all_metrics[key] = self.compute_event_metrics(fly_idx, ball_idx, event_type="random")
 
         self.metrics = all_metrics
         return all_metrics
 
-    def compute_event_metrics(self, fly_idx, ball_idx):
+    def compute_event_metrics(self, fly_idx, ball_idx, event_type="interaction"):
         """
-        Compute metrics for each interaction event.
+        Compute metrics for each event (interaction or random).
 
         Args:
             fly_idx (int): Index of the fly.
             ball_idx (int): Index of the ball.
+            event_type (str): Type of event ("interaction" or "random").
 
         Returns:
             dict: Dictionary where each key is an event index, and the value is a dictionary of metrics for that event.
         """
-        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+        if event_type == "interaction":
+            events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+        elif event_type == "random":
+            events = self.tracking_data.random_events[fly_idx][ball_idx]
+        else:
+            raise ValueError(f"Invalid event_type: {event_type}")
+
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
@@ -61,6 +78,12 @@ class InteractionsMetrics:
         initial_x, initial_y, _, _ = self._calculate_median_coordinates(
             ball_data, start_idx=0, end_idx=len(ball_data), window=10, keypoint="centre"
         )
+
+        max_event = self.summary.get_max_event(fly_idx, ball_idx)
+        print(f"Max event for fly {fly_idx}, ball {ball_idx}: {max_event}")
+
+        final_event = self.summary.get_final_event(fly_idx, ball_idx)
+        print(f"Final event for fly {fly_idx}, ball {ball_idx}: {final_event}")
 
         metrics = {}
         previous_success = None  # To store the success of the previous event
@@ -90,6 +113,12 @@ class InteractionsMetrics:
             # Major event (1 if displacement > major event threshold, else 0)
             major_event = int(displacement > self.fly.config.major_event_threshold)
 
+            # Max event (1 if it is, 0 if not)
+            is_max_event = 1 if event_idx == max_event[0] else 0
+
+            # Final event (1 if it is, 0 if not)
+            is_final_event = 1 if event_idx == final_event[0] else 0
+
             # Ball velocity during the interaction
             ball_velocity = displacement / duration if duration > 0 else 0
 
@@ -112,8 +141,11 @@ class InteractionsMetrics:
                 "direction": direction,
                 "significant": significant,
                 "major_event": major_event,
+                "max_event": is_max_event,
+                "final_event": is_final_event,
                 "ball_velocity": ball_velocity,
                 "efficiency_diff": efficiency_diff,
+                "event_type": event_type,
             }
 
         return metrics
@@ -152,7 +184,7 @@ class InteractionsMetrics:
 
     def _determine_event_direction(self, fly_idx, ball_idx, start_idx, end_idx):
         """
-        Determine the direction of an event (push or pull).
+        Determine the direction of an event (push or pull) if the event is significant.
 
         Args:
             fly_idx (int): Index of the fly.
@@ -161,11 +193,12 @@ class InteractionsMetrics:
             end_idx (int): End index of the event.
 
         Returns:
-            str: "push", "pull", or "unknown".
+            int: 1 for "push", -1 for "pull", or 0 if the event is not significant.
         """
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
+        # Calculate the median coordinates for the fly and ball
         start_fly_x, start_fly_y, _, _ = self._calculate_median_coordinates(
             fly_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="thorax"
         )
@@ -173,15 +206,24 @@ class InteractionsMetrics:
             ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
         )
 
+        # Calculate the displacement of the ball during the event
+        displacement = self._calculate_euclidean_distance(start_ball_x, start_ball_y, end_ball_x, end_ball_y)
+
+        # Check if the event is significant
+        if displacement <= self.fly.config.significant_threshold:
+            return 0  # Not significant, set direction to 0
+
+        # Calculate the distances between the fly and the ball
         start_distance = self._calculate_euclidean_distance(start_fly_x, start_fly_y, start_ball_x, start_ball_y)
         end_distance = self._calculate_euclidean_distance(start_fly_x, start_fly_y, end_ball_x, end_ball_y)
 
+        # Determine the direction
         if end_distance > start_distance:
-            return 1
+            return 1  # Push
         elif end_distance < start_distance:
-            return -1
+            return -1  # Pull
         else:
-            return None
+            return 0  # No change
 
     def get_chamber_exit_time(self, fly_idx, ball_idx):
         """

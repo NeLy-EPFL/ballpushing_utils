@@ -174,67 +174,37 @@ class SkeletonMetrics:
 
         return event, event_index
 
-    def compute_events_based_contacts(self, generate_random=True):
+    def compute_events_based_contacts(self):
         """
-        List fly relative tracking data associated with interaction events with optional random negative examples.
+        List fly relative tracking data associated with interaction events and random negative examples.
         """
-
-        generate_random = self.fly.config.generate_random
 
         events = []
-        all_event_intervals = []
 
+        # Process standardized interaction events
         if hasattr(self.fly.tracking_data, "standardized_interactions"):
-            # Collect all interaction intervals for exclusion
-            for (
-                fly_idx,
-                ball_idx,
-            ), event_list in self.fly.tracking_data.standardized_interactions.items():
-                for event in event_list:
-                    start_frame = event[0]
-                    end_frame = event[1]
-                    all_event_intervals.append((start_frame, end_frame))
-
-        else:
-            print("No standardized interactions found")
-
-        event_counter = 0
-        if (
-            hasattr(self.fly.tracking_data, "standardized_interactions")
-            and self.fly.tracking_data.standardized_interactions
-        ):
-
-            for (
-                fly_idx,
-                ball_idx,
-            ), event_list in self.fly.tracking_data.standardized_interactions.items():
-                for event in event_list:
+            for (fly_idx, ball_idx), event_list in self.fly.tracking_data.standardized_interactions.items():
+                for event_counter, event in enumerate(event_list):
                     if len(event) != 2:
                         print(f"Skipping malformed event: {event}")
                         continue
 
-                    start_frame = int(event[0])
-                    end_frame = int(event[1])
-
-                    # Convert to actual indices
-                    start_idx = start_frame
-                    end_idx = end_frame
+                    start_frame, end_frame = int(event[0]), int(event[1])
 
                     # Validate indices
-                    if start_idx >= len(self.fly_centered_tracks) or end_idx > len(self.fly_centered_tracks):
+                    if start_frame >= len(self.fly_centered_tracks) or end_frame > len(self.fly_centered_tracks):
                         print(
-                            f"Invalid event bounds {start_idx}-{end_idx} for track length {len(self.fly_centered_tracks)}"
+                            f"Invalid event bounds {start_frame}-{end_frame} for track length {len(self.fly_centered_tracks)}"
                         )
                         continue
 
-                    # Process event data
-                    event_data = self.fly_centered_tracks.iloc[start_idx:end_idx].copy()
-
+                    # Process interaction event data
+                    event_data = self.fly_centered_tracks.iloc[start_frame:end_frame].copy()
                     event_data["event_id"] = event_counter
-                    event_data["time_rel_onset"] = (event_data.index - start_idx) / self.fly.experiment.fps
+                    event_data["time_rel_onset"] = (event_data.index - start_frame) / self.fly.experiment.fps
                     event_data["fly_idx"] = fly_idx
                     event_data["ball_idx"] = ball_idx
-                    event_data["adjusted_frame"] = range(end_idx - start_idx)
+                    event_data["adjusted_frame"] = range(end_frame - start_frame)
                     event_data["event_type"] = "interaction"
 
                     # Calculate ball displacement
@@ -246,95 +216,49 @@ class SkeletonMetrics:
 
                     events.append(event_data)
 
-                    # Generate random negative example if requested
-                    if generate_random:
-                        random_data = self._generate_random_chunk(
-                            desired_length=end_idx - start_idx,
-                            exclude_intervals=all_event_intervals,
-                            exclude_interactions=self.fly.config.random_exclude_interactions,
-                            interaction_map=self.fly.config.random_interaction_map,
-                        )
-                        if random_data is not None:
-                            random_data["event_id"] = event_counter
-                            random_data["event_type"] = "random"
-                            random_data["fly_idx"] = fly_idx
-                            random_data["ball_idx"] = ball_idx
-                            events.append(random_data)
+        else:
+            print("No standardized interactions found")
 
-                    event_counter += 1
+        if self.fly.config.generate_random:
+            # Process standardized random events
+            if hasattr(self.fly.tracking_data, "standardized_random_events"):
+                for (fly_idx, ball_idx), random_event_list in self.fly.tracking_data.standardized_random_events.items():
+                    for event_counter, random_event in enumerate(random_event_list):
+                        if len(random_event) != 2:
+                            print(f"Skipping malformed random event: {random_event}")
+                            continue
+
+                        start_frame, end_frame = int(random_event[0]), int(random_event[1])
+
+                        # Validate indices
+                        if start_frame >= len(self.fly_centered_tracks) or end_frame > len(self.fly_centered_tracks):
+                            print(
+                                f"Invalid random event bounds {start_frame}-{end_frame} for track length {len(self.fly_centered_tracks)}"
+                            )
+                            continue
+
+                        # Process random event data
+                        random_data = self.fly_centered_tracks.iloc[start_frame:end_frame].copy()
+                        random_data["event_id"] = event_counter
+                        random_data["time_rel_onset"] = (random_data.index - start_frame) / self.fly.experiment.fps
+                        random_data["fly_idx"] = fly_idx
+                        random_data["ball_idx"] = ball_idx
+                        random_data["adjusted_frame"] = range(end_frame - start_frame)
+                        random_data["event_type"] = "random"
+
+                        # Calculate ball displacement
+                        ball_disp = np.sqrt(
+                            (random_data["x_centre_preprocessed"] - random_data["x_centre_preprocessed"].iloc[0]) ** 2
+                            + (random_data["y_centre_preprocessed"] - random_data["y_centre_preprocessed"].iloc[0]) ** 2
+                        )
+                        random_data["ball_displacement"] = ball_disp
+
+                        events.append(random_data)
+
+        else:
+            print("No standardized random events found")
 
         return pd.concat(events).reset_index(drop=True) if events else pd.DataFrame()
-
-    def _generate_random_chunk(
-        self,
-        desired_length,
-        exclude_intervals,
-        exclude_interactions=True,
-        interaction_map="full",
-    ):
-        """Generate random chunk of tracking data that doesn't overlap with any events"""
-        max_start = len(self.fly_centered_tracks) - desired_length
-
-        if max_start <= 0:
-            return None
-
-        for _ in range(100):  # Try up to 100 times to find non-overlapping segment
-            random_start = np.random.randint(0, max_start)
-            random_end = random_start + desired_length
-
-            # Check overlap with existing events
-            overlap = False
-            for ex_start, ex_end in exclude_intervals:
-                if (random_start < ex_end) and (random_end > ex_start):
-                    overlap = True
-                    break
-
-            if not overlap:
-                if exclude_interactions:
-                    if interaction_map == "full":
-                        # Collect ALL interaction event intervals across flies/balls
-                        interaction_frames = [
-                            (event[0], event[1])
-                            for fly_dict in self.fly.tracking_data.interaction_events.values()
-                            for ball_events in fly_dict.values()
-                            for event in ball_events
-                        ]
-                    elif interaction_map == "onset":
-                        # Existing onset handling (correct)
-                        interaction_frames = [
-                            (onset, onset + desired_length)
-                            for _, onsets in self.fly.tracking_data.interactions_onsets.items()
-                            for onset in onsets
-                        ]
-                    else:
-                        raise ValueError("Invalid interaction_map. Use 'full' or 'onset'.")
-
-                    # Ensure interaction_frames is a list of tuples
-                    if isinstance(interaction_frames, dict):
-                        interaction_frames = [(start, end) for start, end in interaction_frames.items()]
-                    elif isinstance(interaction_frames, list) and all(isinstance(i, int) for i in interaction_frames):
-                        interaction_frames = [(i, i + desired_length) for i in interaction_frames]
-
-                    for ex_start, ex_end in interaction_frames:
-                        if (random_start < ex_end) and (random_end > ex_start):
-                            overlap = True
-                            break
-
-                if not overlap:
-                    random_data = self.fly_centered_tracks.iloc[random_start:random_end].copy()
-                    random_data["time_rel_onset"] = np.nan
-                    random_data["adjusted_frame"] = range(desired_length)
-
-                    # Calculate ball displacement (should be near zero for non-events)
-                    ball_disp = np.sqrt(
-                        (random_data["x_centre_preprocessed"] - random_data["x_centre_preprocessed"].iloc[0]) ** 2
-                        + (random_data["y_centre_preprocessed"] - random_data["y_centre_preprocessed"].iloc[0]) ** 2
-                    )
-                    random_data["ball_displacement"] = ball_disp
-
-                    return random_data
-
-        return None
 
     def get_final_contact(self, threshold=None, init=False):
         if threshold is None:

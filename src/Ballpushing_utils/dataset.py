@@ -445,10 +445,11 @@ class Dataset:
 
             # Iterate over all events for this fly-ball combination
             for event_idx, metrics in events.items():
-                # Add fly_idx, ball_idx, and event_idx to the metrics
+                # Add fly_idx, ball_idx, event_idx, and event_type to the metrics
                 metrics["fly_idx"] = fly_idx
                 metrics["ball_idx"] = ball_idx
                 metrics["event_id"] = event_idx  # Add event_id explicitly
+                metrics["event_type"] = metrics.get("event_type", "unknown")  # Ensure event_type is present
 
                 # Append the metrics to the event data
                 event_data.append(metrics)
@@ -723,7 +724,10 @@ class Dataset:
         return dataset
 
     def _prepare_framewise_dataset(self, fly):
-        """Prepares a dataset regrouping individual interactions metrics including standardized contacts, tracking data, displacements, duration, etc."""
+        """
+        Prepares a dataset regrouping individual interactions metrics including standardized contacts,
+        tracking data, displacements, duration, etc., and integrates event metrics.
+        """
 
         # Extract the events-based contacts data
         data = fly.skeleton_metrics.events_based_contacts
@@ -737,13 +741,18 @@ class Dataset:
         groupby_columns = ["event_id", "event_type"] if "event_type" in data.columns else ["event_id"]
         groups = data.groupby(groupby_columns)
 
+        # Fetch the event metrics dataset
+        event_metrics_df = self._prepare_dataset_event_metrics(fly)
+
+        # print(f"Event metrics DataFrame: {event_metrics_df.head}")
+
         framewise_data = []
 
         for group_key, group in groups:
             event_id = group_key[0]
             event_type = group_key[1] if len(group_key) > 1 else None
 
-            event_df = data[data["event_id"] == event_id]
+            event_df = data[(data["event_id"] == event_id) & (data["event_type"] == event_type)]
 
             # Initialize the row with basic metadata
             row = {
@@ -757,16 +766,32 @@ class Dataset:
                 group = group.drop(columns=[col for col in group.columns if "centre" in col])
 
             # Add transposed keypoints
-            row.update(self._transpose_keypoints(fly, event_df, event_id=event_id))
+            row.update(self._transpose_keypoints(fly, event_df, event_id=event_id, event_type=event_type))
 
             # Add frame-based features (velocity, angles, etc.)
-            row.update(self._calculate_frame_features(fly, event_df, event_id=event_id))
+            row.update(self._calculate_frame_features(fly, event_df, event_id=event_id, event_type=event_type))
 
             # Add statistical measures
-            row.update(self._calculate_statistical_measures(fly, event_df, keypoint_columns, event_id=event_id))
+            row.update(
+                self._calculate_statistical_measures(
+                    fly, event_df, keypoint_columns, event_id=event_id, event_type=event_type
+                )
+            )
 
             # Add Fourier features
-            row.update(self._calculate_fourier_features(fly, event_df, keypoint_columns, event_id=event_id))
+            row.update(
+                self._calculate_fourier_features(
+                    fly, event_df, keypoint_columns, event_id=event_id, event_type=event_type
+                )
+            )
+
+            # Add event metrics if available
+            if not event_metrics_df.empty:
+                event_metrics = event_metrics_df[
+                    (event_metrics_df["event_id"] == event_id) & (event_metrics_df["event_type"] == event_type)
+                ]
+                if not event_metrics.empty:
+                    row.update(event_metrics.iloc[0].to_dict())
 
             # Append the row to the framewise data
             framewise_data.append(row)
@@ -845,7 +870,7 @@ class Dataset:
 
         return transformed_df
 
-    def _transpose_keypoints(self, fly, data, event_id):
+    def _transpose_keypoints(self, fly, data, event_id, event_type):
         """Transpose tracking keypoints to end up with one row per event."""
         try:
             # Define regex patterns for keypoints
@@ -853,10 +878,12 @@ class Dataset:
             keypoint_columns = data.filter(regex=keypoint_patterns).columns
 
             # Add frame count for pivoting
-            data = data.assign(frame_count=data.groupby(["event_id", "adjusted_frame"]).cumcount())
+            data = data.assign(frame_count=data.groupby(["event_id", "event_type", "adjusted_frame"]).cumcount())
 
             # Pivot all keypoints at once
-            pivoted = data.pivot(index="event_id", columns=["adjusted_frame", "frame_count"], values=keypoint_columns)
+            pivoted = data.pivot(
+                index=["event_id", "event_type"], columns=["adjusted_frame", "frame_count"], values=keypoint_columns
+            )
 
             # Flatten the multi-index columns and rename them
             pivoted.columns = [
@@ -864,20 +891,21 @@ class Dataset:
             ]
 
             # Convert to dictionary
-            transposed = pivoted.iloc[0].to_dict() if not pivoted.empty else {}
+            transposed = pivoted.loc[(event_id, event_type)].to_dict() if not pivoted.empty else {}
 
             return transposed
         except Exception as e:
-            print(f"Error in _transpose_keypoints for event_id {event_id}: {e}")
+            print(f"Error in _transpose_keypoints for event_id {event_id}, event_type {event_type}: {e}")
             return {}
 
-    def _calculate_frame_features(self, fly, data, event_id):
+    def _calculate_frame_features(self, fly, data, event_id, event_type):
         """Calculate per-frame velocity and angles using original coordinates."""
         features = {}
 
         try:
-            # Ensure the DataFrame is sorted
-            event_df = data.sort_values("adjusted_frame").reset_index(drop=True)
+            # Filter data for the specific event_id and event_type
+            event_df = data[(data["event_id"] == event_id) & (data["event_type"] == event_type)]
+            event_df = event_df.sort_values("adjusted_frame").reset_index(drop=True)
 
             # Define keypoints
             base_keypoints = {
@@ -918,52 +946,62 @@ class Dataset:
                 )
 
         except Exception as e:
-            print(f"Error in _calculate_frame_features for event_id {event_id}: {e}")
+            print(f"Error in _calculate_frame_features for event_id {event_id}, event_type {event_type}: {e}")
 
         return features
 
-    def _calculate_statistical_measures(self, fly, data, keypoint_columns, event_id, fly_relative=True):
+    def _calculate_statistical_measures(self, fly, data, keypoint_columns, event_id, event_type, fly_relative=True):
         """Calculate statistical measures for keypoints."""
         results = {}
 
         try:
+            # Filter data for the specific event_id and event_type
+            event_df = data[(data["event_id"] == event_id) & (data["event_type"] == event_type)]
+
             # Filter keypoint columns based on fly_relative
             if fly_relative:
                 keypoint_columns = [col for col in keypoint_columns if "_fly" in col]
 
             if not keypoint_columns:
-                print(f"No keypoint columns found for statistical measures in event_id {event_id}.")
+                print(
+                    f"No keypoint columns found for statistical measures in event_id {event_id}, event_type {event_type}."
+                )
                 return results
 
             # Vectorized statistical calculations
             for col in keypoint_columns:
-                col_values = data[col].values
+                col_values = event_df[col].values
                 results[f"{col}_mean"] = np.nanmean(col_values)
                 results[f"{col}_std"] = np.nanstd(col_values)
                 results[f"{col}_skew"] = pd.Series(col_values).skew()
                 results[f"{col}_kurt"] = pd.Series(col_values).kurtosis()
 
         except Exception as e:
-            print(f"Error in _calculate_statistical_measures for event_id {event_id}: {e}")
+            print(f"Error in _calculate_statistical_measures for event_id {event_id}, event_type {event_type}: {e}")
 
         return results
 
-    def _calculate_fourier_features(self, fly, data, keypoint_columns, event_id, fly_relative=True):
+    def _calculate_fourier_features(self, fly, data, keypoint_columns, event_id, event_type, fly_relative=True):
         """Calculate Fourier features for keypoints."""
         fft_results = {}
 
         try:
+            # Filter data for the specific event_id and event_type
+            event_df = data[(data["event_id"] == event_id) & (data["event_type"] == event_type)]
+
             # Filter keypoint columns based on fly_relative
             if fly_relative:
                 keypoint_columns = [col for col in keypoint_columns if "_fly" in col]
 
             if not keypoint_columns:
-                print(f"No keypoint columns found for Fourier features in event_id {event_id}.")
+                print(
+                    f"No keypoint columns found for Fourier features in event_id {event_id}, event_type {event_type}."
+                )
                 return fft_results
 
             # Vectorized Fourier calculations
             for col in keypoint_columns:
-                col_values = data[col].values
+                col_values = event_df[col].values
                 if len(col_values) < 2:  # Ensure sufficient data for FFT
                     continue
 
@@ -974,7 +1012,7 @@ class Dataset:
                 fft_results[f"{col}_dom_freq_magnitude"] = np.abs(fft_vals[dominant_freq])
 
         except Exception as e:
-            print(f"Error in _calculate_fourier_features for event_id {event_id}: {e}")
+            print(f"Error in _calculate_fourier_features for event_id {event_id}, event_type {event_type}: {e}")
 
         return fft_results
 
