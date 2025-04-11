@@ -80,10 +80,8 @@ class InteractionsMetrics:
         )
 
         max_event = self.summary.get_max_event(fly_idx, ball_idx)
-        print(f"Max event for fly {fly_idx}, ball {ball_idx}: {max_event}")
 
         final_event = self.summary.get_final_event(fly_idx, ball_idx)
-        print(f"Final event for fly {fly_idx}, ball {ball_idx}: {final_event}")
 
         metrics = {}
         previous_success = None  # To store the success of the previous event

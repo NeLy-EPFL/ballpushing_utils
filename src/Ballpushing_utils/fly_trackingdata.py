@@ -125,13 +125,10 @@ class FlyTrackingData:
         # TODO: that's gonna be an issue for F1, we'll look at it later.
         final_event = ballpushing_metrics.get_final_event(0, 0)
 
-        print(f"Final event for fly {0}, ball {0}: {final_event}")
-
         # Check if the final event is not None
         if final_event is not None:
             # Set the cutoff reference to the end of the final event
             self.cutoff_reference = final_event[2] + 1  # Adding 1 to include the last frame
-            print(f"Cutoff reference set to: {self.cutoff_reference}s (Frame {final_event[1]})")
 
         # Reset cached calculations
         for attr in [
