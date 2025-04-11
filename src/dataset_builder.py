@@ -36,7 +36,7 @@ CONFIG = {
     "PATHS": {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
-        "output_summary_dir": "250410_BallpushingMetrics",
+        "output_summary_dir": "250411_Transposed_test",
         "excluded_folders": [],
         "config_path": "config.json",
     },

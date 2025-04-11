@@ -305,6 +305,7 @@ class BallPushingMetrics:
 
         if distance_type == "max":
             max_distance = ball_data["euclidean_distance"].max() - threshold
+
             distance_check = (
                 lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= max_distance
             )
@@ -489,15 +490,21 @@ class BallPushingMetrics:
                 final_event_time = final_event[0] / self.fly.experiment.fps
                 if chamber_exit_time is not None:
                     final_event_time -= chamber_exit_time
+
+                final_event_end = final_event[1] / self.fly.experiment.fps
+
             else:
                 final_event_time = None
+                final_event_end = None
         else:
             if final_event:
                 final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+                final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
             else:
                 final_event_time = None
+                final_event_end = None
 
-        return final_event_idx, final_event_time
+        return final_event_idx, final_event_time, final_event_end
 
     def get_significant_events(self, fly_idx, ball_idx, distance=5):
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
