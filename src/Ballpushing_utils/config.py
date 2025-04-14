@@ -73,7 +73,7 @@ class Config:
 
     pause_threshold: int = 5
     pause_window: int = 5
-    pause_min_duration: int = 2
+    pause_min_duration: int = 5
 
     # Skeleton tracking configuration attributes
 

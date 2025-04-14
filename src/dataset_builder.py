@@ -36,14 +36,14 @@ CONFIG = {
     "PATHS": {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
-        "output_summary_dir": "250411_Transposed_test",
+        "output_summary_dir": "250411_Transposed_Ctrls",
         "excluded_folders": [],
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
         "pooled_prefix": "pooled",  # Base name for combined datasets
-        "metrics": ["event_metrics"],  # Metrics to process (add/remove as needed)
+        "metrics": ["transposed"],  # Metrics to process (add/remove as needed)
     },
 }
 

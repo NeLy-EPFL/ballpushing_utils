@@ -962,7 +962,8 @@ class BallPushingMetrics:
 
     def detect_pauses(self, fly_idx, threshold=None, window=None, minimum_duration=None):
         """
-        Detect pauses in the fly's movement based on skeleton keypoints.
+        Detect pauses in the fly's movement based on skeleton keypoints, excluding pauses
+        that occur when the fly is in the chamber.
 
         Parameters
         ----------
@@ -972,13 +973,14 @@ class BallPushingMetrics:
             Movement threshold in pixels to consider as a pause (default is 5).
         window : int, optional
             Number of frames to use for calculating movement (default is 5).
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for a pause to be considered valid (default is 2).
 
         Returns
         -------
         list of tuple
-            List of pauses, where each pause is represented as a tuple (start_frame, end_frame, duration).
+            List of pauses, where each pause is represented as a tuple (start_time, end_time, duration).
         """
-
         if threshold is None:
             threshold = self.fly.config.pause_threshold
         if window is None:
@@ -1011,7 +1013,6 @@ class BallPushingMetrics:
 
         # Identify chunks of static frames
         pauses = []
-        pauses_timestamps = []
         start_frame = None
 
         for i, static in enumerate(is_static_smoothed):
@@ -1021,7 +1022,19 @@ class BallPushingMetrics:
                 end_frame = i
                 duration = (end_frame - start_frame) / self.fly.experiment.fps
                 if duration >= minimum_duration:
-                    pauses.append((start_frame, end_frame, duration))
+                    # Check if the fly is in the chamber during the pause
+                    fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+                    start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+                    distances = Processing.calculate_euclidian_distance(
+                        fly_data["x_thorax"].iloc[start_frame:end_frame],
+                        fly_data["y_thorax"].iloc[start_frame:end_frame],
+                        start_x,
+                        start_y,
+                    )
+                    in_chamber = np.all(distances <= self.fly.config.chamber_radius)
+
+                    if not in_chamber:  # Exclude pauses in the chamber
+                        pauses.append((start_frame, end_frame, duration))
                 start_frame = None
 
         # Handle the case where a pause extends to the end of the recording
@@ -1029,19 +1042,29 @@ class BallPushingMetrics:
             end_frame = len(is_static_smoothed)
             duration = (end_frame - start_frame) / self.fly.experiment.fps
             if duration >= minimum_duration:
-                pauses.append((start_frame, end_frame, duration))
+                fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+                start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+                distances = Processing.calculate_euclidian_distance(
+                    fly_data["x_thorax"].iloc[start_frame:end_frame],
+                    fly_data["y_thorax"].iloc[start_frame:end_frame],
+                    start_x,
+                    start_y,
+                )
+                in_chamber = np.all(distances <= self.fly.config.chamber_radius)
+
+                if not in_chamber:  # Exclude pauses in the chamber
+                    pauses.append((start_frame, end_frame, duration))
 
         # Convert frame indices to timestamps
-        for pause in pauses:
-            start_frame, end_frame, duration = pause
-            start_time = start_frame / self.fly.experiment.fps
-            end_time = end_frame / self.fly.experiment.fps
-            pauses_timestamps.append((start_time, end_time, duration))
+        pauses_timestamps = [
+            (start_frame / self.fly.experiment.fps, end_frame / self.fly.experiment.fps, duration)
+            for start_frame, end_frame, duration in pauses
+        ]
 
         if self.fly.config.debugging:
             print(f"Detected pauses for fly {fly_idx}: {pauses_timestamps}")
 
-        return pauses
+        return pauses_timestamps
 
     def compute_pause_metrics(self, fly_idx, threshold=5, window=5, minimum_duration=2):
         """
