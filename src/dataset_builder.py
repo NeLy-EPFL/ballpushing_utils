@@ -3,6 +3,8 @@ import os
 import json
 import gc
 import psutil
+from datetime import datetime
+
 import concurrent.futures
 from tqdm import tqdm  # For progress bar
 import time
@@ -25,6 +27,15 @@ from Ballpushing_utils import utilities, config
 # individual flies. The script can also create pooled datasets for
 # easier analysis.
 
+# Available datasets:
+# - coordinates : Full coordinates of ball and fly positions over time
+# - event_metrics : individual event metrics for each fly
+# - summary : Summary of all events for each fly
+# - standardized_contacts : contact data reworked to be time standardized and fly centric
+# - transposed: standardized contacts + associated statistics transposed to be one row per event
+# - contact_data : skeleton data associated with individual events (redundant with Skeleton_contacts) => Should probably be reworked
+
+
 # Example usage:
 # python dataset_builder.py --mode experiment --yaml config.yaml
 # python dataset_builder.py --mode fly --yaml config.yaml
@@ -32,18 +43,23 @@ from Ballpushing_utils import utilities, config
 # ==================================================================
 # CONFIGURATION SECTION - EDIT THESE VALUES TO MODIFY BEHAVIOR
 # ==================================================================
+# Data root is where to find the raw videos and tracking data
+# dataset_dir is where to save the processed datasets
+# excluded_folders is a list of folders from data root to exclude from processing
+# config_path is the path to the configuration file for the experiment. It just sets the name of the json file which will be saved along with the experiment files.
+# experiment_filter can be used to select the experiments to process based on a substring in the folder name (e.g. TNT_Fine)
+# metrics is a list of metrics to process.
+
 CONFIG = {
     "PATHS": {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
-        "output_summary_dir": "250411_Transposed_Ctrls",
         "excluded_folders": [],
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "pooled_prefix": "pooled",  # Base name for combined datasets
-        "metrics": ["transposed"],  # Metrics to process (add/remove as needed)
+        "metrics": ["summary"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -51,9 +67,6 @@ CONFIG = {
 current_config = config.Config()
 print("Current ball pushing configurations:")
 current_config.print_config()
-
-# Automatically set output_data_dir based on output_summary_dir
-CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
 
 # ==================================================================
 # LOGGING CONFIGURATION
@@ -248,7 +261,35 @@ if __name__ == "__main__":
         default=4,
         help="Number of threads to use for parallel processing (default: 4)",
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Set the logging level (default: INFO)",
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(level=getattr(logging, args.log_level))
+
+    # Determine the output_summary_dir based on the provided arguments
+    today_date = datetime.now().strftime("%y%m%d")
+    dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
+
+    if args.yaml:
+        yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
+        CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
+    elif CONFIG["PROCESSING"]["experiment_filter"]:
+        experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
+        CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
+    else:
+        raise ValueError(
+            "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
+            "Processing the entire dataset is not allowed."
+        )
+
+    # Automatically set output_data_dir based on output_summary_dir
+    CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
 
     # Build derived paths from configuration
     output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
@@ -275,6 +316,9 @@ if __name__ == "__main__":
     # Exclude folders based on config list
     if CONFIG["PATHS"]["excluded_folders"]:
         Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
+
+    if not Exp_folders:
+        raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
 
     logging.info(f"Folders to analyze: {[f.name for f in Exp_folders]}")
 
@@ -431,7 +475,7 @@ if __name__ == "__main__":
     # Create pooled datasets
     # ==================================================================
     for metric in CONFIG["PROCESSING"]["metrics"]:
-        pooled_path = output_data / metric / f"{CONFIG['PROCESSING']['pooled_prefix']}_{metric}.feather"
+        pooled_path = output_data / metric / f"pooled_{metric}.feather"
 
         if not pooled_path.exists():
             try:
