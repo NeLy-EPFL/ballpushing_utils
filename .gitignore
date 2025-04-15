@@ -656,3 +656,6 @@ tests/integration/outputs/umap_optimisation_withNan/plots/scatter_n_neighbors=50
 tests/integration/outputs/umap_optimisation_withNan/plots/scatter_n_neighbors=50_min_dist=0.1_n_components=2_n_clusters=10_filter_features=True_feature_groups=\['tracking',_'statistical',_'fourier']_include_ball=False_use_pca=False.png
 tests/integration/outputs/umap_optimisation_withNan/plots/scatter_n_neighbors=50_min_dist=0.1_n_components=2_n_clusters=10_filter_features=True_feature_groups=\['tracking',_'statistical']_include_ball=False_use_pca=False.png
 tests/integration/outputs/umap_optimisation_withNan/plots/scatter_n_neighbors=50_min_dist=0.1_n_components=2_n_clusters=10_filter_features=True_feature_groups=\['tracking']_include_ball=False_use_pca=False.png
+src/Plotting/dashboard.html
+src/Plotting/jitterboxplot.html
+src/Plotting/summary_dashboard.html

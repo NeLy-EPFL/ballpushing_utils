@@ -53,13 +53,14 @@ from Ballpushing_utils import utilities, config
 CONFIG = {
     "PATHS": {
         "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/"),
         "excluded_folders": [],
+        "output_summary_dir": Path("250411_Transposed_Ctrls"),
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "metrics": ["summary"],  # Metrics to process (add/remove as needed)
+        "metrics": ["standardized_contacts"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -272,21 +273,26 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=getattr(logging, args.log_level))
 
-    # Determine the output_summary_dir based on the provided arguments
-    today_date = datetime.now().strftime("%y%m%d")
-    dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
-
-    if args.yaml:
-        yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
-        CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
-    elif CONFIG["PROCESSING"]["experiment_filter"]:
-        experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
-        CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
+    if CONFIG["PATHS"]["output_summary_dir"]:
+        # Use the output directory if provided
+        output_summary = Path(CONFIG["PATHS"]["output_summary_dir"])
+        logging.info(f"Using optional output directory: {output_summary}")
     else:
-        raise ValueError(
-            "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
-            "Processing the entire dataset is not allowed."
-        )
+        # Determine the output_summary_dir based on the provided arguments
+        today_date = datetime.now().strftime("%y%m%d")
+        dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
+
+        if args.yaml:
+            yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
+            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
+        elif CONFIG["PROCESSING"]["experiment_filter"]:
+            experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
+            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
+        else:
+            raise ValueError(
+                "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
+                "Processing the entire dataset is not allowed."
+            )
 
     # Automatically set output_data_dir based on output_summary_dir
     CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
