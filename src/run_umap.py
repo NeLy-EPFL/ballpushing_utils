@@ -3,6 +3,7 @@ import argparse
 import os
 from Ballpushing_utils.behavior_umap import BehaviorUMAP
 
+
 def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Run UMAP on a dataset and log results.")
@@ -25,6 +26,17 @@ def main():
 
     print(f"Loading dataset from {args.input_file}...")
     data = pd.read_feather(args.input_file)
+
+    # Replace any value that's 9999 with NaN
+    print("Replacing 9999 with NaN...")
+    data = data.replace(9999, 0)
+
+    # Check if there is any remaining 9999 and check if there are any NaN values
+
+    if (data == 9999).any().any():
+        print("Warning: 9999 values still present in the dataset.")
+    if data.isna().any().any():
+        print("Warning: NaN values present in the dataset.")
 
     if args.output_file is None:
         # Set output file to input directory with umap name
@@ -53,6 +65,7 @@ def main():
     )
 
     print(f"UMAP and clustering completed. Results saved to {args.output_file}.")
+
 
 if __name__ == "__main__":
     main()

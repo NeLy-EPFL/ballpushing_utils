@@ -723,6 +723,66 @@ class Dataset:
 
         return dataset
 
+    def _prepare_transformed_dataset(self, fly):
+        """Prepares a dataset regrouping individual interactions metrics including standardized contacts, tracking data, displacements, duration, etc."""
+
+        # Extract the events-based contacts data
+        data = fly.skeleton_metrics.events_based_contacts
+
+        # Identify keypoint and metadata columns
+        keypoint_columns = data.filter(regex="^(x|y)_").columns
+        metadata_columns = data.columns.difference(keypoint_columns)
+
+        # Group data by event_id, and optionally event_type
+        groups = (
+            list(data.groupby(["event_id", "event_type"]))
+            if "event_type" in data.columns
+            else list(data.groupby(["event_id"]))
+        )
+
+        transformed_data = []
+
+        # Fetch event-level metrics once to avoid redundant calculations
+        event_metrics_df = self._prepare_dataset_event_metrics(fly)
+
+        for group_key, group in groups:
+            # Compute duration and metadata for the group
+            duration = group["frame"].max() - group["frame"].min() + 1
+            metadata = group[metadata_columns].iloc[0].to_dict()
+
+            # Initialize the row with basic metadata and duration
+            row = {
+                "fly": fly.metadata.name,
+                "event_id": group_key[0],
+                "event_type": group_key[1] if len(group_key) > 1 else None,
+                "start": group["time"].iloc[0],
+                "end": group["time"].iloc[-1],
+                "start_frame": group["frame"].iloc[0],
+                "end_frame": group["frame"].iloc[-1],
+                "duration": duration,
+            }
+
+            # Add event-level metrics (avoiding duplicates)
+            if "event_id" in event_metrics_df.columns:
+                event_metrics = event_metrics_df[event_metrics_df["event_id"] == group_key[0]].iloc[0].to_dict()
+                row.update(event_metrics)
+
+            # Add metadata columns
+            for col in metadata_columns:
+                row[col] = metadata[col] if col in metadata else None
+
+            # Append the row to the transformed data
+            transformed_data.append(row)
+
+        # Convert the transformed data into a DataFrame
+        transformed_df = pd.DataFrame(transformed_data)
+
+        # Add trial information if applicable
+        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
+            transformed_df = self._add_trial_information(transformed_df, fly)
+
+        return transformed_df
+
     def _prepare_framewise_dataset(self, fly):
         """
         Prepares a dataset regrouping individual interactions metrics including standardized contacts,
@@ -809,66 +869,6 @@ class Dataset:
         framewise_df = self._add_metadata(framewise_df, fly)
 
         return framewise_df
-
-    def _prepare_transformed_dataset(self, fly):
-        """Prepares a dataset regrouping individual interactions metrics including standardized contacts, tracking data, displacements, duration, etc."""
-
-        # Extract the events-based contacts data
-        data = fly.skeleton_metrics.events_based_contacts
-
-        # Identify keypoint and metadata columns
-        keypoint_columns = data.filter(regex="^(x|y)_").columns
-        metadata_columns = data.columns.difference(keypoint_columns)
-
-        # Group data by event_id, and optionally event_type
-        groups = (
-            list(data.groupby(["event_id", "event_type"]))
-            if "event_type" in data.columns
-            else list(data.groupby(["event_id"]))
-        )
-
-        transformed_data = []
-
-        # Fetch event-level metrics once to avoid redundant calculations
-        event_metrics_df = self._prepare_dataset_event_metrics(fly)
-
-        for group_key, group in groups:
-            # Compute duration and metadata for the group
-            duration = group["frame"].max() - group["frame"].min() + 1
-            metadata = group[metadata_columns].iloc[0].to_dict()
-
-            # Initialize the row with basic metadata and duration
-            row = {
-                "fly": fly.metadata.name,
-                "event_id": group_key[0],
-                "event_type": group_key[1] if len(group_key) > 1 else None,
-                "start": group["time"].iloc[0],
-                "end": group["time"].iloc[-1],
-                "start_frame": group["frame"].iloc[0],
-                "end_frame": group["frame"].iloc[-1],
-                "duration": duration,
-            }
-
-            # Add event-level metrics (avoiding duplicates)
-            if "event_id" in event_metrics_df.columns:
-                event_metrics = event_metrics_df[event_metrics_df["event_id"] == group_key[0]].iloc[0].to_dict()
-                row.update(event_metrics)
-
-            # Add metadata columns
-            for col in metadata_columns:
-                row[col] = metadata[col] if col in metadata else None
-
-            # Append the row to the transformed data
-            transformed_data.append(row)
-
-        # Convert the transformed data into a DataFrame
-        transformed_df = pd.DataFrame(transformed_data)
-
-        # Add trial information if applicable
-        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
-            transformed_df = self._add_trial_information(transformed_df, fly)
-
-        return transformed_df
 
     def _transpose_keypoints(self, fly, data, event_id, event_type):
         """Transpose tracking keypoints to end up with one row per event."""
