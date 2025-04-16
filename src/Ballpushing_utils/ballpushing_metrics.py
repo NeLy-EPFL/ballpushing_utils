@@ -143,7 +143,7 @@ class BallPushingMetrics:
                     "pulling_ratio": (
                         len(events_direction[1]) / (len(events_direction[0]) + len(events_direction[1]))
                         if (len(events_direction[0]) + len(events_direction[1])) > 0
-                        else np.nan
+                        else -1
                     ),
                     "success_direction": metrics["success_direction"](),
                     "interaction_proportion": (
@@ -409,12 +409,12 @@ class BallPushingMetrics:
                 if chamber_exit_time is not None:
                     max_event_time -= chamber_exit_time
             else:
-                max_event_time = None
+                max_event_time = self.tracking_data.duration
         else:
             if max_event:
                 max_event_time = (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
             else:
-                max_event_time = None
+                max_event_time = self.tracking_data.duration
 
         return max_event_idx, max_event_time
 
@@ -494,14 +494,14 @@ class BallPushingMetrics:
                 final_event_end = final_event[1] / self.fly.experiment.fps
 
             else:
-                final_event_time = None
+                final_event_time = self.tracking_data.duration
                 final_event_end = None
         else:
             if final_event:
                 final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
                 final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
             else:
-                final_event_time = None
+                final_event_time = self.tracking_data.duration
                 final_event_end = None
 
         return final_event_idx, final_event_time, final_event_end
@@ -559,7 +559,7 @@ class BallPushingMetrics:
 
             return first_significant_event_idx, first_significant_event_time
         else:
-            return None, None
+            return -1, self.tracking_data.duration
 
     def check_yball_variation(self, event, ball_data, threshold=None):
 
@@ -821,7 +821,7 @@ class BallPushingMetrics:
 
             return major_event_idx, major_event_time
         else:
-            return None, None
+            return -1, self.tracking_data.duration
 
     def get_insight_effect(self, fly_idx, ball_idx, epsilon=1e-6, strength_threshold=2):
         """
@@ -1024,7 +1024,9 @@ class BallPushingMetrics:
                 if duration >= minimum_duration:
                     # Check if the fly is in the chamber during the pause
                     fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
-                    start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+                    start_x, start_y, _, _ = self._calculate_median_coordinates(
+                        fly_data, start_idx=0, window=10, keypoint="thorax"
+                    )
                     distances = Processing.calculate_euclidian_distance(
                         fly_data["x_thorax"].iloc[start_frame:end_frame],
                         fly_data["y_thorax"].iloc[start_frame:end_frame],
@@ -1043,7 +1045,9 @@ class BallPushingMetrics:
             duration = (end_frame - start_frame) / self.fly.experiment.fps
             if duration >= minimum_duration:
                 fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
-                start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+                start_x, start_y, _, _ = self._calculate_median_coordinates(
+                    fly_data, start_idx=0, window=10, keypoint="thorax"
+                )
                 distances = Processing.calculate_euclidian_distance(
                     fly_data["x_thorax"].iloc[start_frame:end_frame],
                     fly_data["y_thorax"].iloc[start_frame:end_frame],
@@ -1292,14 +1296,14 @@ class BallPushingMetrics:
                 displacements_after_failure.append(displacement_n)
 
         # Compute averages
-        avg_displacement_after_success = np.mean(displacements_after_success) if displacements_after_success else np.nan
-        avg_displacement_after_failure = np.mean(displacements_after_failure) if displacements_after_failure else np.nan
+        avg_displacement_after_success = np.mean(displacements_after_success) if displacements_after_success else 0
+        avg_displacement_after_failure = np.mean(displacements_after_failure) if displacements_after_failure else 0
 
         # Compute influence ratio
         if avg_displacement_after_failure > 0:
             influence_ratio = avg_displacement_after_success / avg_displacement_after_failure
         else:
-            influence_ratio = np.nan
+            influence_ratio = 0
 
         return {
             "avg_displacement_after_success": avg_displacement_after_success,
