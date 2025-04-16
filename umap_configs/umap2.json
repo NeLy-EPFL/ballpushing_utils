@@ -1,0 +1,17 @@
+{
+    "input_file": "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250411_Transposed_Ctrls_Data/transposed/pooled_transposed.feather",
+    "output_file": "/home/matthias/ballpushing_utils/tests/integration/outputs/umap2.feather",
+    "n_neighbors": 5,
+    "min_dist": 0.1,
+    "n_components": 2,
+    "n_clusters": 20,
+    "use_pca": false,
+    "filter_features": true,
+    "include_ball": false,
+    "feature_groups": [
+        "frame"
+    ],
+    "video_output_dir": "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_videos",
+    "interaction_data": "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250411_Transposed_Ctrls_Data/standardized_contacts/pooled_standardized_contacts.feather",
+    "best_disp": false
+}

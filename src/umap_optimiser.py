@@ -190,17 +190,6 @@ class UMAPOptimizer:
         print(f"Loading dataset from {self.dataset_path}...")
         data = pd.read_feather(self.dataset_path)
 
-        # Replace any value that's 9999 with NaN
-        print("Replacing 9999 with 0...")
-        data = data.replace(9999, 0)
-
-        # Check if there is any remaining 9999 and check if there are any NaN values
-
-        if (data == 9999).any().any():
-            print("Warning: 9999 values still present in the dataset.")
-        if data.isna().any().any():
-            print("Warning: NaN values present in the dataset.")
-
         # Generate all parameter combinations
         param_combinations = list(product(*self.param_grid.values()))
         param_names = list(self.param_grid.keys())
@@ -269,17 +258,17 @@ if __name__ == "__main__":
     all_combinations = list(chain.from_iterable(combinations(features, r) for r in range(1, len(features) + 1)))
     all_combinations = [list(comb) for comb in all_combinations]
 
-    sub_combinations = [["frame"], ["frame", "statistical"], ["frame", "statistical", "fourier"]]
+    sub_combinations = [["frame", "statistical", "fourier"]]
 
     param_grid = {
-        "n_neighbors": [50],
-        "min_dist": [0.1],
+        "n_neighbors": [5,15,30],
+        "min_dist": [0.05 ,0.1, 0.5],
         "n_components": [2],
-        "n_clusters": [10],
-        "filter_features": [False, True],
-        "feature_groups": all_combinations,
+        "n_clusters": [12],
+        "filter_features": [True],
+        "feature_groups": sub_combinations,
         "include_ball": [False],
-        "use_pca": [False, True],
+        "use_pca": [False],
     }
 
     # Paths

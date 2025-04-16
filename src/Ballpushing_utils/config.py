@@ -107,7 +107,7 @@ class Config:
     fly_only = True
 
     # hidden_value: int = -1
-    hidden_value: int = 9999
+    hidden_value: int = 0
 
     def print_config(self):
         """

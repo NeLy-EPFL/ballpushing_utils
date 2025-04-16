@@ -7,8 +7,15 @@ from sklearn.decomposition import IncrementalPCA, PCA
 import umap
 import os
 from Ballpushing_utils import dataset
+from numba import njit
+import numpy as np
 
-
+@njit
+def nan_safe_euclidean(a, b):
+    mask = ~np.isnan(a) & ~np.isnan(b)
+    if np.sum(mask) == 0:
+        return 0.0  # Both vectors are all NaN
+    return np.sqrt(np.nansum((a - b)**2))
 class BehaviorUMAP:
     def __init__(
         self,
@@ -132,10 +139,8 @@ class BehaviorUMAP:
             n_neighbors=self.n_neighbors,
             min_dist=self.min_dist,
             n_components=self.n_components,
-            metric="euclidean",
-            random_state=42,
-        )
-        return self.umap_model.fit_transform(features, ensure_all_finite="allow-nan")
+            random_state=42,)
+        return self.umap_model.fit_transform(features)
 
     def cluster_embeddings(self, embeddings):
         """
@@ -259,11 +264,11 @@ class BehaviorUMAP:
                               .merge(frame_ranges, on='unique_id'))
 
             # Add raw_displacement from Umap to event_metadata
-            event_metadata = event_metadata.merge(
-                Umap[['unique_id', 'raw_displacement']],
-                on='unique_id',
-                how='left'
-            )
+            # event_metadata = event_metadata.merge(
+            #     Umap[['unique_id', 'raw_displacement']],
+            #     on='unique_id',
+            #     how='left'
+            # )
 
             # Calculate grid layout based on max output dimensions
             cols = MAX_OUTPUT_WIDTH // MAX_CELL_HEIGHT  # Note the swapped dimensions
