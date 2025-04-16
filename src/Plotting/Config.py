@@ -103,6 +103,7 @@ color_dict = {
     "None": "#bcbd22",  # Yellow-green
     "fchON": "#17becf",  # Cyan
     "JON": "#ffbb78",  # Light orange
+    "DN": "#c5b0d5",  # Light purple
 }
 
 

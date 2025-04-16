@@ -52,15 +52,15 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/"),
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/"),
+        "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"),
         "excluded_folders": [],
-        "output_summary_dir": Path("250411_Transposed_Ctrls"),
+        "output_summary_dir": Path("250414_summary_TNT_screen"),
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "metrics": ["standardized_contacts"],  # Metrics to process (add/remove as needed)
+        "metrics": ["event_metrics"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -474,6 +474,15 @@ if __name__ == "__main__":
                     json.dump(list(processed_experiments), f)
             except Exception as e:
                 logging.error(f"Error processing experiment {exp_name}: {str(e)}")
+
+    if args.mode == "experiment":
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            logging.info(f"Removed checkpoint file: {checkpoint_file}")
+    elif args.mode == "fly":
+        if checkpoint_file.exists():
+            checkpoint_file.unlink()
+            logging.info(f"Removed checkpoint file: {checkpoint_file}")
 
     logging.info("Processing complete!")
 

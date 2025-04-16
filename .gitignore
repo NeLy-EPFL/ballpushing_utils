@@ -659,3 +659,8 @@ tests/integration/outputs/umap_optimisation_withNan/plots/scatter_n_neighbors=50
 src/Plotting/dashboard.html
 src/Plotting/jitterboxplot.html
 src/Plotting/summary_dashboard.html
+src/Plotting/permanova_results.csv
+src/Plotting/exLayout.png
+src/Plotting/jitterboxplot.png
+src/Plotting/pca_loadings.csv
+src/Plotting/pca_with_metadata.feather
