@@ -36,6 +36,7 @@ class Config:
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
     chamber_radius: int = 50
+    rolling_window: int = 10
 
     log_missing = True
     log_path = Utils.get_data_server() / "MD/MultiMazeRecorder"

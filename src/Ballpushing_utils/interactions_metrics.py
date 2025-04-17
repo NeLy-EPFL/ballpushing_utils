@@ -1,9 +1,4 @@
 import numpy as np
-import pandas as pd
-from typing import Any
-from sklearn.linear_model import LinearRegression
-from scipy.optimize import curve_fit
-from utils_behavior import Processing
 from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 
 
@@ -74,10 +69,15 @@ class InteractionsMetrics:
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
+        ball_data = self.precompute_rolling_medians(ball_data, window=10, keypoint="centre")
+        fly_data = self.precompute_rolling_medians(fly_data, window=10, keypoint="thorax")
+
         # Calculate the initial position of the ball
         initial_x, initial_y, _, _ = self._calculate_median_coordinates(
-            ball_data, start_idx=0, end_idx=len(ball_data), window=10, keypoint="centre"
+            ball_data, start_idx=0, end_idx=len(ball_data) - 1, keypoint="centre"
         )
+
+        print(f"Initial ball position: ({initial_x}, {initial_y})")
 
         max_event = self.summary.get_max_event(fly_idx, ball_idx)
 
@@ -94,7 +94,7 @@ class InteractionsMetrics:
 
             # Ball displacement
             start_x, start_y, end_x, end_y = self._calculate_median_coordinates(
-                ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+                ball_data, start_idx=start_idx, end_idx=end_idx, keypoint="centre"
             )
             displacement = self._calculate_euclidean_distance(start_x, start_y, end_x, end_y)
 
@@ -148,24 +148,47 @@ class InteractionsMetrics:
 
         return metrics
 
-    def _calculate_median_coordinates(self, data, start_idx, end_idx, window, keypoint):
+    def precompute_rolling_medians(self, data, window, keypoint):
         """
-        Calculate the median coordinates for the start and end of an event.
+        Precompute rolling medians for the given keypoint and store them in the dataset.
 
         Args:
             data (pd.DataFrame): DataFrame containing tracking data.
+            window (int): Number of frames to use for rolling median calculation.
+            keypoint (str): Keypoint to calculate rolling medians for.
+
+        Returns:
+            pd.DataFrame: DataFrame with added rolling median columns.
+        """
+        data[f"x_{keypoint}_rolling_median"] = data[f"x_{keypoint}"].rolling(window=window, center=True).median()
+        data[f"y_{keypoint}_rolling_median"] = data[f"y_{keypoint}"].rolling(window=window, center=True).median()
+
+        # replace NaN values with ffill and bfill
+        data[f"x_{keypoint}_rolling_median"].fillna(method="ffill", inplace=True)
+        data[f"x_{keypoint}_rolling_median"].fillna(method="bfill", inplace=True)
+        data[f"y_{keypoint}_rolling_median"].fillna(method="ffill", inplace=True)
+        data[f"y_{keypoint}_rolling_median"].fillna(method="bfill", inplace=True)
+
+        return data
+
+    def _calculate_median_coordinates(self, data, start_idx, end_idx, keypoint):
+        """
+        Retrieve the precomputed median coordinates for the start and end of an event.
+
+        Args:
+            data (pd.DataFrame): DataFrame containing tracking data with precomputed rolling medians.
             start_idx (int): Start index of the event.
             end_idx (int): End index of the event.
-            window (int): Number of frames to use for median calculation.
             keypoint (str): Keypoint to calculate coordinates for.
 
         Returns:
             tuple: Median x and y coordinates for the start and end of the event.
         """
-        start_x = data[f"x_{keypoint}"].iloc[start_idx : start_idx + window].median()
-        start_y = data[f"y_{keypoint}"].iloc[start_idx : start_idx + window].median()
-        end_x = data[f"x_{keypoint}"].iloc[end_idx - window : end_idx].median()
-        end_y = data[f"y_{keypoint}"].iloc[end_idx - window : end_idx].median()
+        start_x = data[f"x_{keypoint}_rolling_median"].iloc[start_idx]
+        start_y = data[f"y_{keypoint}_rolling_median"].iloc[start_idx]
+        end_x = data[f"x_{keypoint}_rolling_median"].iloc[end_idx]
+        end_y = data[f"y_{keypoint}_rolling_median"].iloc[end_idx]
+
         return start_x, start_y, end_x, end_y
 
     def _calculate_euclidean_distance(self, x1, y1, x2, y2):
@@ -198,10 +221,10 @@ class InteractionsMetrics:
 
         # Calculate the median coordinates for the fly and ball
         start_fly_x, start_fly_y, _, _ = self._calculate_median_coordinates(
-            fly_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="thorax"
+            fly_data, start_idx=start_idx, end_idx=end_idx, keypoint="thorax"
         )
         start_ball_x, start_ball_y, end_ball_x, end_ball_y = self._calculate_median_coordinates(
-            ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+            ball_data, start_idx=start_idx, end_idx=end_idx, keypoint="centre"
         )
 
         # Calculate the displacement of the ball during the event
@@ -237,8 +260,9 @@ class InteractionsMetrics:
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
         # Calculate the distance from the fly start position for each frame
-        distances = Processing.calculate_euclidian_distance(
-            fly_data["x_thorax"], fly_data["y_thorax"], self.tracking_data.start_x, self.tracking_data.start_y
+        distances = np.sqrt(
+            (fly_data["x_thorax"] - self.tracking_data.start_x) ** 2
+            + (fly_data["y_thorax"] - self.tracking_data.start_y) ** 2
         )
 
         # Debugging: Print distances

@@ -428,7 +428,6 @@ class Dataset:
         Returns:
             pandas.DataFrame: A DataFrame containing all events and their associated metrics.
         """
-
         # Initialize the InteractionsMetrics object
         interaction_metrics = fly.event_metrics
 
@@ -436,26 +435,21 @@ class Dataset:
             print(f"No interaction metrics found for fly {fly.metadata.name}")
             return pd.DataFrame()
 
-        # Initialize an empty list to store event data
-        event_data = []
-
-        # Iterate over all fly-ball combinations
-        for key, events in interaction_metrics.items():
-            fly_idx, ball_idx = map(int, key.split("_")[1::2])  # Extract fly_idx and ball_idx from the key
-
-            # Iterate over all events for this fly-ball combination
-            for event_idx, metrics in events.items():
-                # Add fly_idx, ball_idx, event_idx, and event_type to the metrics
-                metrics["fly_idx"] = fly_idx
-                metrics["ball_idx"] = ball_idx
-                metrics["event_id"] = event_idx  # Add event_id explicitly
-                metrics["event_type"] = metrics.get("event_type", "unknown")  # Ensure event_type is present
-
-                # Append the metrics to the event data
-                event_data.append(metrics)
+        # Preprocess keys and events into a flat structure
+        event_data = [
+            {
+                **metrics,
+                "fly_idx": int(key.split("_")[1]),
+                "ball_idx": int(key.split("_")[3]),
+                "event_id": event_idx,
+                "event_type": metrics.get("event_type", "unknown"),
+            }
+            for key, events in interaction_metrics.items()
+            for event_idx, metrics in events.items()
+        ]
 
         # Convert the event data to a DataFrame
-        event_df = pd.DataFrame(event_data)
+        event_df = pd.DataFrame.from_records(event_data)
 
         # Add metadata to the dataset
         event_df = self._add_metadata(event_df, fly)
