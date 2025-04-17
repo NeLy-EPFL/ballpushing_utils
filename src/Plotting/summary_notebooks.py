@@ -1,10 +1,13 @@
-from utils_behavior import HoloviewsTemplates
+from utils_behavior import HoloviewsTemplates, Processing
 import pandas as pd
 import holoviews as hv
 import panel as pn
 import Config
 from pathlib import Path
+import re
 
+
+import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -18,6 +21,9 @@ from bokeh.io.export import export_svgs
 
 hv.extension("bokeh")
 pn.extension()
+
+
+rg = np.random.default_rng()
 
 dataset = pd.read_feather(
     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
@@ -54,8 +60,8 @@ metric_names = [
     "major_event",
     "major_event_time",
     "major_event_first",
-    "insight_effect",
-    "insight_effect_log",
+    # "insight_effect",
+    # "insight_effect_log",
     "cumulated_breaks_duration",
     "chamber_time",
     "chamber_ratio",
@@ -126,8 +132,8 @@ learning_metrics = [
 ]
 
 insight_metrics = [
-    "insight_effect",
-    "insight_effect_log",
+    # "insight_effect",
+    # "insight_effect_log",
     "avg_displacement_after_success",
     "avg_displacement_after_failure",
     "influence_ratio",
@@ -156,6 +162,35 @@ metric_groups = {
 # Set metadata names
 metric_names = sum(metric_groups.values(), [])  # Flatten all metric sublists
 metadata_names = [col for col in dataset.columns if col not in metric_names]
+
+
+# For each column, handle missing values gracefully
+
+# For max event, first significant event, major event final event, if missing, set to -1
+dataset["max_event"].fillna(-1, inplace=True)
+dataset["first_significant_event"].fillna(-1, inplace=True)
+dataset["major_event"].fillna(-1, inplace=True)
+dataset["final_event"].fillna(-1, inplace=True)
+
+# For max event time, first significant event time, major event final event time, if missing, set to 3600
+dataset["max_event_time"].fillna(3600, inplace=True)
+dataset["first_significant_event_time"].fillna(3600, inplace=True)
+dataset["major_event_time"].fillna(3600, inplace=True)
+dataset["final_event_time"].fillna(3600, inplace=True)
+
+# Remove columns insight_effect, insight_effect_log, exit_time
+dataset.drop(columns=["insight_effect", "insight_effect_log", "exit_time"], inplace=True)
+
+# for pulling_ratio, avg_displacement_after_success, avg_displacement_before_success, and influence_ratio, if missing set to 0
+dataset["pulling_ratio"].fillna(0, inplace=True)
+dataset["avg_displacement_after_success"].fillna(0, inplace=True)
+dataset["avg_displacement_after_failure"].fillna(0, inplace=True)
+dataset["influence_ratio"].fillna(0, inplace=True)
+
+# Check which metrics have NA values
+na_metrics = dataset[metric_names].isna().sum()
+print("Metrics with NA values:")
+print(na_metrics[na_metrics > 0])
 
 
 def jitterboxplot(data, x, y, hue=None, palette="Set2", title=None, figsize=(10, 6), ax=None):
@@ -413,7 +448,7 @@ def generate_jitterboxplots_for_all_metrics(
 #     ncols=3,
 # )
 
-# Generate jitterboxplots for all metrics
+# # Generate jitterboxplots for all metrics
 
 # generate_jitterboxplots_for_all_metrics(
 #     data=dataset,
@@ -493,19 +528,530 @@ def generate_pca_jitterboxplots_by_brain_region(
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)  # Close the figure to free memory
 
+        # Make a 3D plot of the PCA components
+        # Ensure the 'hue' column is present in the data
+        if hue not in combined_data.columns:
+            raise ValueError(f"Column '{hue}' not found in the dataset.")
 
-# Example usage
-pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
-pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+        # Map the 'hue' values to their corresponding colors using the palette dictionary
+        if isinstance(palette, dict):
+            color_values = combined_data[hue].map(palette)
+        else:
+            raise ValueError("Palette must be a dictionary mapping Brain region values to colors.")
 
-generate_pca_jitterboxplots_by_brain_region(
-    pca_data=pca_results,
-    brain_regions=pca_brain_regions,
-    components=pca_components,
-    y="Nickname",  # Categorical column
-    output_dir=OUTPUT_DIR / "PCA_Layouts",
-    hue="Brain region",  # Optional grouping column
+        # Make a 3D plot of the PCA components
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+        ax.scatter(
+            combined_data[components[0]],
+            combined_data[components[1]],
+            combined_data[components[2]],
+            c=color_values,  # Use the mapped colors
+            s=50,
+            alpha=0.6,
+        )
+        ax.set_xlabel(components[0])
+        ax.set_ylabel(components[1])
+        ax.set_zlabel(components[2])
+        ax.set_title(f"3D PCA Plot for {brain_region}")
+        plt.tight_layout()
+
+        # Save the 3D plot
+        output_path_3d = region_dir / f"PCA_3D_{brain_region}.png"
+        plt.savefig(output_path_3d, dpi=300, bbox_inches="tight")
+        plt.close(fig)  # Close the figure to free memory
+
+
+# Generate PCA jitterboxplots by brain region
+
+
+# # Example usage
+# pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
+# pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+
+# generate_pca_jitterboxplots_by_brain_region(
+#     pca_data=pca_results,
+#     brain_regions=pca_brain_regions,
+#     components=pca_components,
+#     y="Nickname",  # Categorical column
+#     output_dir=OUTPUT_DIR / "PCA_Layouts",
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+#     ncols=3,  # 3 columns for PC1, PC2, and PC3
+# )
+
+
+def generate_pca_jitterboxplots_by_nickname(
+    pca_data, nicknames, components, y, output_dir, hue=None, palette="Set2", figsize=(10, 6), ncols=3
+):
+    """
+    Generates jitterboxplots of PCA components by Nickname and its associated control.
+
+    Parameters:
+        pca_data (pd.DataFrame): The PCA dataset containing components and metadata.
+        nicknames (list): List of unique Nicknames.
+        components (list): List of PCA components to plot (e.g., ["PC1", "PC2", "PC3"]).
+        y (str): The name of the column for the y-axis (categorical values).
+        output_dir (Path): Base directory to save the plots.
+        hue (str, optional): The name of the column for color grouping. Default is None.
+        palette (str or list, optional): Color palette for the plots. Default is "Set2".
+        figsize (tuple, optional): Size of each figure. Default is (10, 6).
+        ncols (int, optional): Number of columns in the grid layout. Default is 3.
+
+    Returns:
+        None
+    """
+    for nickname in nicknames:
+        print(f"Processing PCA for Nickname: {nickname}")
+
+        # Get the subset of data for the Nickname and its associated control
+        subset_data = Config.get_subset_data(pca_data, value=nickname)
+
+        if subset_data.empty:
+            print(f"Skipping {nickname} due to empty subset data.")
+            continue
+
+        # Sanitize the nickname to remove or replace special characters
+        safe_nickname = re.sub(r"[^\w\-_\. ]", "_", nickname)
+        nickname_dir = output_dir / safe_nickname
+        nickname_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a grid layout for the PCA components
+        nrows = -(-len(components) // ncols)  # Calculate the number of rows needed
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(figsize[0] * ncols, figsize[1] * nrows))
+        axes = axes.flatten()  # Flatten the axes array for easy iteration
+
+        for i, component in enumerate(components):
+            print(f"Generating jitterboxplot for Nickname: {nickname}, Component: {component}")
+
+            # Drop rows where the component or y is NaN
+            plot_data = subset_data.dropna(subset=[component, y])
+
+            # Create the jitterboxplot
+            jitterboxplot(
+                data=plot_data,
+                x=component,
+                y=y,
+                hue=hue,
+                palette=palette,
+                title=f"{component} by {y} ({nickname})",
+                ax=axes[i],  # Pass the corresponding axis
+            )
+
+        # Hide any unused subplots
+        for j in range(len(components), len(axes)):
+            fig.delaxes(axes[j])
+
+        # Save the layout as a single image
+        output_path = nickname_dir / f"PCA_Layout_by_{y.replace(' ', '_')}.png"
+        # Make the directory if it doesn't exist
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)  # Close the figure to free memory
+
+        # Make a 3D plot of the PCA components
+        if len(components) >= 3:
+            fig = plt.figure(figsize=(10, 8))
+            ax = fig.add_subplot(111, projection="3d")
+            ax.scatter(
+                subset_data[components[0]],
+                subset_data[components[1]],
+                subset_data[components[2]],
+                c=subset_data[hue].map(palette) if isinstance(palette, dict) else None,
+                s=50,
+                alpha=0.6,
+            )
+            ax.set_xlabel(components[0])
+            ax.set_ylabel(components[1])
+            ax.set_zlabel(components[2])
+            ax.set_title(f"3D PCA Plot for {nickname}")
+            plt.tight_layout()
+
+            # Save the 3D plot
+            output_path_3d = nickname_dir / f"PCA_3D_{safe_nickname}.png"
+            plt.savefig(output_path_3d, dpi=300, bbox_inches="tight")
+            plt.close(fig)  # Close the figure to free memory
+
+
+# # Define parameters
+# nicknames = pca_results["Nickname"].unique()
+# pca_components = ["PC1", "PC2", "PC3"]
+
+# # Generate PCA jitterboxplots by Nickname
+# generate_pca_jitterboxplots_by_nickname(
+#     pca_data=pca_results,
+#     nicknames=nicknames,
+#     components=pca_components,
+#     y="Brain region",  # Categorical column
+#     output_dir=OUTPUT_DIR,
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+#     ncols=3,
+# )
+
+
+def test_plot_metric(
+    data,
+    nickname,
+    metric,
+    y,
+    output_dir,
+    palette="Set2",
+    n_reps=300,
+    show_progress=False,
+    figsize=(8, 6),
+):
+    """
+    Test function to create a single plot for one metric and one Nickname.
+
+    Args:
+        data (pd.DataFrame): The dataset containing metrics and metadata.
+        nickname (str): The Nickname to process.
+        metric (str): The metric to plot.
+        y (str): The name of the column for the y-axis (categorical values).
+        output_dir (Path): Directory to save the plot.
+        palette (str or list, optional): Color palette for the plot. Default is "Set2".
+        n_reps (int, optional): Number of bootstrap replicates. Default is 300.
+        show_progress (bool, optional): Whether to show progress for bootstrap replicates. Default is False.
+        figsize (tuple, optional): Size of the plot. Default is (8, 6).
+
+    Returns:
+        None
+    """
+    print(f"Processing test plot for Nickname: {nickname}, Metric: {metric}")
+
+    # Get the subset of data for the Nickname and its associated control
+    subset_data = Config.get_subset_data(data, value=nickname)
+
+    if subset_data.empty:
+        print(f"Skipping {nickname} due to empty subset data.")
+        return
+
+    # Sanitize the nickname to remove or replace special characters
+    safe_nickname = re.sub(r"[^\w\-_\. ]", "_", nickname)
+
+    # Get brain region for the nickname
+    brain_region_values = subset_data["Brain region"].unique()
+
+    if len(brain_region_values) == 1 and brain_region_values[0] == "Control":
+        brain_region = "Control"
+    else:
+        brain_region = next(value for value in brain_region_values if value != "Control")
+
+    # Create the output directory for the Nickname
+    nickname_dir = output_dir / brain_region / safe_nickname
+    nickname_dir.mkdir(parents=True, exist_ok=True)
+
+    # Separate data for the Nickname and its control
+    nickname_data = subset_data[subset_data["Nickname"] == nickname][metric].dropna()
+    control_data = subset_data[subset_data["Nickname"] != nickname][metric].dropna()
+
+    if nickname_data.empty or control_data.empty:
+        print(f"Skipping metric '{metric}' for Nickname: {nickname} due to insufficient data.")
+        return
+
+    # Compute bootstrapped confidence intervals
+    nickname_ci = Processing.draw_bs_ci(
+        nickname_data.values, func=np.mean, rg=rg, n_reps=n_reps, show_progress=show_progress
+    )
+    control_ci = Processing.draw_bs_ci(
+        control_data.values, func=np.mean, rg=rg, n_reps=n_reps, show_progress=show_progress
+    )
+
+    # Compute effect size
+    effect_size, effect_size_interval = Processing.compute_effect_size(nickname_ci, control_ci)
+
+    # Create the plot
+    fig, ax = plt.subplots(figsize=figsize)
+    stripplot = sns.stripplot(
+        data=subset_data,
+        x=metric,
+        y=y,
+        hue="Brain region",
+        palette=palette,
+        dodge=False,
+        alpha=0.6,
+        jitter=True,
+        size=5,
+        ax=ax,
+    )
+
+    # Extract the y positions for the two groups
+    y_positions = stripplot.get_yticks()
+
+    # Add bootstrapped confidence intervals as error bars
+    ax.errorbar(
+        x=[nickname_data.mean(), control_data.mean()],
+        y=y_positions[:2],  # Use the first two y positions dynamically
+        xerr=[
+            [nickname_data.mean() - nickname_ci[0], control_data.mean() - control_ci[0]],
+            [nickname_ci[1] - nickname_data.mean(), control_ci[1] - control_data.mean()],
+        ],
+        fmt="o",
+        color="black",
+        capsize=5,
+        zorder=1,  # Ensure error bars are drawn below the stripplot
+    )
+
+    # Add effect size as text on the plot
+    ax.text(
+        0.8,
+        0.5,
+        f"Effect Size: {effect_size:.2f}\n95% CI: [{effect_size_interval[0]:.2f}, {effect_size_interval[1]:.2f}]",
+        transform=ax.transAxes,
+        fontsize=10,
+        verticalalignment="center",
+        horizontalalignment="center",
+    )
+
+    # Add a red "*" if the effect size confidence interval does not include zero
+    if (
+        effect_size_interval[0] > 0
+        and effect_size_interval[1] > 0
+        or effect_size_interval[0] < 0
+        and effect_size_interval[1] < 0
+    ):
+        ax.text(
+            0.5,
+            0.5,
+            "*",
+            transform=ax.transAxes,
+            fontsize=20,
+            color="red",
+            horizontalalignment="center",
+            verticalalignment="center",
+        )
+
+    # Finalize plot
+    # Increase y margins
+    ax.margins(y=2)
+    ax.set_ylim(bottom=ax.get_ylim()[0] - 2, top=ax.get_ylim()[1] + 2)
+
+    ax.set_title(f"{metric} - {nickname} vs Control - {brain_region}", fontsize=14)
+    ax.set_xlabel(metric)
+    # Remove y-axis label
+    ax.set_ylabel("")
+
+    # Hide legend
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend_.remove()
+
+    plt.tight_layout()
+    plt.show()
+
+
+# Example usage of the test_plot function
+# Test the function with one nickname and one metric
+# test_plot_metric(
+#     data=dataset,
+#     nickname="86639 (LH1990)",  # Replace with an actual nickname from your dataset
+#     metric="nb_events",  # Replace with an actual metric from your dataset
+#     y="Nickname",
+#     output_dir=OUTPUT_DIR,
+#     palette=Config.color_dict,
+#     n_reps=300,
+#     show_progress=True,
+#     figsize=(8, 3),
+# )
+
+
+def plot_metric_group_layouts(
+    data,
+    nicknames,
+    metric_groups,
+    y,
+    output_dir,
+    palette="Set2",
+    n_reps=300,
+    show_progress=False,
+    ncols=3,
+    figsize=(8, 6),
+):
+    """
+    Create layouts grouped by metric groups for each Nickname, combining stripplot, confidence intervals, and effect size.
+
+    Args:
+        data (pd.DataFrame): The dataset containing metrics and metadata.
+        nicknames (list): List of unique Nicknames.
+        metric_groups (dict): Dictionary of metric groups (e.g., {"Group Name": [metric1, metric2]}).
+        y (str): The name of the column for the y-axis (categorical values).
+        output_dir (Path): Base directory to save the plots.
+        palette (str or list, optional): Color palette for the plots. Default is "Set2".
+        n_reps (int, optional): Number of bootstrap replicates. Default is 300.
+        show_progress (bool, optional): Whether to show progress for bootstrap replicates. Default is False.
+        ncols (int, optional): Number of columns in the grid layout. Default is 3.
+        figsize (tuple, optional): Size of each subplot. Default is (8, 6).
+
+    Returns:
+        None
+    """
+    for nickname in nicknames:
+        print(f"Processing layouts for Nickname: {nickname}")
+
+        # Get the subset of data for the Nickname and its associated control
+        subset_data = Config.get_subset_data(data, value=nickname)
+
+        if subset_data.empty:
+            print(f"Skipping {nickname} due to empty subset data.")
+            continue
+
+        # Sanitize the nickname to remove or replace special characters
+        safe_nickname = re.sub(r"[^\w\-_\. ]", "_", nickname)
+
+        # Get brain region for the nickname
+        brain_region_values = subset_data["Brain region"].unique()
+
+        if len(brain_region_values) == 1 and brain_region_values[0] == "Control":
+            brain_region = "Control"
+        else:
+            brain_region = next(value for value in brain_region_values if value != "Control")
+
+        # Create the output directory for the Nickname
+        nickname_dir = output_dir / brain_region / safe_nickname
+        nickname_dir.mkdir(parents=True, exist_ok=True)
+
+        for group_name, metrics in metric_groups.items():
+            print(f"Processing metric group '{group_name}' for Nickname: {nickname}")
+
+            # Define the output path for the layout
+            output_path = nickname_dir / f"{group_name.replace(' ', '_')}_layout.png"
+
+            # Check if the plot already exists
+            if output_path.exists():
+                print(f"Plot for metric group '{group_name}' for Nickname: {nickname} already exists. Skipping...")
+                continue
+
+            # Calculate the grid layout
+            nrows = -(-len(metrics) // ncols)  # Calculate the number of rows needed
+            fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(figsize[0] * ncols, figsize[1] * nrows))
+            axes = axes.flatten()  # Flatten the axes array for easy iteration
+
+            for i, metric in enumerate(metrics):
+                print(f"Processing metric '{metric}' for Nickname: {nickname}")
+
+                # Separate data for the Nickname and its control
+                nickname_data = subset_data[subset_data["Nickname"] == nickname][metric].dropna()
+                control_data = subset_data[subset_data["Nickname"] != nickname][metric].dropna()
+
+                if nickname_data.empty or control_data.empty:
+                    print(f"Skipping metric '{metric}' for Nickname: {nickname} due to insufficient data.")
+                    continue
+
+                # Compute bootstrapped confidence intervals
+                nickname_ci = Processing.draw_bs_ci(
+                    nickname_data.values, func=np.mean, rg=rg, n_reps=n_reps, show_progress=show_progress
+                )
+                control_ci = Processing.draw_bs_ci(
+                    control_data.values, func=np.mean, rg=rg, n_reps=n_reps, show_progress=show_progress
+                )
+
+                # Compute effect size
+                effect_size, effect_size_interval = Processing.compute_effect_size(nickname_ci, control_ci)
+
+                # Plot raw values as a stripplot
+                ax = axes[i]
+                stripplot = sns.stripplot(
+                    data=subset_data,
+                    x=metric,
+                    y=y,
+                    hue="Brain region",
+                    palette=palette,
+                    dodge=False,
+                    alpha=0.6,
+                    jitter=True,
+                    size=5,
+                    ax=ax,
+                )
+
+                # Extract the y positions for the two groups
+                y_positions = stripplot.get_yticks()
+
+                # Add bootstrapped confidence intervals as error bars
+                ax.errorbar(
+                    x=[nickname_data.mean(), control_data.mean()],
+                    y=y_positions[:2],  # Adjust y positions for the two groups
+                    xerr=[
+                        [nickname_data.mean() - nickname_ci[0], control_data.mean() - control_ci[0]],
+                        [nickname_ci[1] - nickname_data.mean(), control_ci[1] - control_data.mean()],
+                    ],
+                    fmt="o",
+                    color="black",
+                    capsize=5,
+                    zorder=1,  # Ensure error bars are drawn below the stripplot
+                )
+
+                # Add effect size as text on the plot
+                ax.text(
+                    0.8,
+                    0.5,
+                    f"Effect Size: {effect_size:.2f}\n95% CI: [{effect_size_interval[0]:.2f}, {effect_size_interval[1]:.2f}]",
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    verticalalignment="center",
+                    horizontalalignment="center",
+                )
+
+                # Add a red "*" if the effect size confidence interval does not include zero
+                if (
+                    effect_size_interval[0] > 0
+                    and effect_size_interval[1] > 0
+                    or effect_size_interval[0] < 0
+                    and effect_size_interval[1] < 0
+                ):
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "*",
+                        transform=ax.transAxes,
+                        fontsize=20,
+                        color="red",
+                        horizontalalignment="center",
+                        verticalalignment="center",
+                    )
+
+                # Finalize plot
+                # Increase y margins
+                ax.margins(y=2)
+                ax.set_ylim(bottom=ax.get_ylim()[0] - 2, top=ax.get_ylim()[1] + 2)
+
+                ax.set_title(f"{metric} - {nickname} vs Control - {brain_region}", fontsize=14)
+                ax.set_xlabel(metric)
+                # Remove y-axis label
+                ax.set_ylabel("")
+
+                # Hide legend
+                handles, labels = ax.get_legend_handles_labels()
+                ax.legend_.remove()
+
+            # Hide any unused subplots
+            for j in range(len(metrics), len(axes)):
+                fig.delaxes(axes[j])
+
+            # Save the layout for the metric group
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            plt.close()
+
+            print(f"Saved layout for metric group '{group_name}' for Nickname: {nickname} to {output_path}")
+
+
+# Define parameters
+nicknames = dataset["Nickname"].unique()
+metrics = metric_names  # List of all metrics
+
+
+# Generate layouts for all metric groups
+plot_metric_group_layouts(
+    data=dataset,
+    nicknames=nicknames,
+    metric_groups=metric_groups,  # Dictionary of metric groups
+    y="Nickname",
+    output_dir=OUTPUT_DIR,
     palette=Config.color_dict,
-    figsize=(10, 6),
-    ncols=3,  # 3 columns for PC1, PC2, and PC3
+    n_reps=300,
+    show_progress=False,
+    ncols=3,  # Number of columns in the grid layout
+    figsize=(8, 6),  # Size of each subplot
 )
