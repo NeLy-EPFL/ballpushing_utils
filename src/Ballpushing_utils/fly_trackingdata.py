@@ -128,7 +128,7 @@ class FlyTrackingData:
         # Check if the final event is not None
         if final_event is not None:
             # Set the cutoff reference to the end of the final event
-            self.cutoff_reference = final_event[2] + 1  # Adding 1 to include the last frame
+            self.cutoff_reference = final_event[2] + 15  # Adding 1 to include the last frame
 
         # Reset cached calculations
         for attr in [
