@@ -124,7 +124,7 @@ class UMAPOptimizer:
 
     def save_plots(self, embeddings, cluster_labels, param_dict, output_dir):
         """
-        Save scatterplot and density plot of UMAP embeddings.
+        Save scatterplot and density plot of UMAP embeddings as subplots in one figure.
 
         Args:
             embeddings (np.ndarray): UMAP embeddings.
@@ -144,20 +144,31 @@ class UMAPOptimizer:
         param_str = "_".join([f"{key}={value}" for key, value in param_dict.items()])
         safe_param_str = param_str.replace("/", "-").replace(" ", "_")  # Make filename safe
 
-        # Scatterplot
-        scatterplot_path = os.path.join(output_dir, f"scatter_{safe_param_str}.png")
+        # Combined plot path
+        combined_plot_path = os.path.join(output_dir, f"combined_{safe_param_str}.png")
+
         if embeddings.shape[1] == 2:
-            # 2D scatterplot
-            plt.figure(figsize=(8, 6))
-            sns.scatterplot(data=df, x="UMAP1", y="UMAP2", hue="cluster", palette="viridis", s=10)
-            plt.title(f"Scatterplot: {param_str}")
-            plt.legend(title="Cluster", bbox_to_anchor=(1.05, 1), loc="upper left")
+            # Create a figure with subplots
+            fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+
+            # Scatterplot
+            sns.scatterplot(ax=axes[0], data=df, x="UMAP1", y="UMAP2", hue="cluster", palette="viridis", s=10)
+            axes[0].set_title(f"Scatterplot: {param_str}")
+            axes[0].legend(title="Cluster", bbox_to_anchor=(1.05, 1), loc="upper left")
+
+            # Density plot
+            sns.kdeplot(ax=axes[1], data=df, x="UMAP1", y="UMAP2", fill=True, cmap="viridis")
+            axes[1].set_title(f"Density Plot: {param_str}")
+
+            # Adjust layout and save the combined plot
             plt.tight_layout()
-            plt.savefig(scatterplot_path)
+            plt.savefig(combined_plot_path)
             plt.close()
-            print(f"2D Scatterplot saved to {scatterplot_path}")
+            print(f"Combined scatterplot and density plot saved to {combined_plot_path}")
+
         elif embeddings.shape[1] == 3:
-            # 3D scatterplot
+            # 3D scatterplot (no density plot for 3D embeddings)
+            scatterplot_path = os.path.join(output_dir, f"scatter_{safe_param_str}.png")
             fig = plt.figure(figsize=(10, 8))
             ax = fig.add_subplot(111, projection="3d")
             scatter = ax.scatter(df["UMAP1"], df["UMAP2"], df["UMAP3"], c=df["cluster"], cmap="viridis", s=10)
@@ -170,17 +181,6 @@ class UMAPOptimizer:
             plt.savefig(scatterplot_path)
             plt.close()
             print(f"3D Scatterplot saved to {scatterplot_path}")
-
-        # Density plot (only for 2D embeddings)
-        if embeddings.shape[1] == 2:
-            densityplot_path = os.path.join(output_dir, f"density_{safe_param_str}.png")
-            plt.figure(figsize=(8, 6))
-            sns.kdeplot(data=df, x="UMAP1", y="UMAP2", fill=True, cmap="viridis")
-            plt.title(f"Density Plot: {param_str}")
-            plt.tight_layout()
-            plt.savefig(densityplot_path)
-            plt.close()
-            print(f"Density plot saved to {densityplot_path}")
 
     def optimize(self):
         """
@@ -254,28 +254,31 @@ class UMAPOptimizer:
 
 if __name__ == "__main__":
     # Define the parameter grid
-    features = [ "frame", "statistical", "fourier"]
+    features = ["tracking", "frame", "statistical", "fourier"]
     all_combinations = list(chain.from_iterable(combinations(features, r) for r in range(1, len(features) + 1)))
     all_combinations = [list(comb) for comb in all_combinations]
 
     sub_combinations = [["frame", "statistical", "fourier"]]
 
     param_grid = {
-        "n_neighbors": [5,15,30],
-        "min_dist": [0.05 ,0.1, 0.5],
+        "n_neighbors": [5, 15, 30],
+        "min_dist": [0.05, 0.1, 0.5],
         "n_components": [2],
         "n_clusters": [12],
-        "filter_features": [True],
-        "feature_groups": sub_combinations,
+        "filter_features": [True, False],
+        "feature_groups": all_combinations,
         "include_ball": [False],
         "use_pca": [False],
     }
 
     # Paths
-    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250411_Transposed_Ctrls_Data/transposed/pooled_transposed.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250418_summary_TNT_screen_Data/transposed/pooled_transposed.feather"
     output_path = (
-        "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_optimisation_withNan/umap_optimization_results.csv"
+        "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_optimisation_TNT/umap_optimization_results.csv"
     )
+
+    # Make sure the output directory exists
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # Run the optimizer
     optimizer = UMAPOptimizer(dataset_path, output_path, param_grid)

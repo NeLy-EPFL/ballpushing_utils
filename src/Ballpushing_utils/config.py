@@ -49,7 +49,7 @@ class Config:
 
     # Random events attributes
 
-    generate_random: bool = True
+    generate_random: bool = False
     random_exclude_interactions: bool = True
     random_interaction_map: str = "full"  # Options: "full" or "onset"
 

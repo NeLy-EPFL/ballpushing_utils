@@ -359,12 +359,22 @@ class FlyTrackingData:
     @property
     def random_events(self):
         """Random chunks of time with the same lengths as interaction events."""
+        # Check if random event generation is disabled in the config
+        if not self.fly.config.generate_random:
+            warnings.warn(f"Random event generation is disabled for {self.fly.metadata.name}.")
+            return {}
+
         if not hasattr(self, "_random_events"):
             self._random_events = self._generate_random_events()
         return self._random_events
 
     def _generate_random_events(self):
         """Generate random events of the same lengths as interaction events."""
+        # Check if random event generation is disabled in the config
+        if not self.fly.config.generate_random:
+            warnings.warn(f"Random event generation is disabled for {self.fly.metadata.name}.")
+            return {}
+
         if not self.interaction_events:
             warnings.warn(f"No interaction events found for {self.fly.metadata.name}. Cannot generate random events.")
             return {}

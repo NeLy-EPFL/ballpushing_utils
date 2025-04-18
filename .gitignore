@@ -716,3 +716,7 @@ tests/integration/outputs/umap_videos/cluster_46_video.mp4
 tests/integration/outputs/umap_videos/cluster_47_video.mp4
 tests/integration/outputs/umap_videos/cluster_48_video.mp4
 tests/integration/outputs/umap_videos/cluster_49_video.mp4
+tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['fourier']_include_ball=False_use_pca=False.png
+tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['frame']_include_ball=False_use_pca=False.png
+tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['statistical']_include_ball=False_use_pca=False.png
+tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['tracking']_include_ball=False_use_pca=False.png

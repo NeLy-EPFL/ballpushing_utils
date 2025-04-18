@@ -52,12 +52,12 @@ CONFIG = {
         "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
         "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"),
         "excluded_folders": [],
-        "output_summary_dir": Path("250414_summary_TNT_screen"),
+        "output_summary_dir": Path("250418_summary_TNT_screen"),
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "metrics": ["event_metrics"],  # Metrics to process (add/remove as needed)
+        "metrics": ["transposed"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -296,6 +296,56 @@ if __name__ == "__main__":
         logging.info(f"Removed checkpoint file: {checkpoint_file}")
 
     logging.info("Processing complete!")
+
+    # ==================================================================
+    # Create pooled datasets
+    # ==================================================================
+    for metric in CONFIG["PROCESSING"]["metrics"]:
+        pooled_path = output_data / metric / f"pooled_{metric}.feather"
+
+        if not pooled_path.exists():
+            try:
+                metric_files = list((output_data / metric).glob("*.feather"))
+                if not metric_files:
+                    logging.warning(f"No {metric} files found for pooling. Skipping.")
+                    continue
+
+                # Use chunking for pooling to avoid loading all files at once
+                chunk_size = 5  # Adjust based on file sizes
+                total_chunks = (len(metric_files) + chunk_size - 1) // chunk_size
+
+                logging.info(f"Pooling {len(metric_files)} files for metric '{metric}' into {pooled_path.name}")
+                first_chunk = True
+                for chunk_idx in range(total_chunks):
+                    start_idx = chunk_idx * chunk_size
+                    end_idx = min((chunk_idx + 1) * chunk_size, len(metric_files))
+                    chunk_files = metric_files[start_idx:end_idx]
+
+                    logging.info(f"Processing chunk {chunk_idx + 1}/{total_chunks} for metric '{metric}'")
+                    chunk_df = pd.concat([pd.read_feather(f) for f in chunk_files])
+
+                    if first_chunk:
+                        # First chunk: create the file
+                        chunk_df.to_feather(pooled_path)
+                        first_chunk = False
+                    else:
+                        # Subsequent chunks: append to existing
+                        existing_df = pd.read_feather(pooled_path)
+                        combined_df = pd.concat([existing_df, chunk_df])
+                        combined_df.to_feather(pooled_path)
+                        del existing_df, combined_df
+
+                    del chunk_df
+                    gc.collect()
+                    log_memory_usage(f"After pooling chunk {chunk_idx + 1} for metric '{metric}'")
+
+                logging.info(f"Created pooled {metric} dataset: {pooled_path.name}")
+            except Exception as e:
+                logging.error(f"Error pooling {metric}: {str(e)}")
+        else:
+            logging.info(f"Pooled {metric} dataset already exists: {pooled_path.name}")
+
+    logging.info("Pooled dataset creation complete!")
 
     end_time = time.time()
     runtime = end_time - start_time
