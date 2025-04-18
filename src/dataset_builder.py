@@ -79,22 +79,7 @@ logging.basicConfig(
 # ==================================================================
 # UTILITY FUNCTIONS
 # ==================================================================
-def monitor_cpu_usage(stop_event, cpu_threshold=80):
-    """
-    Monitor CPU usage in a separate thread and pause processing if usage exceeds the threshold.
 
-    Parameters
-    ----------
-    stop_event : threading.Event
-        Event to signal when to stop monitoring.
-    cpu_threshold : int
-        CPU usage percentage threshold to pause processing.
-    """
-    while not stop_event.is_set():
-        current_cpu = psutil.cpu_percent(interval=1)
-        if current_cpu > cpu_threshold:
-            logging.warning(f"High CPU usage detected ({current_cpu}%). Pausing processing.")
-            time.sleep(5)  # Pause to reduce system load
 
 def load_yaml_config(yaml_path):
     """
@@ -136,6 +121,7 @@ def log_memory_usage(label):
     process = psutil.Process(os.getpid())
     memory_info = process.memory_info()
     logging.info(f"Memory usage at {label}: {memory_info.rss / 1024 / 1024:.2f} MB")
+
 
 def process_experiment(folder, metrics, output_data):
     """
@@ -217,110 +203,99 @@ if __name__ == "__main__":
 
     logging.basicConfig(level=getattr(logging, args.log_level))
 
-    # Start the CPU monitor thread
-    stop_event = threading.Event()
-    cpu_monitor_thread = threading.Thread(target=monitor_cpu_usage, args=(stop_event,))
-    cpu_monitor_thread.start()
+    if CONFIG["PATHS"]["output_summary_dir"]:
+        # Use the output directory if provided
+        output_summary = Path(CONFIG["PATHS"]["output_summary_dir"])
+        logging.info(f"Using optional output directory: {output_summary}")
+    else:
+        # Determine the output_summary_dir based on the provided arguments
+        today_date = datetime.now().strftime("%y%m%d")
+        dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
 
-    try:
-        if CONFIG["PATHS"]["output_summary_dir"]:
-            # Use the output directory if provided
-            output_summary = Path(CONFIG["PATHS"]["output_summary_dir"])
-            logging.info(f"Using optional output directory: {output_summary}")
-        else:
-            # Determine the output_summary_dir based on the provided arguments
-            today_date = datetime.now().strftime("%y%m%d")
-            dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
-
-            if args.yaml:
-                yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
-                CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
-            elif CONFIG["PROCESSING"]["experiment_filter"]:
-                experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
-                CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
-            else:
-                raise ValueError(
-                    "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
-                    "Processing the entire dataset is not allowed."
-                )
-
-        # Automatically set output_data_dir based on output_summary_dir
-        CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
-
-        # Build derived paths from configuration
-        output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
-        output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
-        output_summary.mkdir(parents=True, exist_ok=True)
-        output_data.mkdir(parents=True, exist_ok=True)
-
-        # Get list of experiment folders to process
-        Exp_folders = []
         if args.yaml:
-            yaml_dirs = load_yaml_config(args.yaml)
-            Exp_folders.extend(yaml_dirs)
+            yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
+            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
+        elif CONFIG["PROCESSING"]["experiment_filter"]:
+            experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
+            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
         else:
-            for root in CONFIG["PATHS"]["data_root"]:
-                Exp_folders.extend(
-                    folder
-                    for folder in root.iterdir()
-                    if folder.is_dir() and CONFIG["PROCESSING"]["experiment_filter"] in folder.name
-                )
+            raise ValueError(
+                "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
+                "Processing the entire dataset is not allowed."
+            )
 
-        if CONFIG["PATHS"]["excluded_folders"]:
-            Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
+    # Automatically set output_data_dir based on output_summary_dir
+    CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
 
-        if not Exp_folders:
-            raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
+    # Build derived paths from configuration
+    output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
+    output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
+    output_summary.mkdir(parents=True, exist_ok=True)
+    output_data.mkdir(parents=True, exist_ok=True)
 
-        logging.info(f"Folders to analyze: {[f.name for f in Exp_folders]}")
+    # Get list of experiment folders to process
+    Exp_folders = []
+    if args.yaml:
+        yaml_dirs = load_yaml_config(args.yaml)
+        Exp_folders.extend(yaml_dirs)
+    else:
+        for root in CONFIG["PATHS"]["data_root"]:
+            Exp_folders.extend(
+                folder
+                for folder in root.iterdir()
+                if folder.is_dir() and CONFIG["PROCESSING"]["experiment_filter"] in folder.name
+            )
 
-        # Create metric subdirectories
-        for metric in CONFIG["PROCESSING"]["metrics"]:
-            (output_data / metric).mkdir(exist_ok=True)
+    if CONFIG["PATHS"]["excluded_folders"]:
+        Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
 
-        # Main processing loop
-        checkpoint_file = output_summary / "processing_checkpoint.json"
+    if not Exp_folders:
+        raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
 
-        # Load checkpoint if exists
-        if checkpoint_file.exists():
-            with open(checkpoint_file, "r") as f:
-                processed_folders = set(json.load(f))
-            logging.info(f"Resuming from checkpoint, {len(processed_folders)} folders already processed")
-        else:
-            processed_folders = set()
+    logging.info(f"Folders to analyze: {[f.name for f in Exp_folders]}")
 
-        for folder in Exp_folders:
-            exp_name = folder.name
+    # Create metric subdirectories
+    for metric in CONFIG["PROCESSING"]["metrics"]:
+        (output_data / metric).mkdir(exist_ok=True)
 
-            if exp_name in processed_folders:
-                logging.info(f"Skipping already processed experiment: {exp_name}")
-                continue
+    # Main processing loop
+    checkpoint_file = output_summary / "processing_checkpoint.json"
 
-            log_memory_usage(f"Before processing {exp_name}")
+    # Load checkpoint if exists
+    if checkpoint_file.exists():
+        with open(checkpoint_file, "r") as f:
+            processed_folders = set(json.load(f))
+        logging.info(f"Resuming from checkpoint, {len(processed_folders)} folders already processed")
+    else:
+        processed_folders = set()
 
-            try:
-                process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
-                processed_folders.add(exp_name)
+    for folder in Exp_folders:
+        exp_name = folder.name
 
-                # Save checkpoint after each successful experiment
-                with open(checkpoint_file, "w") as f:
-                    json.dump(list(processed_folders), f)
+        if exp_name in processed_folders:
+            logging.info(f"Skipping already processed experiment: {exp_name}")
+            continue
 
-            except Exception as e:
-                logging.error(f"Error processing {exp_name}: {str(e)}")
+        log_memory_usage(f"Before processing {exp_name}")
 
-            log_memory_usage(f"After processing {exp_name}")
+        try:
+            process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
+            processed_folders.add(exp_name)
 
-        if checkpoint_file.exists():
-            checkpoint_file.unlink()
-            logging.info(f"Removed checkpoint file: {checkpoint_file}")
+            # Save checkpoint after each successful experiment
+            with open(checkpoint_file, "w") as f:
+                json.dump(list(processed_folders), f)
 
-        logging.info("Processing complete!")
+        except Exception as e:
+            logging.error(f"Error processing {exp_name}: {str(e)}")
 
-    finally:
-        # Stop the CPU monitor thread
-        stop_event.set()
-        cpu_monitor_thread.join()
+        log_memory_usage(f"After processing {exp_name}")
+
+    if checkpoint_file.exists():
+        checkpoint_file.unlink()
+        logging.info(f"Removed checkpoint file: {checkpoint_file}")
+
+    logging.info("Processing complete!")
 
     end_time = time.time()
     runtime = end_time - start_time

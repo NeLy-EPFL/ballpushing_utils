@@ -120,7 +120,7 @@ class FlyTrackingData:
             warnings.warn("Flytrack or its objects are not initialized.")
             return
 
-        ballpushing_metrics = BallPushingMetrics(self)
+        ballpushing_metrics = BallPushingMetrics(self, compute_metrics_on_init=False)
 
         # TODO: that's gonna be an issue for F1, we'll look at it later.
         final_event = ballpushing_metrics.get_final_event(0, 0)
@@ -370,7 +370,15 @@ class FlyTrackingData:
             return {}
 
         random_events = {}
-        total_frames = len(self.flytrack.objects[0].dataset) if self.flytrack else 0
+
+        # Determine the valid frame range based on the filtered dataset
+        if self.flytrack:
+            fly_data = self.flytrack.objects[0].dataset
+            valid_start = fly_data.index[0]  # First valid frame
+            valid_end = fly_data.index[-1]  # Last valid frame
+            total_frames = valid_end - valid_start + 1
+        else:
+            total_frames = 0
 
         for fly_idx, ball_events in self.interaction_events.items():
             random_events[fly_idx] = {}
@@ -380,19 +388,31 @@ class FlyTrackingData:
                     event_duration = event[1] - event[0]
                     max_start = total_frames - event_duration
 
-                    # Generate a random start frame
-                    random_start = np.random.randint(0, max_start)
-                    random_end = random_start + event_duration
+                    if max_start <= 0:
+                        warnings.warn(
+                            f"Event duration exceeds available frames for fly_idx={fly_idx}, ball_idx={ball_idx}."
+                        )
+                        continue
 
-                    # Ensure no overlap with existing interaction events
-                    while any(
-                        random_start <= existing_event[1] and random_end >= existing_event[0]
-                        for existing_event in events
-                    ):
-                        random_start = np.random.randint(0, max_start)
+                    # Attempt to generate a random event with a maximum number of retries
+                    max_retries = 1000
+                    for _ in range(max_retries):
+                        random_start = np.random.randint(valid_start, valid_start + max_start)
                         random_end = random_start + event_duration
 
-                    random_events[fly_idx][ball_idx].append((random_start, random_end))
+                        # Ensure no overlap with existing interaction events
+                        if not any(
+                            random_start <= existing_event[1] and random_end >= existing_event[0]
+                            for existing_event in events
+                        ):
+                            random_events[fly_idx][ball_idx].append((random_start, random_end))
+                            break
+                    else:
+                        # If no valid random event could be generated, log a warning and skip
+                        warnings.warn(
+                            f"Could not generate a random event for fly_idx={fly_idx}, ball_idx={ball_idx} "
+                            f"after {max_retries} attempts. Skipping."
+                        )
 
         return random_events
 

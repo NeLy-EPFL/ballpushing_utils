@@ -7,7 +7,7 @@ class InteractionsMetrics:
     def __init__(self, tracking_data):
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
-        self.summary = BallPushingMetrics(self.fly.tracking_data)
+        self.summary = BallPushingMetrics(self.fly.tracking_data, compute_metrics_on_init=False)
         # Iterate over the indices of the flytrack objects list
         self.chamber_exit_times = {
             fly_idx: self.get_chamber_exit_time(fly_idx, 0)
@@ -34,6 +34,8 @@ class InteractionsMetrics:
         for fly_idx, ball_dict in self.tracking_data.interaction_events.items():
             for ball_idx, events in ball_dict.items():
                 key = f"fly_{fly_idx}_ball_{ball_idx}_interaction"
+                if self.fly.config.debugging:
+                    print(f"Computing metrics for {key}...")
                 all_metrics[key] = self.compute_event_metrics(fly_idx, ball_idx, event_type="interaction")
 
         if self.fly.config.generate_random:
@@ -42,9 +44,13 @@ class InteractionsMetrics:
                 for fly_idx, ball_dict in self.tracking_data.random_events.items():
                     for ball_idx, events in ball_dict.items():
                         key = f"fly_{fly_idx}_ball_{ball_idx}_random"
+                        if self.fly.config.debugging:
+                            print(f"Computing metrics for {key}...")
                         all_metrics[key] = self.compute_event_metrics(fly_idx, ball_idx, event_type="random")
 
         self.metrics = all_metrics
+        if self.fly.config.debugging:
+            print("Finished compute_all_event_metrics.")
         return all_metrics
 
     def compute_event_metrics(self, fly_idx, ball_idx, event_type="interaction"):
@@ -66,27 +72,35 @@ class InteractionsMetrics:
         else:
             raise ValueError(f"Invalid event_type: {event_type}")
 
+        if self.fly.config.debugging:
+            print(f"Number of events: {len(events)}")
+
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
+        if self.fly.config.debugging:
+            print("Precomputing rolling medians for ball and fly data...")
         ball_data = self.precompute_rolling_medians(ball_data, window=10, keypoint="centre")
         fly_data = self.precompute_rolling_medians(fly_data, window=10, keypoint="thorax")
+        if self.fly.config.debugging:
+            print("Rolling medians precomputed.")
 
         # Calculate the initial position of the ball
         initial_x, initial_y, _, _ = self._calculate_median_coordinates(
             ball_data, start_idx=0, end_idx=len(ball_data) - 1, keypoint="centre"
         )
-
-        print(f"Initial ball position: ({initial_x}, {initial_y})")
+        if self.fly.config.debugging:
+            print(f"Initial ball position: ({initial_x}, {initial_y})")
 
         max_event = self.summary.get_max_event(fly_idx, ball_idx)
-
         final_event = self.summary.get_final_event(fly_idx, ball_idx)
 
         metrics = {}
         previous_success = None  # To store the success of the previous event
 
         for event_idx, event in enumerate(events):
+            if self.fly.config.debugging:
+                print(f"Processing event {event_idx}...")
             start_idx, end_idx = event[0], event[1]
 
             # Duration of the event
@@ -145,7 +159,10 @@ class InteractionsMetrics:
                 "efficiency_diff": efficiency_diff,
                 "event_type": event_type,
             }
-
+            if self.fly.config.debugging:
+                print(f"Finished processing event {event_idx}.")
+        if self.fly.config.debugging:
+            print(f"Finished compute_event_metrics for fly_idx={fly_idx}, ball_idx={ball_idx}, event_type={event_type}")
         return metrics
 
     def precompute_rolling_medians(self, data, window, keypoint):
@@ -163,12 +180,12 @@ class InteractionsMetrics:
         data[f"x_{keypoint}_rolling_median"] = data[f"x_{keypoint}"].rolling(window=window, center=True).median()
         data[f"y_{keypoint}_rolling_median"] = data[f"y_{keypoint}"].rolling(window=window, center=True).median()
 
-        # replace NaN values with ffill and bfill
-        data[f"x_{keypoint}_rolling_median"].fillna(method="ffill", inplace=True)
-        data[f"x_{keypoint}_rolling_median"].fillna(method="bfill", inplace=True)
-        data[f"y_{keypoint}_rolling_median"].fillna(method="ffill", inplace=True)
-        data[f"y_{keypoint}_rolling_median"].fillna(method="bfill", inplace=True)
+        # Replace NaN values with forward fill and backward fill
+        data[f"x_{keypoint}_rolling_median"] = data[f"x_{keypoint}_rolling_median"].ffill().bfill()
+        data[f"y_{keypoint}_rolling_median"] = data[f"y_{keypoint}_rolling_median"].ffill().bfill()
 
+        if self.fly.config.debugging:
+            print(f"Finished precompute_rolling_medians for keypoint={keypoint}")
         return data
 
     def _calculate_median_coordinates(self, data, start_idx, end_idx, keypoint):

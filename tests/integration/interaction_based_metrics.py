@@ -2,6 +2,8 @@ import argparse
 from pathlib import Path
 from Ballpushing_utils import Fly, Experiment, Dataset
 from utils_behavior import Utils
+import cProfile
+import pstats
 
 
 def process_fly(fly_path):
@@ -32,11 +34,18 @@ def process_experiment(experiment_path):
     ExampleExperiment = Experiment(experiment_path)
 
     # Make a dataset using the experiment's ballpushing metrics
-    ExampleData = Dataset(ExampleExperiment, dataset_type="summary")
+    ExampleData_summary = Dataset(ExampleExperiment, dataset_type="summary")
+
+    ExampleData_individual = Dataset(ExampleExperiment, dataset_type="event_metrics")
 
     # Print the dataset
-    if ExampleData.data is not None:
-        print(ExampleData.data.head())
+    if ExampleData_summary.data is not None:
+        print(ExampleData_summary.data.head())
+    else:
+        print("ExampleData.data is None. Cannot call 'head()'.")
+
+    if ExampleData_individual.data is not None:
+        print(ExampleData_individual.data.head())
     else:
         print("ExampleData.data is None. Cannot call 'head()'.")
 

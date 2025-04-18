@@ -7,7 +7,7 @@ from utils_behavior import Processing
 
 
 class BallPushingMetrics:
-    def __init__(self, tracking_data):
+    def __init__(self, tracking_data, compute_metrics_on_init=True):
 
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
@@ -22,7 +22,8 @@ class BallPushingMetrics:
                 print(f"Fly {fly_idx} chamber exit time: {exit_time}")
 
         self.metrics = {}
-        self.compute_metrics()
+        if compute_metrics_on_init:
+            self.compute_metrics()
 
     def compute_metrics(self):
         """
