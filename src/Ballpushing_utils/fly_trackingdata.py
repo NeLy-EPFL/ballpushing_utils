@@ -59,6 +59,8 @@ class FlyTrackingData:
 
         # Apply initial time range filter if specified in config
         if self.fly.config.time_range:
+            if self.fly.config.debugging:
+                print(f"Applying time range filter for {self.fly.metadata.name}: {self.fly.config.time_range}")
             self.filter_tracking_data(self.fly.config.time_range)
 
         # Determine success cutoff reference
@@ -148,7 +150,7 @@ class FlyTrackingData:
     def interaction_events(self):
         """Chunks of time where the fly is interacting with the ball."""
         if not hasattr(self, "_interaction_events"):
-            time_range = (0, self.cutoff_reference) if self.cutoff_reference else None
+            time_range = (self.fly.config.time_range[0], self.cutoff_reference) if self.cutoff_reference else None
 
             self._interaction_events = self._calculate_interactions(time_range)
         return self._interaction_events
@@ -828,6 +830,8 @@ class FlyTrackingData:
     def filter_tracking_data(self, time_range):
         """Filter the tracking data based on the time range."""
         if self.flytrack is not None:
+            if self.fly.config.debugging:
+                print(f"Filtering flytrack data for {self.fly.metadata.name} with time range: {time_range}")
             self.flytrack.filter_data(time_range)
         if self.balltrack is not None:
             self.balltrack.filter_data(time_range)

@@ -30,7 +30,7 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "Ctrl"
+    experiment_type: str = "MagnetBlock"
     time_range: Optional[tuple] = None
     success_cutoff: bool = True
     success_cutoff_method: str = "final_event"
