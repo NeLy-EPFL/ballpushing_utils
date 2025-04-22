@@ -258,24 +258,22 @@ if __name__ == "__main__":
     all_combinations = list(chain.from_iterable(combinations(features, r) for r in range(1, len(features) + 1)))
     all_combinations = [list(comb) for comb in all_combinations]
 
-    sub_combinations = [["frame", "statistical", "fourier"]]
+    sub_combinations = [["tracking", "frame", "statistical", "fourier"]]
 
     param_grid = {
-        "n_neighbors": [5, 15, 30],
-        "min_dist": [0.05, 0.1, 0.5],
+        "n_neighbors": [15],
+        "min_dist": [0.05, 0.1],
         "n_components": [2],
-        "n_clusters": [12],
-        "filter_features": [True, False],
+        "n_clusters": [8, 12, 16, 20, 24, 30, 40],
+        "filter_features": [False],
         "feature_groups": all_combinations,
         "include_ball": [False],
         "use_pca": [False],
     }
 
     # Paths
-    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250418_summary_TNT_screen_Data/transposed/pooled_transposed.feather"
-    output_path = (
-        "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_optimisation_TNT/umap_optimization_results.csv"
-    )
+    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250419_transposed_control_folders_Data/transposed/pooled_transposed.feather"
+    output_path = "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_optimisation_ctrls/umap_optimization_results.csv"
 
     # Make sure the output directory exists
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

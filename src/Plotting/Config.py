@@ -24,8 +24,6 @@ from holoviews import opts
 
 hv.extension("bokeh")
 
-from shiny import App, Inputs, Outputs, Session, reactive, render, req, ui
-
 from utils_behavior import (
     Utils,
     Processing,

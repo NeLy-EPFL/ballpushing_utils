@@ -49,7 +49,7 @@ class Config:
 
     # Random events attributes
 
-    generate_random: bool = False
+    generate_random: bool = True
     random_exclude_interactions: bool = True
     random_interaction_map: str = "full"  # Options: "full" or "onset"
 
@@ -108,7 +108,7 @@ class Config:
     fly_only = True
 
     # hidden_value: int = -1
-    hidden_value: int = 0
+    hidden_value: int = -9999
 
     def print_config(self):
         """

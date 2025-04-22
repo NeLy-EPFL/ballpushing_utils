@@ -1,0 +1,18 @@
+{
+    "input_file": "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250418_summary_TNT_screen_Data/transposed/pooled_transposed_cleaned.feather",
+    "output_file": "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather",
+    "n_neighbors": 15,
+    "min_dist": 0.05,
+    "n_components": 2,
+    "n_clusters": 24,
+    "use_pca": false,
+    "filter_features": false,
+    "include_ball": false,
+    "feature_groups": [
+        "statistical",
+        "fourier"
+    ],
+    "video_output_dir": "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_videos",
+    "interaction_data": "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250418_summary_TNT_screen_Data/standardized_contacts/pooled_standardized_contacts.feather",
+    "best_disp": false
+}
