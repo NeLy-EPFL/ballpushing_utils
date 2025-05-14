@@ -1,5 +1,6 @@
 from utils_behavior import Sleap_utils
 from Ballpushing_utils import utilities
+from utils_behavior import Processing
 from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 import numpy as np
 import warnings
@@ -48,24 +49,45 @@ class FlyTrackingData:
         self.check_dying()
 
         if self.valid_data or self.keep_idle:
-            self.duration = self.balltrack.objects[0].dataset["time"].iloc[-1]
+
             self.start_x, self.start_y = self.get_initial_position()
-            if self.fly.config.debugging:
-                print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
+
+            time_range_start = self.fly.config.time_range[0] if self.fly.config.time_range else None
+            self.chamber_exit_times = {
+                fly_idx: (
+                    0
+                    if (
+                        (exit_time := self.get_chamber_exit_time(fly_idx, 0)) is not None
+                        and time_range_start is not None
+                        and exit_time < time_range_start
+                    )
+                    else exit_time
+                )
+                for fly_idx in range(len(self.flytrack.objects))
+            }
+
+            # Apply initial time range filter if specified in config
+            if self.fly.config.time_range:
+                # if self.fly.config.debugging:
+                # print(f"Applying time range filter for {self.fly.metadata.name}: {self.fly.config.time_range}")
+                self.filter_tracking_data(self.fly.config.time_range)
+
+            # Compute duration as the difference between last and first time
+            times = self.balltrack.objects[0].dataset["time"]
+            if not times.empty:
+                self.duration = times.iloc[-1] - times.iloc[0]
+
+            # if self.fly.config.debugging:
+            print(f"Duration for {self.fly.metadata.name}: {self.duration}")
+            print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
 
             self.fly_skeleton = self.get_skeleton()
             self.exit_time = self.get_exit_time()
             self.adjusted_time = self.compute_adjusted_time()
 
-        # Apply initial time range filter if specified in config
-        if self.fly.config.time_range:
-            if self.fly.config.debugging:
-                print(f"Applying time range filter for {self.fly.metadata.name}: {self.fly.config.time_range}")
-            self.filter_tracking_data(self.fly.config.time_range)
-
-        # Determine success cutoff reference
-        if self.fly.config.success_cutoff:
-            self._determine_success_cutoff()
+            # Determine success cutoff reference
+            if self.fly.config.success_cutoff:
+                self._determine_success_cutoff()
 
     def load_tracking_file(
         self,
@@ -88,6 +110,52 @@ class FlyTrackingData:
             )
         except IndexError:
             return None
+
+    def get_chamber_exit_time(self, fly_idx, ball_idx):
+        """
+        Compute the time at which the fly left the chamber for a given fly and ball.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+
+        Returns:
+            float or None: The exit time in seconds, or None if the fly never left the chamber.
+        """
+        fly_data = self.flytrack.objects[fly_idx].dataset
+
+        # Calculate the distance from the fly start position for each frame
+        distances = Processing.calculate_euclidian_distance(
+            fly_data["x_thorax"], fly_data["y_thorax"], self.start_x, self.start_y
+        )
+
+        # Debugging: Print distances
+        if self.fly.config.debugging:
+            print(f"Distances for fly {fly_idx}, ball {ball_idx}: {distances}")
+
+        # Determine the frames where the fly is within a certain radius of the start position
+        in_chamber = distances <= self.fly.config.chamber_radius
+
+        # Debugging: Print in_chamber array
+        if self.fly.config.debugging:
+            print(f"In-chamber status for fly {fly_idx}, ball {ball_idx}: {in_chamber}")
+
+        # Check if the fly ever leaves the chamber
+        if not np.any(~in_chamber):  # If all values in `in_chamber` are True
+            if self.fly.config.debugging:
+                print(f"Fly {fly_idx} never left the chamber.")
+            return None
+
+        # Get the first frame where the fly is outside the chamber
+        exit_frame = np.argmax(~in_chamber)  # Find the first `False` in `in_chamber`
+
+        # Debugging: Print exit_frame
+        if self.fly.config.debugging:
+            print(f"Exit frame for fly {fly_idx}, ball {ball_idx}: {exit_frame}")
+
+        exit_time = exit_frame / self.fly.experiment.fps
+
+        return exit_time
 
     def calculate_euclidean_distances(self):
         """
@@ -122,15 +190,28 @@ class FlyTrackingData:
             warnings.warn("Flytrack or its objects are not initialized.")
             return
 
+        # Apply initial time range filter if specified
+        # if self.fly.config.time_range is not None:
+        #     time_range = self.fly.config.time_range
+        #     self.filter_tracking_data(time_range)
+
         ballpushing_metrics = BallPushingMetrics(self, compute_metrics_on_init=False)
 
-        # TODO: that's gonna be an issue for F1, we'll look at it later.
+        # TODO F1 adaptation
         final_event = ballpushing_metrics.get_final_event(0, 0)
-
-        # Check if the final event is not None
-        if final_event is not None:
-            # Set the cutoff reference to the end of the final event
-            self.cutoff_reference = final_event[2] + 15  # Adding 1 to include the last frame
+        print(f"Final event for {self.fly.metadata.name}: {final_event}")
+        # Check if the final event is valid
+        if final_event is not None and final_event[2] is not None:
+            print(f"Final event detected for {self.fly.metadata.name}: {final_event}")
+            # Set the cutoff reference to the end of the final event + safety frames
+            self.cutoff_reference = final_event[2] + 15
+        else:
+            print(f"No valid final event detected for {self.fly.metadata.name}.")
+            # If no final event, set cutoff reference to the end of the time range or dataset
+            if self.fly.config.time_range and self.fly.config.time_range[1] is not None:
+                self.cutoff_reference = self.fly.config.time_range[1]
+            else:
+                self.cutoff_reference = None
 
         # Reset cached calculations
         for attr in [
@@ -150,7 +231,14 @@ class FlyTrackingData:
     def interaction_events(self):
         """Chunks of time where the fly is interacting with the ball."""
         if not hasattr(self, "_interaction_events"):
-            time_range = (self.fly.config.time_range[0], self.cutoff_reference) if self.cutoff_reference else None
+            if self.fly.config.time_range is not None:
+                time_range = (
+                    (self.fly.config.time_range[0], self.cutoff_reference)
+                    if self.cutoff_reference is not None
+                    else (self.fly.config.time_range[0], None)
+                )
+            else:
+                time_range = (None, self.cutoff_reference) if self.cutoff_reference is not None else None
 
             self._interaction_events = self._calculate_interactions(time_range)
         return self._interaction_events
@@ -184,9 +272,7 @@ class FlyTrackingData:
     ):
         """
         Find interaction events between the fly and the ball.
-        It uses the find_interaction_events function from the Ballpushing_utils module to find chunks of time where the fly ball distance is below a threshold thresh for a minimum of event_min_length seconds. It also merge together events that are separated by less than gap_between_events seconds.
         """
-        # Parameter handling unchanged
         if thresh is None:
             thresh = self.fly.config.interaction_threshold
         if gap_between_events is None:
@@ -201,12 +287,12 @@ class FlyTrackingData:
         fly_data = self.flytrack.objects[fly_idx].dataset
         ball_data = self.balltrack.objects[ball_idx].dataset
 
-        if time_range:
-            # Convert frame indices to integers for iloc
-            start = int(time_range[0] * self.fly.experiment.fps)
-            end = int(time_range[1] * self.fly.experiment.fps) if time_range[1] else None
-            fly_data = fly_data.iloc[start:end]
-            ball_data = ball_data.iloc[start:end]
+        # if time_range:
+        #     # Convert frame indices to integers for iloc
+        #     start = int(time_range[0] * self.fly.experiment.fps) if time_range[0] is not None else 0
+        #     end = int(time_range[1] * self.fly.experiment.fps) if time_range[1] is not None else None
+        #     fly_data = fly_data.iloc[start:end]
+        #     ball_data = ball_data.iloc[start:end]
 
         # Original event detection logic
         interaction_events = utilities.find_interaction_events(
@@ -833,10 +919,26 @@ class FlyTrackingData:
             if self.fly.config.debugging:
                 print(f"Filtering flytrack data for {self.fly.metadata.name} with time range: {time_range}")
             self.flytrack.filter_data(time_range)
+            if self.flytrack.objects[0].dataset.empty:
+                raise ValueError(f"Flytrack data is empty after filtering for {self.fly.metadata.name}.")
+
         if self.balltrack is not None:
             self.balltrack.filter_data(time_range)
+            if self.balltrack.objects[0].dataset.empty:
+                raise ValueError(f"Balltrack data is empty after filtering for {self.fly.metadata.name}.")
+
         if self.skeletontrack is not None:
             self.skeletontrack.filter_data(time_range)
+            if self.skeletontrack.objects[0].dataset.empty:
+                raise ValueError(f"Skeletontrack data is empty after filtering for {self.fly.metadata.name}.")
+
+        # Reset cached interaction events to force recomputation with filtered data
+        if hasattr(self, "_interaction_events"):
+            del self._interaction_events
+        if hasattr(self, "_interactions_onsets"):
+            del self._interactions_onsets
+        if hasattr(self, "_interactions_offsets"):
+            del self._interactions_offsets
 
     def log_missing_fly(self):
         """Log the metadata of flies that do not pass the validity test."""

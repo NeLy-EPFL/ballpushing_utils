@@ -30,9 +30,7 @@ dataset = pd.read_feather(
 )
 
 # Configuration section
-OUTPUT_DIR = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Plots/Summary_metrics"
-)  # Base directory for saving plots
+OUTPUT_DIR = Path("/home/durrieu/ballpushing_utils/outputs")  # Base directory for saving plots
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
 
 # dataset = Config.map_split_registry(dataset)
@@ -242,14 +240,14 @@ def jitterboxplot(data, x, y, hue=None, palette="Set2", title=None, figsize=(10,
 
 
 # Example usage of the jitterboxplot function
-# jitterboxplot(
-#     data=dataset,
-#     x="nb_events",  # Numeric column
-#     y="Simplified Nickname",  # Categorical column
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     title="Jitterboxplot of Number of Events by Brain Region",
-# )
+jitterboxplot(
+    data=dataset,
+    x="nb_events",  # Numeric column
+    y="Simplified Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    title="Jitterboxplot of Number of Events by Brain Region",
+)
 
 # Now let's create one example layout with the first metric group
 group = "Events Metrics"
@@ -350,7 +348,7 @@ def generate_layouts_by_brain_region(
             )
 
             # Save the plot to the corresponding directory
-            output_path = region_dir / f"{group_name.replace(' ', '_')}.png"
+            output_path = region_dir / f"{group_name.replace(' ', '_')}.pdf"
             plt.savefig(output_path, dpi=300, bbox_inches="tight")
             plt.close()  # Close the plot to free memory
 
@@ -407,62 +405,62 @@ def generate_jitterboxplots_for_all_metrics(
         plt.tight_layout()
 
         # Save the plot
-        output_path = output_dir / f"{metric.replace(' ', '_')}.png"
+        output_path = output_dir / f"{metric.replace(' ', '_')}.pdf"
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)  # Close the figure to free memory
 
 
 # Example usage of the jitterboxplot function
-# explot = jitterboxplot(
-#     data=Combined,
-#     x="nb_events",  # Numeric column
-#     y="Simplified Nickname",  # Categorical column
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     title="Jitterboxplot of Number of Events by Brain Region",
-# )
+explot = jitterboxplot(
+    data=Combined,
+    x="nb_events",  # Numeric column
+    y="Simplified Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    title="Jitterboxplot of Number of Events by Brain Region",
+)
 
-# plt.savefig("jitterboxplot.png", dpi=300, bbox_inches="tight")
+plt.savefig("jitterboxplot.pdf", dpi=300, bbox_inches="tight")
 
-# explot = create_layout(
-#     data=Combined,
-#     metrics=metric_groups[group],
-#     y="Nickname",  # Categorical column
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     figsize=(10, 6),
-# )
+explot = create_layout(
+    data=Combined,
+    metrics=metric_groups[group],
+    y="Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 6),
+)
 
-# # Save as png
-# plt.savefig("exLayout.png", dpi=300, bbox_inches="tight")
+# Save as pdf
+plt.savefig("exLayout.pdf", dpi=300, bbox_inches="tight")
 
-# brain_regions = dataset["Brain region"].unique()  # Get unique brain regions
-# generate_layouts_by_brain_region(
-#     data=dataset,
-#     brain_regions=brain_regions,
-#     metric_groups=metric_groups,
-#     y="Nickname",  # Categorical column
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     figsize=(10, 6),
-#     ncols=3,
-# )
+brain_regions = dataset["Brain region"].unique()  # Get unique brain regions
+generate_layouts_by_brain_region(
+    data=dataset,
+    brain_regions=brain_regions,
+    metric_groups=metric_groups,
+    y="Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 6),
+    ncols=3,
+)
 
-# # Generate jitterboxplots for all metrics
+# Generate jitterboxplots for all metrics
 
-# generate_jitterboxplots_for_all_metrics(
-#     data=dataset,
-#     metrics=metric_names,
-#     y="Nickname",  # Categorical column
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     figsize=(10, 30),
-#     output_dir=OUTPUT_DIR / "All_Metrics",
-# )
+generate_jitterboxplots_for_all_metrics(
+    data=dataset,
+    metrics=metric_names,
+    y="Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 30),
+    output_dir=OUTPUT_DIR / "All_Metrics",
+)
 
 # Load the PCA results
 
-pca_results = pd.read_feather("/home/durrieu/ballpushing_utils/src/Plotting/pca_with_metadata.feather")
+pca_results = pd.read_feather("/home/durrieu/ballpushing_utils/outputs/pca_with_metadata.feather")
 
 
 def generate_pca_jitterboxplots_by_brain_region(
@@ -523,7 +521,7 @@ def generate_pca_jitterboxplots_by_brain_region(
             fig.delaxes(axes[j])
 
         # Save the layout as a single image
-        output_path = region_dir / f"PCA_Layout_by_{y.replace(' ', '_')}.png"
+        output_path = region_dir / f"PCA_Layout_by_{y.replace(' ', '_')}.pdf"
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         plt.close(fig)  # Close the figure to free memory
@@ -557,7 +555,7 @@ def generate_pca_jitterboxplots_by_brain_region(
         plt.tight_layout()
 
         # Save the 3D plot
-        output_path_3d = region_dir / f"PCA_3D_{brain_region}.png"
+        output_path_3d = region_dir / f"PCA_3D_{brain_region}.pdf"
         plt.savefig(output_path_3d, dpi=300, bbox_inches="tight")
         plt.close(fig)  # Close the figure to free memory
 
@@ -565,21 +563,21 @@ def generate_pca_jitterboxplots_by_brain_region(
 # Generate PCA jitterboxplots by brain region
 
 
-# # Example usage
-# pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
-# pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+# Example usage
+pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
+pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
 
-# generate_pca_jitterboxplots_by_brain_region(
-#     pca_data=pca_results,
-#     brain_regions=pca_brain_regions,
-#     components=pca_components,
-#     y="Nickname",  # Categorical column
-#     output_dir=OUTPUT_DIR / "PCA_Layouts",
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     figsize=(10, 6),
-#     ncols=3,  # 3 columns for PC1, PC2, and PC3
-# )
+generate_pca_jitterboxplots_by_brain_region(
+    pca_data=pca_results,
+    brain_regions=pca_brain_regions,
+    components=pca_components,
+    y="Nickname",  # Categorical column
+    output_dir=OUTPUT_DIR / "PCA_Layouts",
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 6),
+    ncols=3,  # 3 columns for PC1, PC2, and PC3
+)
 
 
 def generate_pca_jitterboxplots_by_nickname(
@@ -644,7 +642,7 @@ def generate_pca_jitterboxplots_by_nickname(
             fig.delaxes(axes[j])
 
         # Save the layout as a single image
-        output_path = nickname_dir / f"PCA_Layout_by_{y.replace(' ', '_')}.png"
+        output_path = nickname_dir / f"PCA_Layout_by_{y.replace(' ', '_')}.pdf"
         # Make the directory if it doesn't exist
         plt.tight_layout()
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
@@ -669,27 +667,27 @@ def generate_pca_jitterboxplots_by_nickname(
             plt.tight_layout()
 
             # Save the 3D plot
-            output_path_3d = nickname_dir / f"PCA_3D_{safe_nickname}.png"
+            output_path_3d = nickname_dir / f"PCA_3D_{safe_nickname}.pdf"
             plt.savefig(output_path_3d, dpi=300, bbox_inches="tight")
             plt.close(fig)  # Close the figure to free memory
 
 
-# # Define parameters
-# nicknames = pca_results["Nickname"].unique()
-# pca_components = ["PC1", "PC2", "PC3"]
+# Define parameters
+nicknames = pca_results["Nickname"].unique()
+pca_components = ["PC1", "PC2", "PC3"]
 
-# # Generate PCA jitterboxplots by Nickname
-# generate_pca_jitterboxplots_by_nickname(
-#     pca_data=pca_results,
-#     nicknames=nicknames,
-#     components=pca_components,
-#     y="Brain region",  # Categorical column
-#     output_dir=OUTPUT_DIR,
-#     hue="Brain region",  # Optional grouping column
-#     palette=Config.color_dict,
-#     figsize=(10, 6),
-#     ncols=3,
-# )
+# Generate PCA jitterboxplots by Nickname
+generate_pca_jitterboxplots_by_nickname(
+    pca_data=pca_results,
+    nicknames=nicknames,
+    components=pca_components,
+    y="Brain region",  # Categorical column
+    output_dir=OUTPUT_DIR,
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 6),
+    ncols=3,
+)
 
 
 def test_plot_metric(
@@ -844,17 +842,17 @@ def test_plot_metric(
 
 # Example usage of the test_plot function
 # Test the function with one nickname and one metric
-# test_plot_metric(
-#     data=dataset,
-#     nickname="86639 (LH1990)",  # Replace with an actual nickname from your dataset
-#     metric="nb_events",  # Replace with an actual metric from your dataset
-#     y="Nickname",
-#     output_dir=OUTPUT_DIR,
-#     palette=Config.color_dict,
-#     n_reps=300,
-#     show_progress=True,
-#     figsize=(8, 3),
-# )
+test_plot_metric(
+    data=dataset,
+    nickname="86639 (LH1990)",  # Replace with an actual nickname from your dataset
+    metric="nb_events",  # Replace with an actual metric from your dataset
+    y="Nickname",
+    output_dir=OUTPUT_DIR,
+    palette=Config.color_dict,
+    n_reps=300,
+    show_progress=True,
+    figsize=(8, 3),
+)
 
 
 def plot_metric_group_layouts(
@@ -916,7 +914,7 @@ def plot_metric_group_layouts(
             print(f"Processing metric group '{group_name}' for Nickname: {nickname}")
 
             # Define the output path for the layout
-            output_path = nickname_dir / f"{group_name.replace(' ', '_')}_layout.png"
+            output_path = nickname_dir / f"{group_name.replace(' ', '_')}_layout.pdf"
 
             # Check if the plot already exists
             if output_path.exists():
@@ -1054,4 +1052,144 @@ plot_metric_group_layouts(
     show_progress=False,
     ncols=3,  # Number of columns in the grid layout
     figsize=(8, 6),  # Size of each subplot
+)
+
+
+def plot_all_pca_components_sorted(pca_data, components, y, hue, palette="Set2", figsize=(10, 6), output_path=None):
+    """
+    Creates a single plot for all PCA components, sorted by median value and colored by Brain region.
+
+    Parameters:
+        pca_data (pd.DataFrame): The PCA dataset containing components and metadata.
+        components (list): List of PCA components to plot (e.g., ["PC1", "PC2", "PC3"]).
+        y (str): The name of the column for the y-axis (categorical values).
+        hue (str): The name of the column for color grouping.
+        palette (str or dict, optional): Color palette for the plot. Default is "Set2".
+        figsize (tuple, optional): Size of each figure. Default is (10, 6).
+        output_path (str or Path, optional): Path to save the plot. Default is None.
+
+    Returns:
+        None
+    """
+    # Ensure the y-axis column is categorical and sorted by median value of the first component
+    sorted_categories = pca_data.groupby(y, observed=True)[components[0]].median().sort_values(ascending=False).index
+    pca_data[y] = pd.Categorical(pca_data[y], categories=sorted_categories, ordered=True)
+
+    # Create a grid layout for the PCA components
+    ncols = 3  # Number of columns in the grid layout
+    nrows = -(-len(components) // ncols)  # Calculate the number of rows needed
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(figsize[0] * ncols, figsize[1] * nrows))
+    axes = axes.flatten()  # Flatten the axes array for easy iteration
+
+    for i, component in enumerate(components):
+        print(f"Creating jitterboxplot for PCA component: {component}")
+        ax = axes[i]
+
+        # Drop rows where the component or y is NaN
+        plot_data = pca_data.dropna(subset=[component, y])
+
+        # Create the jitterboxplot
+        jitterboxplot(
+            data=plot_data,
+            x=component,
+            y=y,
+            hue=hue,
+            palette=palette,
+            title=f"Jitterboxplot of {component} by {y}",
+            ax=ax,
+        )
+
+    # Hide any unused subplots
+    for j in range(len(components), len(axes)):
+        fig.delaxes(axes[j])
+
+    plt.tight_layout()
+
+    # Save the plot if an output path is provided
+    if output_path:
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"Saved PCA components plot to {output_path}")
+
+    plt.show()
+
+
+# Example usage
+pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+output_path = OUTPUT_DIR / "All_PCA_Components_Sorted.pdf"
+
+plot_all_pca_components_sorted(
+    pca_data=pca_results,
+    components=pca_components,
+    y="Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 6),
+    output_path=output_path,
+)
+
+
+def plot_individual_pca_components(pca_data, components, y, hue, palette="Set2", figsize=(10, 6), output_dir=None):
+    """
+    Creates individual plots for each PCA component, sorted by median value and colored by Brain region.
+
+    Parameters:
+        pca_data (pd.DataFrame): The PCA dataset containing components and metadata.
+        components (list): List of PCA components to plot (e.g., ["PC1", "PC2", "PC3"]).
+        y (str): The name of the column for the y-axis (categorical values).
+        hue (str): The name of the column for color grouping.
+        palette (str or dict, optional): Color palette for the plot. Default is "Set2".
+        figsize (tuple, optional): Size of each figure. Default is (10, 6).
+        output_dir (Path, optional): Directory to save the plots. Default is None.
+
+    Returns:
+        None
+    """
+    # Ensure the output directory exists
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    for component in components:
+        print(f"Creating jitterboxplot for PCA component: {component}")
+
+        # Drop rows where the component or y is NaN
+        plot_data = pca_data.dropna(subset=[component, y])
+
+        # Sort the y-axis categories by the median value of the current component
+        sorted_categories = plot_data.groupby(y, observed=True)[component].median().sort_values(ascending=False).index
+        plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_categories, ordered=True)
+
+        # Create the plot with the correct axis
+        fig, ax = plt.subplots(figsize=figsize)
+        jitterboxplot(
+            data=plot_data,
+            x=component,
+            y=y,
+            hue=hue,
+            palette=palette,
+            title=f"Jitterboxplot of {component} by {y}",
+            ax=ax,  # Pass the created axis
+        )
+
+        # Save the plot if an output directory is provided
+        if output_dir:
+            output_path = output_dir / f"{component}_Jitterboxplot.pdf"
+            plt.savefig(output_path, dpi=300, bbox_inches="tight")
+            print(f"Saved plot for {component} to {output_path}")
+
+        plt.close(fig)  # Close the figure to free memory
+
+
+# Example usage
+pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+output_dir = OUTPUT_DIR / "Individual_PCA_Components"
+
+plot_individual_pca_components(
+    pca_data=pca_results,
+    components=pca_components,
+    y="Nickname",  # Categorical column
+    hue="Brain region",  # Optional grouping column
+    palette=Config.color_dict,
+    figsize=(10, 30),
+    output_dir=output_dir,
 )

@@ -28,6 +28,7 @@ class Fly:
         directory,
         experiment=None,
         as_individual=False,
+        custom_config=None,
     ):
         """
         Initialize a Fly object.
@@ -68,6 +69,12 @@ class Fly:
         if self.config.experiment_type:
             self.config.set_experiment_config(self.config.experiment_type)
 
+        # Apply custom configuration if provided
+        if custom_config:
+            self._apply_custom_config(custom_config)
+
+        print(f" Time range: {self.config.time_range}")
+
         self.metadata = FlyMetadata(self)
 
         self.Genotype = self.metadata.arena_metadata.get("Genotype", "Unknown")
@@ -97,6 +104,35 @@ class Fly:
         self._learning_metrics = None
 
         self._skeleton_metrics = None
+
+    def _apply_custom_config(self, custom_config):
+        """
+        Apply custom configuration values to the Fly's config.
+
+        Args:
+            custom_config (str or dict): A path to a JSON/YAML file or a dictionary of custom configuration values.
+        """
+        if isinstance(custom_config, str):
+            # Load configuration from a JSON or YAML file
+            config_path = Path(custom_config)
+            if config_path.suffix in [".json"]:
+                with open(config_path, "r") as f:
+                    custom_config = json.load(f)
+            elif config_path.suffix in [".yaml", ".yml"]:
+                with open(config_path, "r") as f:
+                    custom_config = yaml.safe_load(f)
+            else:
+                raise ValueError("Unsupported file format. Use JSON or YAML.")
+
+        if not isinstance(custom_config, dict):
+            raise ValueError("Custom configuration must be a dictionary or a path to a JSON/YAML file.")
+
+        # Update the Fly's config with the custom values
+        for key, value in custom_config.items():
+            if hasattr(self.config, key):
+                setattr(self.config, key, value)
+            else:
+                raise AttributeError(f"Config has no attribute named '{key}'")
 
     @property
     def tracking_data(self):

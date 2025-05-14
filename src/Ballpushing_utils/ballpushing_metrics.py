@@ -12,14 +12,14 @@ class BallPushingMetrics:
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
         # Iterate over the indices of the flytrack objects list
-        self.chamber_exit_times = {
-            fly_idx: self.get_chamber_exit_time(fly_idx, 0)
-            for fly_idx in range(len(self.tracking_data.flytrack.objects))
-        }
+        # self.chamber_exit_times = {
+        #     fly_idx: self.get_chamber_exit_time(fly_idx, 0)
+        #     for fly_idx in range(len(self.tracking_data.flytrack.objects))
+        # }
 
-        if self.fly.config.debugging:
-            for fly_idx, exit_time in self.chamber_exit_times.items():
-                print(f"Fly {fly_idx} chamber exit time: {exit_time}")
+        # if self.fly.config.debugging:
+        for fly_idx, exit_time in self.tracking_data.chamber_exit_times.items():
+            print(f"Fly {fly_idx} chamber exit time: {exit_time}")
 
         self.metrics = {}
         if compute_metrics_on_init:
@@ -102,6 +102,13 @@ class BallPushingMetrics:
                 # Compute metrics
                 nb_events = metrics["nb_events"]()
                 max_event = metrics["max_event"]()
+                # Handle final event
+                final_event = metrics["final_event"]()
+                if final_event is None:
+                    final_event_idx = -1
+                    final_event_time = self.tracking_data.duration
+                else:
+                    final_event_idx, final_event_time, _ = final_event
                 significant_events = metrics["significant_events"]()
                 major_event = metrics["major_event"]()
                 events_direction = metrics["events_direction"]()
@@ -123,8 +130,8 @@ class BallPushingMetrics:
                     "max_event": max_event[0],
                     "max_event_time": max_event[1],
                     "max_distance": metrics["max_distance"](),
-                    "final_event": metrics["final_event"]()[0],
-                    "final_event_time": metrics["final_event"]()[1],
+                    "final_event": final_event_idx,
+                    "final_event_time": final_event_time,
                     "nb_significant_events": metrics["nb_significant_events"](),
                     "significant_ratio": (
                         len(metrics["significant_events"]()) / len(events) if len(events) > 0 else np.nan
@@ -157,7 +164,7 @@ class BallPushingMetrics:
                     "distance_moved": metrics["distance_moved"](),
                     "distance_ratio": metrics["distance_ratio"](),
                     "exit_time": self.tracking_data.exit_time,
-                    "chamber_exit_time": self.chamber_exit_times[fly_idx],
+                    "chamber_exit_time": self.tracking_data.chamber_exit_times[fly_idx],
                     "number_of_pauses": pause_metrics["number_of_pauses"],
                     "total_pause_duration": pause_metrics["total_pause_duration"],
                     "learning_slope": learning_slope["slope"],
@@ -233,7 +240,7 @@ class BallPushingMetrics:
             adjusted_nb_events = (
                 len(events)
                 * self.fly.config.adjusted_events_normalisation
-                / (self.tracking_data.duration - self.chamber_exit_times[fly_idx])
+                / (self.tracking_data.duration - self.tracking_data.chamber_exit_times[fly_idx])
                 if self.tracking_data.duration > 0
                 else 0
             )
@@ -401,7 +408,7 @@ class BallPushingMetrics:
         max_event, max_event_idx = self.find_event_by_distance(fly_idx, ball_idx, threshold, distance_type="max")
 
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
 
         # Calculate the time of the maximum event
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
@@ -465,13 +472,27 @@ class BallPushingMetrics:
 
         Returns
         -------
-        tuple
-            Final event index and final event time.
+        tuple or None
+            A tuple (final_event_idx, final_event_time, final_event_end) if a final event is found,
+            or None if no final event is found.
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
+        # Check the ball data time boundaries
+        ball_data_start = ball_data["time"].iloc[0]
+        ball_data_end = ball_data["time"].iloc[-1]
+
+        print(f"Ball data time range: {ball_data_start} to {ball_data_end}")
+
+        # # Apply time range filtering
+        # time_range = self.tracking_data.fly.config.time_range
+        # if time_range:
+        #     start = int(time_range[0] * self.tracking_data.fly.experiment.fps) if time_range[0] is not None else 0
+        #     end = int(time_range[1] * self.tracking_data.fly.experiment.fps) if time_range[1] is not None else None
+        #     ball_data = ball_data.iloc[start:end]
+
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
 
         # Determine the appropriate threshold
         if threshold is None:
@@ -480,30 +501,30 @@ class BallPushingMetrics:
             else:
                 threshold = self.fly.config.final_event_F1_threshold
 
+            print(f"Threshold for fly {fly_idx}, ball {ball_idx}: {threshold}")
+
         # Find the final event based on the threshold
         final_event, final_event_idx = self.find_event_by_distance(
             fly_idx, ball_idx, threshold, distance_type="threshold"
         )
 
-        # Calculate the time of the final event
+        print(f"Final event for fly {fly_idx}, ball {ball_idx}: {final_event}")
+
+        # If no final event is found, return None
+        if not final_event:
+            return None
+
+        # Calculate the time and end time of the final event
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            if final_event:
-                final_event_time = final_event[0] / self.fly.experiment.fps
-                if chamber_exit_time is not None:
-                    final_event_time -= chamber_exit_time
+            final_event_time = final_event[0] / self.fly.experiment.fps
+            final_event_end = final_event[1] / self.fly.experiment.fps
 
-                final_event_end = final_event[1] / self.fly.experiment.fps
-
-            else:
-                final_event_time = self.tracking_data.duration
-                final_event_end = None
+            if chamber_exit_time is not None:
+                final_event_time -= chamber_exit_time
+                final_event_end -= chamber_exit_time
         else:
-            if final_event:
-                final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
-                final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
-            else:
-                final_event_time = self.tracking_data.duration
-                final_event_end = None
+            final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+            final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
 
         return final_event_idx, final_event_time, final_event_end
 
@@ -539,7 +560,7 @@ class BallPushingMetrics:
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
 
         # Get significant events
         significant_events = self.get_significant_events(fly_idx, ball_idx, distance=distance)

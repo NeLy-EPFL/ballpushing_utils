@@ -128,6 +128,8 @@ class Config:
         if experiment_type == "MagnetBlock":
             self.time_range = (3600, None)
             self.final_event_threshold = 100
+
+            print("MagnetBlock experiment configuration set.")
             # Add other specific settings for MagnetBlock
         elif experiment_type == "Learning":
             # Learning experiment specific settings

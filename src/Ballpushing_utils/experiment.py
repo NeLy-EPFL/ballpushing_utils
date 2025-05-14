@@ -16,6 +16,7 @@ class Experiment:
         self,
         directory,
         metadata_only=False,
+        custom_config=None,
     ):
         """
         Parameters
@@ -42,7 +43,7 @@ class Experiment:
 
         # If metadata_only is True, don't load the flies
         if not metadata_only:
-            self.flies = self.load_flies()
+            self.flies = self.load_flies(custom_config)
 
     def __str__(self):
         # Generate a list of unique genotypes from the flies in the experiment
@@ -92,11 +93,15 @@ class Experiment:
 
         else:
             fps = 30
-            #print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
+            # print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
 
         return fps
 
-    def load_flies(self, multithreading=False):
+    def load_flies(
+        self,
+        custom_config,
+        multithreading=False,
+    ):
         """
         Loads all flies in the experiment directory. Find subdirectories containing at least one .mp4 file, then find all .mp4 files that are named the same as their parent directory. Create a Fly object for each found folder.
 
@@ -152,6 +157,7 @@ class Experiment:
                     mp4_file,
                     self,
                     # experiment_type=self.experiment_type,
+                    custom_config,
                 )
                 if fly is not None:
                     flies.append(fly)
@@ -220,6 +226,7 @@ def load_fly(
     mp4_file,
     experiment,
     # experiment_type,
+    custom_config,
 ):
     from Ballpushing_utils import Fly
 
@@ -229,6 +236,7 @@ def load_fly(
             mp4_file.parent,
             experiment=experiment,
             # experiment_type=experiment_type,
+            custom_config=custom_config,
         )
         try:
             if fly.tracking_data and fly.tracking_data.valid_data:

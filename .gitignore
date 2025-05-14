@@ -725,3 +725,5 @@ tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min
 tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['frame']_include_ball=False_use_pca=False.png
 tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['statistical']_include_ball=False_use_pca=False.png
 tests/integration/outputs/umap_optimisation_TNT/plots/combined_n_neighbors=5_min_dist=0.05_n_components=2_n_clusters=12_filter_features=True_feature_groups=\['tracking']_include_ball=False_use_pca=False.png
+src/Plotting/jitterboxplot.pdf
+src/Plotting/exLayout.pdf
