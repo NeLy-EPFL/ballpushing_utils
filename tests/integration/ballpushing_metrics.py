@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 from Ballpushing_utils import Fly, BallPushingMetrics
 from utils_behavior import Utils
+import inspect
 
 
 def process_fly(fly_path, metrics_to_test):
@@ -12,32 +13,47 @@ def process_fly(fly_path, metrics_to_test):
     # Initialize the BallPushingMetrics object
     metrics = BallPushingMetrics(ExampleFly.tracking_data)
 
-    # Store results in a dictionary
+    # If "all" is in metrics_to_test, collect all public methods that are metrics
+    if "all" in metrics_to_test:
+        # Exclude private methods and __init__
+        all_methods = [
+            name
+            for name, func in inspect.getmembers(metrics, predicate=inspect.ismethod)
+            if not name.startswith("_") and name != "compute_metrics"
+        ]
+        metrics_to_test = all_methods
+
     results = {}
 
-    # Test the selected metrics
-    if "pauses" in metrics_to_test:
-        pauses = metrics.detect_pauses(0)
-        results["pauses"] = pauses if pauses is not None else "No pauses detected."
+    for metric_name in metrics_to_test:
+        # Handle known metrics with required arguments
+        if metric_name == "pauses":
+            try:
+                result = metrics.detect_pauses(0)
+            except Exception as e:
+                result = f"Error: {e}"
+        elif metric_name == "max_event":
+            try:
+                result = metrics.get_max_event(0, 0)
+            except Exception as e:
+                result = f"Error: {e}"
+        elif metric_name == "final_event":
+            try:
+                result = metrics.get_final_event(0, 0)
+            except Exception as e:
+                result = f"Error: {e}"
+        else:
+            # Try to call the metric with no arguments
+            try:
+                func = getattr(metrics, metric_name)
+                result = func()
+            except Exception as e:
+                result = f"Error: {e}"
+        results[metric_name] = result if result is not None else "No result."
 
-    if "max_event" in metrics_to_test:
-        max_event = metrics.get_max_event(0, 0)
-        results["max_event"] = max_event if max_event is not None else "Max Event is None."
-
-    if "final_event" in metrics_to_test:
-        final_event = metrics.get_final_event(0, 0)
-        results["final_event"] = final_event if final_event is not None else "Final Event is None."
-
-    # Add more metrics as needed
-    # Example:
-    # if "some_other_metric" in metrics_to_test:
-    #     result = metrics.some_other_function()
-    #     results["some_other_metric"] = result
-
-    # Print results in a structured format
     print(json.dumps(results, indent=4))
     output_dir = Path(__file__).parent / "outputs"
-    # Optionally, write results to a file
+    output_dir.mkdir(exist_ok=True)
     with open(output_dir / "metrics_results.json", "w") as f:
         json.dump(results, f, indent=4)
     print(f"Results saved to {output_dir / 'metrics_results.json'}")

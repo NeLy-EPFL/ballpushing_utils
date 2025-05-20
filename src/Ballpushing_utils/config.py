@@ -30,9 +30,9 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "MagnetBlock"
+    experiment_type: str = "TNT"
     time_range: Optional[tuple] = None
-    success_cutoff: bool = True
+    success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
     chamber_radius: int = 50

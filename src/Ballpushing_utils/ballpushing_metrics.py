@@ -109,7 +109,26 @@ class BallPushingMetrics:
                     final_event_time = self.tracking_data.duration
                 else:
                     final_event_idx, final_event_time, _ = final_event
+
                 significant_events = metrics["significant_events"]()
+
+                # Filter events and significant events up to and including the final event
+                if final_event_idx >= 0:
+                    filtered_events = events[: final_event_idx + 1]
+                    filtered_significant_events = [e for e in significant_events if e[1] <= final_event_idx]
+                else:
+                    filtered_events = events  # If no final event, keep all
+                    filtered_significant_events = significant_events
+
+                # Filtered event directions for pulling/pushing ratio
+                filtered_events_direction = self.find_events_direction(fly_idx, ball_idx)
+                filtered_pushed = [
+                    e for e in filtered_events_direction[0] if e in [ev[0] for ev in filtered_significant_events]
+                ]
+                filtered_pulled = [
+                    e for e in filtered_events_direction[1] if e in [ev[0] for ev in filtered_significant_events]
+                ]
+
                 major_event = metrics["major_event"]()
                 events_direction = metrics["events_direction"]()
                 insight_effect = metrics["insight_effect"]()
@@ -124,6 +143,20 @@ class BallPushingMetrics:
                 velocity_during_interactions = safe_call(self.compute_velocity_during_interactions, fly_idx, ball_idx)
                 velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
 
+                binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx)
+                interaction_rate_by_bin = safe_call(self.compute_interaction_rate_by_bin, fly_idx, ball_idx)
+
+                binned_slope_dict = {f"binned_slope_{i}": val for i, val in enumerate(binned_slope or [])}
+                interaction_rate_by_bin_dict = {
+                    f"interaction_rate_bin_{i}": val for i, val in enumerate(interaction_rate_by_bin or [])
+                }
+                overall_slope = safe_call(self.compute_overall_slope, fly_idx, ball_idx)
+                overall_interaction_rate = safe_call(self.compute_overall_interaction_rate, fly_idx, ball_idx)
+
+                auc = safe_call(self.compute_auc, fly_idx, ball_idx)
+                binned_auc = safe_call(self.compute_binned_auc, fly_idx, ball_idx)
+                binned_auc_dict = {f"binned_auc_{i}": val for i, val in enumerate(binned_auc or [])}
+
                 # Store metrics in the dictionary
                 self.metrics[key] = {
                     "nb_events": nb_events,
@@ -132,53 +165,78 @@ class BallPushingMetrics:
                     "max_distance": metrics["max_distance"](),
                     "final_event": final_event_idx,
                     "final_event_time": final_event_time,
-                    "nb_significant_events": metrics["nb_significant_events"](),
+                    "nb_significant_events": len(filtered_significant_events),
                     "significant_ratio": (
-                        len(metrics["significant_events"]()) / len(events) if len(events) > 0 else np.nan
+                        len(filtered_significant_events) / len(filtered_events) if len(filtered_events) > 0 else np.nan
                     ),
                     "first_significant_event": metrics["first_significant_event"]()[0],
                     "first_significant_event_time": metrics["first_significant_event"]()[1],
                     "major_event": major_event[0],
                     "major_event_time": major_event[1],
                     "major_event_first": insight_effect["first_event"],
-                    "insight_effect": insight_effect["raw_effect"],
-                    "insight_effect_log": insight_effect["log_effect"],
-                    "cumulated_breaks_duration": metrics["cumulated_breaks_duration"](),
-                    "chamber_time": metrics["chamber_time"](),
-                    "chamber_ratio": metrics["chamber_ratio"](),
-                    "pushed": len(events_direction[0]),
-                    "pulled": len(events_direction[1]),
+                    # "insight_effect": safe_call(self.get_insight_effect, fly_idx, ball_idx, subset=filtered_events)[
+                    #     "raw_effect"
+                    # ],
+                    # "insight_effect_log": safe_call(self.get_insight_effect, fly_idx, ball_idx, subset=filtered_events)[
+                    #     "log_effect"
+                    # ],
+                    "cumulated_breaks_duration": safe_call(
+                        self.get_cumulated_breaks_duration, fly_idx, ball_idx, subset=filtered_events
+                    ),
+                    "chamber_time": safe_call(self.get_chamber_time, fly_idx, end_time=final_event_time),
+                    "chamber_ratio": safe_call(self.chamber_ratio, fly_idx, end_time=final_event_time),
+                    "pushed": len(filtered_pushed),
+                    "pulled": len(filtered_pulled),
                     "pulling_ratio": (
-                        len(events_direction[1]) / (len(events_direction[0]) + len(events_direction[1]))
-                        if (len(events_direction[0]) + len(events_direction[1])) > 0
+                        len(filtered_pulled) / (len(filtered_pushed) + len(filtered_pulled))
+                        if (len(filtered_pushed) + len(filtered_pulled)) > 0
                         else -1
                     ),
                     "success_direction": metrics["success_direction"](),
                     "interaction_proportion": (
-                        sum([event[2] for event in events])
-                        / (sum([event[2] for event in events]) + metrics["cumulated_breaks_duration"]())
-                        if metrics["cumulated_breaks_duration"]() > 0
+                        sum([event[2] for event in filtered_events])
+                        / (final_event_time if final_event_time is not None else self.tracking_data.duration)
+                        if (final_event_time if final_event_time is not None else self.tracking_data.duration) > 0
                         else np.nan
                     ),
-                    "interaction_persistence": interaction_persistence,
-                    "distance_moved": metrics["distance_moved"](),
-                    "distance_ratio": metrics["distance_ratio"](),
+                    "interaction_persistence": safe_call(
+                        self.compute_interaction_persistence, fly_idx, ball_idx, subset=filtered_events
+                    ),
+                    "distance_moved": safe_call(self.get_distance_moved, fly_idx, ball_idx, subset=filtered_events),
+                    "distance_ratio": safe_call(self.get_distance_ratio, fly_idx, ball_idx, subset=filtered_events),
                     "exit_time": self.tracking_data.exit_time,
                     "chamber_exit_time": self.tracking_data.chamber_exit_times[fly_idx],
-                    "number_of_pauses": pause_metrics["number_of_pauses"],
-                    "total_pause_duration": pause_metrics["total_pause_duration"],
+                    "number_of_pauses": safe_call(self.compute_pause_metrics, fly_idx, subset=filtered_events)[
+                        "number_of_pauses"
+                    ],
+                    "total_pause_duration": safe_call(self.compute_pause_metrics, fly_idx, subset=filtered_events)[
+                        "total_pause_duration"
+                    ],
+                    # Learning and logistic slopes: use full data
                     "learning_slope": learning_slope["slope"],
                     "learning_slope_r2": learning_slope["r2"],
                     "logistic_L": logistic_features["L"],
                     "logistic_k": logistic_features["k"],
                     "logistic_t0": logistic_features["t0"],
                     "logistic_r2": logistic_features["r2"],
-                    "avg_displacement_after_success": event_influence["avg_displacement_after_success"],
-                    "avg_displacement_after_failure": event_influence["avg_displacement_after_failure"],
-                    "influence_ratio": event_influence["influence_ratio"],
+                    # "avg_displacement_after_success": safe_call(
+                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
+                    # )["avg_displacement_after_success"],
+                    # "avg_displacement_after_failure": safe_call(
+                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
+                    # )["avg_displacement_after_failure"],
+                    # "influence_ratio": safe_call(
+                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
+                    # )["influence_ratio"],
                     "normalized_velocity": normalized_velocity,
                     "velocity_during_interactions": velocity_during_interactions,
                     "velocity_trend": velocity_trend,
+                    "overall_slope": overall_slope,
+                    "overall_interaction_rate": overall_interaction_rate,
+                    **binned_slope_dict,
+                    **interaction_rate_by_bin_dict,
+                    "auc": auc,
+                    **binned_auc_dict,
                 }
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
@@ -626,12 +684,21 @@ class BallPushingMetrics:
 
         return breaks
 
-    def get_cumulated_breaks_duration(self, fly_idx, ball_idx):
+    def get_cumulated_breaks_duration(self, fly_idx, ball_idx, subset=None):
         breaks = self.find_breaks(fly_idx, ball_idx)
+        if subset is not None:
+            # Only include breaks that overlap with any event in subset
+            valid_ranges = [(event[0], event[1]) for event in subset]
+            filtered_breaks = []
+            for br in breaks:
+                br_start, br_end, _ = br
+                if any((br_start < end and br_end > start) for start, end in valid_ranges):
+                    filtered_breaks.append(br)
+            breaks = filtered_breaks
         cumulated_breaks_duration = sum([break_[2] for break_ in breaks])
         return cumulated_breaks_duration
 
-    def get_chamber_time(self, fly_idx):
+    def get_chamber_time(self, fly_idx, end_time=None):
         """
         Compute the time spent by the fly in the chamber. The chamber is defined as the area within a certain radius of the fly start position.
 
@@ -655,6 +722,9 @@ class BallPushingMetrics:
         # Determine the frames where the fly is within a certain radius of the start position
         in_chamber = distances <= self.fly.config.chamber_radius
 
+        if end_time is not None:
+            in_chamber = in_chamber[: int(end_time * self.fly.experiment.fps)]
+
         # Calculate the time spent in the chamber
         time_in_chamber = np.sum(in_chamber) / self.fly.experiment.fps
 
@@ -662,17 +732,14 @@ class BallPushingMetrics:
 
     # TODO: Maybe use the non smoothed data to compute this kind of thing as it looks like there's a slight lag in the smoothed data.
 
-    def chamber_ratio(self, fly_idx):
+    def chamber_ratio(self, fly_idx, end_time=None):
         """Compute the ratio of time spent in the chamber to the total time of the experiment.
         Args:
             fly_idx (int): Index of the fly.
         """
 
-        # Get the time spent in the chamber
-        time_in_chamber = self.get_chamber_time(fly_idx)
-
-        # Get the total time of the experiment
-        total_time = self.tracking_data.duration
+        time_in_chamber = self.get_chamber_time(fly_idx, end_time=end_time)
+        total_time = end_time if end_time is not None else self.tracking_data.duration
 
         # Calculate the ratio
         if total_time > 0:
@@ -771,7 +838,7 @@ class BallPushingMetrics:
 
         return total_distance
 
-    def get_distance_ratio(self, fly_idx, ball_idx):
+    def get_distance_ratio(self, fly_idx, ball_idx, subset=None):
         """
         Calculate the ratio between the maximum distance moved from the start position
         and the total distance moved by the ball. This ratio highlights discrepancies
@@ -789,7 +856,7 @@ class BallPushingMetrics:
         max_distance = self.get_max_distance(fly_idx, ball_idx)
 
         # Get the total distance moved
-        total_distance = self.get_distance_moved(fly_idx, ball_idx)
+        total_distance = self.get_distance_moved(fly_idx, ball_idx, subset=subset)
 
         # Calculate the ratio
         if total_distance > 0:
@@ -845,35 +912,16 @@ class BallPushingMetrics:
         else:
             return -1, self.tracking_data.duration
 
-    def get_insight_effect(self, fly_idx, ball_idx, epsilon=1e-6, strength_threshold=2):
+    def get_insight_effect(self, fly_idx, ball_idx, epsilon=1e-6, strength_threshold=2, subset=None):
         """
-        Calculate enhanced insight effect with performance analytics.
-
-        Parameters
-        ----------
-        fly_idx : int
-            Index of the fly.
-        ball_idx : int
-            Index of the ball.
-        epsilon : float, optional
-            Smoothing factor to prevent division by zero.
-        strength_threshold : float, optional
-            Threshold for strong/weak classification.
-
-        Returns
-        -------
-        dict
-            Dictionary containing multiple insight metrics:
-            - raw_effect: Base ratio of post/pre aha performance
-            - log_effect: Log-transformed effect for normal distribution
-            - classification: Strong/weak based on threshold
-            - first_event: Flag for aha moment as first interaction
-            - post_aha_count: Number of post-aha events
+        Calculate enhanced insight effect with performance analytics, optionally on a subset of events.
         """
-        significant_events = [event[0] for event in self.get_significant_events(fly_idx, ball_idx)]
+        if subset is not None:
+            significant_events = [event[0] for event in subset]
+        else:
+            significant_events = [event[0] for event in self.get_significant_events(fly_idx, ball_idx)]
         major_event_index, _ = self.get_major_event(fly_idx, ball_idx)
 
-        # Handle no significant events case early
         if not significant_events:
             return {
                 "raw_effect": np.nan,
@@ -883,7 +931,6 @@ class BallPushingMetrics:
                 "post_aha_count": 0,
             }
 
-        # Handle no aha moment case early
         if major_event_index is None:
             return {
                 "raw_effect": np.nan,
@@ -893,15 +940,12 @@ class BallPushingMetrics:
                 "post_aha_count": 0,
             }
 
-        # Segment events with aha moment in before period
         before_aha = significant_events[: major_event_index + 1]
         after_aha = significant_events[major_event_index + 1 :]
 
-        # Calculate average distances with safety checks
         avg_before = self._calculate_avg_distance(fly_idx, ball_idx, before_aha)
         avg_after = self._calculate_avg_distance(fly_idx, ball_idx, after_aha)
 
-        # Core insight calculation
         if major_event_index == 0:
             insight_effect = 1.0
         elif avg_before == 0:
@@ -909,7 +953,6 @@ class BallPushingMetrics:
         else:
             insight_effect = avg_after / avg_before
 
-        # Transformations and classifications
         log_effect = np.log(insight_effect + 1) if insight_effect > 0 else np.nan
         classification = "strong" if insight_effect > strength_threshold else "weak"
 
@@ -1092,48 +1135,42 @@ class BallPushingMetrics:
 
         return pauses_timestamps
 
-    def compute_pause_metrics(self, fly_idx, threshold=5, window=5, minimum_duration=2):
+    def compute_pause_metrics(self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2):
         """
-        Compute the number of pauses and total duration of pauses for a given fly.
-
-        Parameters
-        ----------
-        fly_idx : int
-            Index of the fly.
-        threshold : float, optional
-            Movement threshold in pixels to consider as a pause (default is 5).
-        window : int, optional
-            Number of frames to use for calculating movement (default is 5).
-        minimum_duration : float, optional
-            Minimum duration (in seconds) for a pause to be considered valid (default is 2).
-
-        Returns
-        -------
-        dict
-            Dictionary containing:
-            - "number_of_pauses": int, the total number of pauses.
-            - "total_pause_duration": float, the total duration of all pauses in seconds.
+        Compute the number of pauses and total duration of pauses for a given fly, optionally within a subset of frames.
         """
-        # Detect pauses
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
-        # If no pauses are detected, return default values
+        if subset is not None:
+            # Flatten all intervals in subset to a set of valid time ranges (in seconds)
+            valid_ranges = []
+            for event in subset:
+                start_time = event[0] / self.fly.experiment.fps
+                end_time = event[1] / self.fly.experiment.fps
+                valid_ranges.append((start_time, end_time))
+            # Filter pauses to only those that overlap with any valid range
+            filtered_pauses = []
+            for pause in pauses:
+                pause_start, pause_end, duration = pause
+                if any((pause_start < end and pause_end > start) for start, end in valid_ranges):
+                    filtered_pauses.append(pause)
+            pauses = filtered_pauses
+
         if not pauses:
             return {
                 "number_of_pauses": 0,
                 "total_pause_duration": 0.0,
             }
 
-        # Compute metrics
         number_of_pauses = len(pauses)
-        total_pause_duration = sum(pause[2] for pause in pauses)  # Sum the durations of all pauses
+        total_pause_duration = sum(pause[2] for pause in pauses)
 
         return {
             "number_of_pauses": number_of_pauses,
             "total_pause_duration": total_pause_duration,
         }
 
-    def compute_interaction_persistence(self, fly_idx, ball_idx):
+    def compute_interaction_persistence(self, fly_idx, ball_idx, subset=None):
         """
         Compute the interaction persistence for a given fly and ball.
 
@@ -1150,8 +1187,7 @@ class BallPushingMetrics:
             The average duration of interaction events in seconds, or np.nan if no events exist.
         """
         # Get the interaction events for the fly and ball
-        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
-
+        events = subset if subset is not None else self.tracking_data.interaction_events[fly_idx][ball_idx]
         if not events:
             # Return NaN if there are no interaction events
             return np.nan
@@ -1443,3 +1479,109 @@ class BallPushingMetrics:
 
         # Return the slope of the trend
         return model.coef_[0]
+
+    def compute_binned_slope(self, fly_idx, ball_idx, n_bins=12):
+        """
+        Compute the slope of the ball position curve in time bins.
+
+        Returns
+        -------
+        list of float: Slope for each bin.
+        """
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps
+        position = ball_data["y_centre"].values
+
+        bins = np.linspace(time[0], time[-1], n_bins + 1)
+        slopes = []
+
+        for i in range(n_bins):
+            mask = (time >= bins[i]) & (time < bins[i + 1])
+            t_bin = time[mask]
+            p_bin = position[mask]
+            if len(t_bin) > 1 and not np.all(p_bin == p_bin[0]):
+                model = LinearRegression()
+                model.fit(t_bin.reshape(-1, 1), p_bin)
+                slopes.append(model.coef_[0])
+            else:
+                slopes.append(np.nan)
+        return slopes
+
+    def compute_overall_slope(self, fly_idx, ball_idx):
+        """
+        Compute the overall slope of the ball trajectory.
+        """
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps
+        position = ball_data["y_centre"].values
+        if len(time) < 2 or np.all(position == position[0]):
+            return np.nan
+        model = LinearRegression()
+        model.fit(time.reshape(-1, 1), position)
+        return model.coef_[0]
+
+    def compute_interaction_rate_by_bin(self, fly_idx, ball_idx, n_bins=12):
+        """
+        Compute the rate of interactions per time bin.
+        Returns a list of rates (events per second) for each bin.
+        """
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps
+        bins = np.linspace(time[0], time[-1], n_bins + 1)
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+        rates = []
+        for i in range(n_bins):
+            bin_start, bin_end = bins[i], bins[i + 1]
+            # Count events whose start falls in this bin
+            count = sum(
+                (event[0] / self.fly.experiment.fps >= bin_start) and (event[0] / self.fly.experiment.fps < bin_end)
+                for event in events
+            )
+            duration = bin_end - bin_start
+            rates.append(count / duration if duration > 0 else np.nan)
+        return rates
+
+    def compute_overall_interaction_rate(self, fly_idx, ball_idx):
+        """
+        Compute the overall rate of interactions (events per second).
+        """
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+        duration = self.tracking_data.duration
+        return len(events) / duration if duration > 0 else np.nan
+
+    def compute_auc(self, fly_idx, ball_idx):
+        """
+        Compute the area under the y_centre vs. time curve for the ball.
+
+        Returns
+        -------
+        float: The total AUC.
+        """
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps
+        position = ball_data["y_centre"].values
+        auc = np.trapz(position, time)
+        return auc
+
+    def compute_binned_auc(self, fly_idx, ball_idx, n_bins=12):
+        """
+        Compute the AUC in each time bin.
+
+        Returns
+        -------
+        list of float: AUC for each bin.
+        """
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        time = np.arange(len(ball_data)) / self.fly.experiment.fps
+        position = ball_data["y_centre"].values
+        bins = np.linspace(time[0], time[-1], n_bins + 1)
+        aucs = []
+        for i in range(n_bins):
+            mask = (time >= bins[i]) & (time < bins[i + 1])
+            t_bin = time[mask]
+            p_bin = position[mask]
+            if len(t_bin) > 1:
+                aucs.append(np.trapz(p_bin, t_bin))
+            else:
+                aucs.append(np.nan)
+        return aucs

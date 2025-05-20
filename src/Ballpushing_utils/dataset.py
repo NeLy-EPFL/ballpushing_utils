@@ -476,7 +476,11 @@ class Dataset:
 
         # If no specific metrics are provided, include all available metrics
         if not metrics:
-            metrics = list(fly.event_summaries[next(iter(fly.event_summaries))].keys())
+            # Instead of just the first dict's keys, collect all keys from all event_summaries
+            all_keys = set()
+            for metric_dict in fly.event_summaries.values():
+                all_keys.update(metric_dict.keys())
+            metrics = list(all_keys)
 
         # For each pair of fly and ball, get the metrics from the Fly metrics
         for key, metric_dict in fly.event_summaries.items():
