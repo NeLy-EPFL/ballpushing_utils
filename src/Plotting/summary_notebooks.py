@@ -239,32 +239,32 @@ def jitterboxplot(data, x, y, hue=None, palette="Set2", title=None, figsize=(10,
     plt.tight_layout()
 
 
-# Example usage of the jitterboxplot function
-jitterboxplot(
-    data=dataset,
-    x="nb_events",  # Numeric column
-    y="Simplified Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    title="Jitterboxplot of Number of Events by Brain Region",
-)
+# # Example usage of the jitterboxplot function
+# jitterboxplot(
+#     data=dataset,
+#     x="nb_events",  # Numeric column
+#     y="Simplified Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     title="Jitterboxplot of Number of Events by Brain Region",
+# )
 
-# Now let's create one example layout with the first metric group
-group = "Events Metrics"
+# # Now let's create one example layout with the first metric group
+# group = "Events Metrics"
 
-dataset = Config.cleanup_data(dataset)
+# dataset = Config.cleanup_data(dataset)
 
-# Get a brain region and
+# # Get a brain region and
 
-Control_data = dataset[dataset["Brain region"] == "Control"]
+# Control_data = dataset[dataset["Brain region"] == "Control"]
 
-ex_region = dataset[dataset["Brain region"] == "MB"]
+# ex_region = dataset[dataset["Brain region"] == "MB"]
 
-Combined = pd.concat([Control_data, ex_region], axis=0).reset_index(drop=True)
+# Combined = pd.concat([Control_data, ex_region], axis=0).reset_index(drop=True)
 
-# Check for duplicate indices (optional for debugging)
-print("Checking for duplicate indices...")
-print(Combined.index.duplicated().sum(), "duplicate indices found.")
+# # Check for duplicate indices (optional for debugging)
+# print("Checking for duplicate indices...")
+# print(Combined.index.duplicated().sum(), "duplicate indices found.")
 
 
 def create_layout(data, metrics, y, hue=None, palette="Set2", figsize=(10, 6), ncols=2):
@@ -410,29 +410,29 @@ def generate_jitterboxplots_for_all_metrics(
         plt.close(fig)  # Close the figure to free memory
 
 
-# Example usage of the jitterboxplot function
-explot = jitterboxplot(
-    data=Combined,
-    x="nb_events",  # Numeric column
-    y="Simplified Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    title="Jitterboxplot of Number of Events by Brain Region",
-)
+# # Example usage of the jitterboxplot function
+# explot = jitterboxplot(
+#     data=Combined,
+#     x="nb_events",  # Numeric column
+#     y="Simplified Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     title="Jitterboxplot of Number of Events by Brain Region",
+# )
 
-plt.savefig("jitterboxplot.pdf", dpi=300, bbox_inches="tight")
+# plt.savefig("jitterboxplot.pdf", dpi=300, bbox_inches="tight")
 
-explot = create_layout(
-    data=Combined,
-    metrics=metric_groups[group],
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 6),
-)
+# explot = create_layout(
+#     data=Combined,
+#     metrics=metric_groups[group],
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+# )
 
-# Save as pdf
-plt.savefig("exLayout.pdf", dpi=300, bbox_inches="tight")
+# # Save as pdf
+# plt.savefig("exLayout.pdf", dpi=300, bbox_inches="tight")
 
 brain_regions = dataset["Brain region"].unique()  # Get unique brain regions
 generate_layouts_by_brain_region(
@@ -460,7 +460,7 @@ generate_jitterboxplots_for_all_metrics(
 
 # Load the PCA results
 
-pca_results = pd.read_feather("/home/durrieu/ballpushing_utils/outputs/pca_with_metadata.feather")
+# pca_results = pd.read_feather("/home/durrieu/ballpushing_utils/outputs/pca_with_metadata.feather")
 
 
 def generate_pca_jitterboxplots_by_brain_region(
@@ -563,21 +563,21 @@ def generate_pca_jitterboxplots_by_brain_region(
 # Generate PCA jitterboxplots by brain region
 
 
-# Example usage
-pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
-pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+# # Example usage
+# pca_brain_regions = pca_results["Brain region"].unique()  # Get unique brain regions
+# pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
 
-generate_pca_jitterboxplots_by_brain_region(
-    pca_data=pca_results,
-    brain_regions=pca_brain_regions,
-    components=pca_components,
-    y="Nickname",  # Categorical column
-    output_dir=OUTPUT_DIR / "PCA_Layouts",
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 6),
-    ncols=3,  # 3 columns for PC1, PC2, and PC3
-)
+# generate_pca_jitterboxplots_by_brain_region(
+#     pca_data=pca_results,
+#     brain_regions=pca_brain_regions,
+#     components=pca_components,
+#     y="Nickname",  # Categorical column
+#     output_dir=OUTPUT_DIR / "PCA_Layouts",
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+#     ncols=3,  # 3 columns for PC1, PC2, and PC3
+# )
 
 
 def generate_pca_jitterboxplots_by_nickname(
@@ -672,22 +672,22 @@ def generate_pca_jitterboxplots_by_nickname(
             plt.close(fig)  # Close the figure to free memory
 
 
-# Define parameters
-nicknames = pca_results["Nickname"].unique()
-pca_components = ["PC1", "PC2", "PC3"]
+# # Define parameters
+# nicknames = pca_results["Nickname"].unique()
+# pca_components = ["PC1", "PC2", "PC3"]
 
-# Generate PCA jitterboxplots by Nickname
-generate_pca_jitterboxplots_by_nickname(
-    pca_data=pca_results,
-    nicknames=nicknames,
-    components=pca_components,
-    y="Brain region",  # Categorical column
-    output_dir=OUTPUT_DIR,
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 6),
-    ncols=3,
-)
+# # Generate PCA jitterboxplots by Nickname
+# generate_pca_jitterboxplots_by_nickname(
+#     pca_data=pca_results,
+#     nicknames=nicknames,
+#     components=pca_components,
+#     y="Brain region",  # Categorical column
+#     output_dir=OUTPUT_DIR,
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+#     ncols=3,
+# )
 
 
 def test_plot_metric(
@@ -840,19 +840,19 @@ def test_plot_metric(
     plt.show()
 
 
-# Example usage of the test_plot function
-# Test the function with one nickname and one metric
-test_plot_metric(
-    data=dataset,
-    nickname="86639 (LH1990)",  # Replace with an actual nickname from your dataset
-    metric="nb_events",  # Replace with an actual metric from your dataset
-    y="Nickname",
-    output_dir=OUTPUT_DIR,
-    palette=Config.color_dict,
-    n_reps=300,
-    show_progress=True,
-    figsize=(8, 3),
-)
+# # Example usage of the test_plot function
+# # Test the function with one nickname and one metric
+# test_plot_metric(
+#     data=dataset,
+#     nickname="86639 (LH1990)",  # Replace with an actual nickname from your dataset
+#     metric="nb_events",  # Replace with an actual metric from your dataset
+#     y="Nickname",
+#     output_dir=OUTPUT_DIR,
+#     palette=Config.color_dict,
+#     n_reps=300,
+#     show_progress=True,
+#     figsize=(8, 3),
+# )
 
 
 def plot_metric_group_layouts(
@@ -1035,24 +1035,24 @@ def plot_metric_group_layouts(
             print(f"Saved layout for metric group '{group_name}' for Nickname: {nickname} to {output_path}")
 
 
-# Define parameters
-nicknames = dataset["Nickname"].unique()
-metrics = metric_names  # List of all metrics
+# # Define parameters
+# nicknames = dataset["Nickname"].unique()
+# metrics = metric_names  # List of all metrics
 
 
-# Generate layouts for all metric groups
-plot_metric_group_layouts(
-    data=dataset,
-    nicknames=nicknames,
-    metric_groups=metric_groups,  # Dictionary of metric groups
-    y="Nickname",
-    output_dir=OUTPUT_DIR,
-    palette=Config.color_dict,
-    n_reps=300,
-    show_progress=False,
-    ncols=3,  # Number of columns in the grid layout
-    figsize=(8, 6),  # Size of each subplot
-)
+# # Generate layouts for all metric groups
+# plot_metric_group_layouts(
+#     data=dataset,
+#     nicknames=nicknames,
+#     metric_groups=metric_groups,  # Dictionary of metric groups
+#     y="Nickname",
+#     output_dir=OUTPUT_DIR,
+#     palette=Config.color_dict,
+#     n_reps=300,
+#     show_progress=False,
+#     ncols=3,  # Number of columns in the grid layout
+#     figsize=(8, 6),  # Size of each subplot
+# )
 
 
 def plot_all_pca_components_sorted(pca_data, components, y, hue, palette="Set2", figsize=(10, 6), output_path=None):
@@ -1113,19 +1113,19 @@ def plot_all_pca_components_sorted(pca_data, components, y, hue, palette="Set2",
     plt.show()
 
 
-# Example usage
-pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
-output_path = OUTPUT_DIR / "All_PCA_Components_Sorted.pdf"
+# # Example usage
+# pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+# output_path = OUTPUT_DIR / "All_PCA_Components_Sorted.pdf"
 
-plot_all_pca_components_sorted(
-    pca_data=pca_results,
-    components=pca_components,
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 6),
-    output_path=output_path,
-)
+# plot_all_pca_components_sorted(
+#     pca_data=pca_results,
+#     components=pca_components,
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 6),
+#     output_path=output_path,
+# )
 
 
 def plot_individual_pca_components(pca_data, components, y, hue, palette="Set2", figsize=(10, 6), output_dir=None):
@@ -1181,15 +1181,15 @@ def plot_individual_pca_components(pca_data, components, y, hue, palette="Set2",
 
 
 # Example usage
-pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
-output_dir = OUTPUT_DIR / "Individual_PCA_Components"
+# pca_components = ["PC1", "PC2", "PC3"]  # Specify PCA components to plot
+# output_dir = OUTPUT_DIR / "Individual_PCA_Components"
 
-plot_individual_pca_components(
-    pca_data=pca_results,
-    components=pca_components,
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 30),
-    output_dir=output_dir,
-)
+# plot_individual_pca_components(
+#     pca_data=pca_results,
+#     components=pca_components,
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 30),
+#     output_dir=output_dir,
+# )
