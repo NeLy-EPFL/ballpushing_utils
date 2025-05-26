@@ -31,7 +31,7 @@ metric_names = [
     "nb_events",
     "max_event",
     "max_event_time",
-    # "max_distance",
+    "max_distance",
     # "final_event",
     # "final_event_time",
     "nb_significant_events",
@@ -48,10 +48,10 @@ metric_names = [
     # "chamber_ratio",
     # "pushed",
     # "pulled",
-    # "pulling_ratio",
+    "pulling_ratio",
     # "success_direction",
     # "interaction_proportion",
-    # "interaction_persistence",
+    "interaction_persistence",
     # "distance_moved",
     # "distance_ratio",
     # "exit_time",
@@ -70,7 +70,18 @@ metric_names = [
     # "normalized_velocity",
     # "velocity_during_interactions",
     # "velocity_trend",
+    "auc",
+    "overall_slope",
+    "overall_interaction_rate",
 ]
+
+# Find all columns with the desired prefixes
+binned_slope_cols = [col for col in dataset.columns if col.startswith("binned_slope_")]
+interaction_rate_cols = [col for col in dataset.columns if col.startswith("interaction_rate_bin_")]
+binned_auc_cols = [col for col in dataset.columns if col.startswith("binned_auc_")]
+
+# Add them to metric_names list
+metric_names += binned_slope_cols + interaction_rate_cols + binned_auc_cols
 
 # For each column, handle missing values gracefully
 
@@ -114,19 +125,19 @@ print(f"Metric columns: {metric_names}")
 metrics_data = dataset[valid_metric_names]  # Select only the valid metric columns
 metadata_data = dataset[metadata_names]  # Select only the metadata columns
 
-# Step 2.1: Filter features based on variance
-feature_variance = metrics_data.var(axis=0)
-selected_features = feature_variance[feature_variance > 0.01].index.tolist()
-metrics_data = metrics_data[selected_features]
-print(f"Filtered features based on variance: {len(metrics_data.columns)} remaining.")
+# # Step 2.1: Filter features based on variance
+# feature_variance = metrics_data.var(axis=0)
+# selected_features = feature_variance[feature_variance > 0.01].index.tolist()
+# metrics_data = metrics_data[selected_features]
+# print(f"Filtered features based on variance: {len(metrics_data.columns)} remaining.")
 
-# Step 2.2: Filter features based on correlation
-corr_matrix = metrics_data.corr().abs()
-upper_triangle = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-to_drop = [column for column in upper_triangle.columns if any(upper_triangle[column] > 0.95)]
-metrics_data = metrics_data.drop(columns=to_drop, errors="ignore")
-print(f"Filtered features: {len(to_drop)} features removed based on correlation.")
-print(f"Remaining features after filtering: {len(metrics_data.columns)}")
+# # Step 2.2: Filter features based on correlation
+# corr_matrix = metrics_data.corr().abs()
+# upper_triangle = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+# to_drop = [column for column in upper_triangle.columns if any(upper_triangle[column] > 0.95)]
+# metrics_data = metrics_data.drop(columns=to_drop, errors="ignore")
+# print(f"Filtered features: {len(to_drop)} features removed based on correlation.")
+# print(f"Remaining features after filtering: {len(metrics_data.columns)}")
 
 # Update valid_metric_names to match the filtered metrics_data
 valid_metric_names = metrics_data.columns.tolist()
