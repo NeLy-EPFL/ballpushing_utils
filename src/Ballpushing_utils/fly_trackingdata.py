@@ -77,9 +77,9 @@ class FlyTrackingData:
             if not times.empty:
                 self.duration = times.iloc[-1] - times.iloc[0]
 
-            # if self.fly.config.debugging:
-            print(f"Duration for {self.fly.metadata.name}: {self.duration}")
-            print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
+            if self.fly.config.debugging:
+                print(f"Duration for {self.fly.metadata.name}: {self.duration}")
+                print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
 
             self.fly_skeleton = self.get_skeleton()
             self.exit_time = self.get_exit_time()
@@ -199,10 +199,12 @@ class FlyTrackingData:
 
         # TODO F1 adaptation
         final_event = ballpushing_metrics.get_final_event(0, 0)
-        print(f"Final event for {self.fly.metadata.name}: {final_event}")
+        if self.fly.config.debugging:
+            print(f"Final event for {self.fly.metadata.name}: {final_event}")
         # Check if the final event is valid
         if final_event is not None and final_event[2] is not None:
-            print(f"Final event detected for {self.fly.metadata.name}: {final_event}")
+            if self.fly.config.debugging:
+                print(f"Final event detected for {self.fly.metadata.name}: {final_event}")
             # Set the cutoff reference to the end of the final event + safety frames
             self.cutoff_reference = final_event[2] + 15
         else:

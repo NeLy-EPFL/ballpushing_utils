@@ -451,6 +451,10 @@ class Dataset:
         # Convert the event data to a DataFrame
         event_df = pd.DataFrame.from_records(event_data)
 
+        # Sort by start_time to ensure events are in temporal order
+        if "start_time" in event_df.columns:
+            event_df = event_df.sort_values("start_time").reset_index(drop=True)
+
         # Add metadata to the dataset
         event_df = self._add_metadata(event_df, fly)
 

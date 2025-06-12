@@ -49,7 +49,7 @@ class Config:
 
     # Random events attributes
 
-    generate_random: bool = True
+    generate_random: bool = False
     random_exclude_interactions: bool = True
     random_interaction_map: str = "full"  # Options: "full" or "onset"
 
@@ -75,6 +75,8 @@ class Config:
     pause_threshold: int = 5
     pause_window: int = 5
     pause_min_duration: int = 5
+
+    backoff_threshold: int = 40
 
     # Skeleton tracking configuration attributes
 
