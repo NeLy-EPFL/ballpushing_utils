@@ -3,9 +3,11 @@ import pandas as pd
 import Config
 import os
 import numpy as np
-from utils_behavior import Processing
+from utils_behavior import Processing, Utils
 import argparse
 import yaml
+
+data_path = Utils.get_data_server()
 
 if __name__ == "__main__":
     from pathlib import Path
@@ -17,10 +19,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Set your data_path and output root here
-    data_path = Path(
-        "/mnt/upramdya_data/MD/MultiMazeRecorder/Datasets/Skeleton_TNT/240120_short_contacts_no_cutoff_no_downsample_Data/coordinates_regions"
+    data_path = (
+        Utils.get_data_server()
+        / "MD/MultiMazeRecorder/Datasets/Skeleton_TNT/240120_short_contacts_no_cutoff_no_downsample_Data/coordinates_regions"
     )
-    output_root = Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Plots/ID_cards")
+    output_root = Utils.get_data_server() / "MD/Ballpushing_TNTScreen/Plots/ID_cards"
 
     registries = Config.registries
     split_registry = Config.SplitRegistry
@@ -126,7 +129,8 @@ if __name__ == "__main__":
 
             # Events
             events_data = pd.read_feather(
-                "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/event_metrics/pooled_event_metrics.feather"
+                Utils.get_data_server()
+                / "MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/event_metrics/pooled_event_metrics.feather"
             )
 
             # Subset events_data for the Nickname and its associated control
@@ -156,7 +160,8 @@ if __name__ == "__main__":
 
             # Load summary metrics dataset (as in summary_notebooks.py)
             summary_data = pd.read_feather(
-                "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
+                Utils.get_data_server()
+                / "MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
             )
 
             # List of metrics to check (from summary_notebooks.py)
@@ -292,8 +297,10 @@ if __name__ == "__main__":
                             y_control = y
                     # Fallback: use first two y-positions
                     y_positions = [y_nickname, y_control]
-                    if None in y_positions or len([y for y in y_positions if y is not None]) < 2:
-                        y_positions = ax.get_yticks()[:2]
+                    # Filter out None values and ensure at least two positions
+                    y_positions = [y for y in y_positions if y is not None]
+                    if len(y_positions) < 2:
+                        y_positions = list(ax.get_yticks()[:2])
                     ax.errorbar(
                         x=[nickname_data.mean(), control_data.mean()],
                         y=y_positions,
@@ -485,8 +492,10 @@ if __name__ == "__main__":
                         elif label == row.iloc[0]["Control"]:
                             y_control = y
                     y_positions = [y_nickname, y_control]
-                    if None in y_positions or len([y for y in y_positions if y is not None]) < 2:
-                        y_positions = ax.get_yticks()[:2]
+                    # Filter out None values and ensure at least two positions
+                    y_positions = [y for y in y_positions if y is not None]
+                    if len(y_positions) < 2:
+                        y_positions = list(ax.get_yticks()[:2])
                     try:
                         ax.errorbar(
                             x=[nickname_data.mean(), control_data.mean()],
@@ -538,9 +547,10 @@ if __name__ == "__main__":
             import seaborn as sns
             import matplotlib.pyplot as plt
 
-            # Path to UMAP data and hits CSV (adjust as needed)
-            umap_data_path = "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather"
-            umap_hits_path = "/home/matthias/ballpushing_utils/outputs/Umap_hits.csv"
+            # Path to UMAP data and hits CSV (portable, relative to repo root)
+            repo_root = Path(__file__).resolve().parent.parent.parent
+            umap_data_path = repo_root / "tests" / "integration" / "outputs" / "umap_TNT_1.feather"
+            umap_hits_path = repo_root / "outputs" / "Umap_hits.csv"
 
             # Load UMAP data
             try:
@@ -569,7 +579,7 @@ if __name__ == "__main__":
                 fig, ax = plt.subplots(figsize=(8, 6))
                 # --- Load full UMAP dataset for cluster background ---
                 try:
-                    full_umap_path = "/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather"
+                    full_umap_path = "/home/durrieu/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather"
                     full_umap_data = pd.read_feather(full_umap_path)
                 except Exception as e:
                     print(f"[WARN] Could not load full UMAP dataset for cluster background: {e}")
