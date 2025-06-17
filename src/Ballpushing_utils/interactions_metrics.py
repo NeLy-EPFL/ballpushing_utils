@@ -144,11 +144,25 @@ class InteractionsMetrics:
 
             # Backoff intervals
             backoff_threshold = getattr(self.fly.config, "backoff_threshold", 20)  # Default to 20 if not set
-            # print(f"Using backoff threshold: {backoff_threshold}")
             backoff_intervals = self.get_backoff_intervals(fly_data, ball_data, start_idx, end_idx, backoff_threshold)
-
+            # Compute percent completion for each backoff (relative to max y displacement in event)
+            # Use the y distance from start to ball at backoff, divided by max y displacement in event
+            y_start = ball_data["y_centre_rolling_median"].iloc[start_idx]
+            y_event = ball_data["y_centre_rolling_median"].iloc[start_idx : end_idx + 1].values
+            max_y_disp = np.max(np.abs(y_event - y_start)) if len(y_event) > 0 else np.nan
+            percent_completion_list = []
+            for b in backoff_intervals:
+                backoff_frame = b["backoff_start_frame"] - start_idx
+                if 0 <= backoff_frame <= (end_idx - start_idx):
+                    y_backoff = ball_data["y_centre_rolling_median"].iloc[start_idx + backoff_frame]
+                    y_disp = np.abs(y_backoff - y_start)
+                    percent = y_disp / max_y_disp if max_y_disp > 0 else np.nan
+                else:
+                    percent = np.nan
+                percent_completion_list.append(percent)
             # Store metrics for this event
             metrics[event_idx] = {
+                "event_idx": event_idx,
                 "start_time": start_idx / self.fly.experiment.fps,
                 "end_time": end_idx / self.fly.experiment.fps,
                 "duration": duration,
@@ -163,7 +177,9 @@ class InteractionsMetrics:
                 "ball_velocity": ball_velocity,
                 "efficiency_diff": efficiency_diff,
                 "event_type": event_type,
-                "backoff_intervals": backoff_intervals,
+                "backoff_intervals": [
+                    dict(b, percent_completion=percent_completion_list[i]) for i, b in enumerate(backoff_intervals)
+                ],
             }
             if self.fly.config.debugging:
                 print(f"Finished processing event {event_idx}.")
@@ -321,7 +337,8 @@ class InteractionsMetrics:
         Detect all intervals within [start_idx, end_idx] where the fly backs off from the ball:
         - The fly-ball distance crosses the threshold from below to above
         - The distance is increasing (fly is moving away from the ball)
-        Returns a list of (backoff_start_frame, backoff_end_frame, time_from_event_start) for each backoff period.
+        Returns a list of dicts for each backoff event:
+            {"backoff_start_frame", "backoff_end_frame", "time_from_event_start"}
         Guarantees at least one backoff per event (at the end if none detected).
         """
         fly_x = fly_data["x_thorax_rolling_median"].iloc[start_idx : end_idx + 1].values
