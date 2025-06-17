@@ -187,9 +187,10 @@ class Dataset:
             elif metrics == "event_metrics":
                 for fly in self.flies:
                     data = self._prepare_dataset_event_metrics(fly)
-                    if not data.empty:
+                    if data is not None and hasattr(data, "empty") and not data.empty:
                         Dataset.append(data)
-
+                    else:
+                        print(f"[WARN] Skipping fly {getattr(fly, 'directory', None)}: No valid event metrics.")
             elif metrics == "summary":
                 for fly in self.flies:
                     # print("Preparing dataset for", fly.name)
@@ -429,27 +430,50 @@ class Dataset:
             pandas.DataFrame: A DataFrame containing all events and their associated metrics.
         """
         # Initialize the InteractionsMetrics object
-        interaction_metrics = fly.event_metrics
+        try:
+            interaction_metrics = fly.event_metrics
+        except Exception as e:
+            print(f"[WARN] Could not compute event_metrics for fly {getattr(fly, 'directory', None)}: {e}")
+            return None
 
         if interaction_metrics is None:
-            print(f"No interaction metrics found for fly {fly.metadata.name}")
-            return pd.DataFrame()
+            print(f"[WARN] event_metrics is None for fly {getattr(fly, 'directory', None)}")
+            return None
 
         # Preprocess keys and events into a flat structure
-        event_data = [
-            {
-                **metrics,
-                "fly_idx": int(key.split("_")[1]),
-                "ball_idx": int(key.split("_")[3]),
-                "event_id": event_idx,
-                "event_type": metrics.get("event_type", "unknown"),
-            }
-            for key, events in interaction_metrics.items()
-            for event_idx, metrics in events.items()
-        ]
+        event_data = []
+        for key, events in interaction_metrics.items():
+            if events is None:
+                continue
+            for event_idx, metrics in events.items():
+                if metrics is None:
+                    continue
+                try:
+                    event_data.append(
+                        {
+                            **metrics,
+                            "fly_idx": int(key.split("_")[1]),
+                            "ball_idx": int(key.split("_")[3]),
+                            "event_id": event_idx,
+                            "event_type": metrics.get("event_type", "unknown"),
+                        }
+                    )
+                except Exception as e:
+                    print(f"[WARN] Error processing event metrics for fly {getattr(fly, 'directory', None)}: {e}")
+                    continue
 
         # Convert the event data to a DataFrame
+        if not event_data:
+            print(f"[WARN] No event data for fly {getattr(fly, 'directory', None)}")
+            return None
         event_df = pd.DataFrame.from_records(event_data)
+
+        # Sort by start_time to ensure events are in temporal order
+        if "start_time" in event_df.columns:
+            event_df = event_df.sort_values("start_time").reset_index(drop=True)
+        else:
+            print(f"[WARN] 'start_time' not in event_df columns for fly {getattr(fly, 'directory', None)}")
+            return None
 
         # Add metadata to the dataset
         event_df = self._add_metadata(event_df, fly)

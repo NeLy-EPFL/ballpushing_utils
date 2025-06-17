@@ -19,6 +19,7 @@ from scipy.spatial import distance
 
 import matplotlib.pyplot as plt
 
+
 def permutation_test(group1, group2, n_permutations=1000, random_state=None):
     rng = np.random.default_rng(random_state)
     observed = np.linalg.norm(group1.mean(axis=0) - group2.mean(axis=0))
@@ -35,6 +36,7 @@ def permutation_test(group1, group2, n_permutations=1000, random_state=None):
     pval = (count + 1) / (n_permutations + 1)
     return observed, pval
 
+
 def mahalanobis_distance(group1, group2):
     mean1 = group1.mean(axis=0)
     mean2 = group2.mean(axis=0)
@@ -43,6 +45,7 @@ def mahalanobis_distance(group1, group2):
     inv_cov = np.linalg.pinv(cov)
     dist = distance.mahalanobis(mean1, mean2, inv_cov)
     return dist
+
 
 def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_state=None):
     rng = np.random.default_rng(random_state)
@@ -59,6 +62,7 @@ def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_sta
             count += 1
     pval = (count + 1) / (n_permutations + 1)
     return observed, pval
+
 
 # 2. Data Segmentation
 dataset = pd.read_feather(
@@ -178,11 +182,20 @@ else:
 fpca_loadings_df = pd.DataFrame(comps, columns=columns, index=[f"FPCA{i+1}" for i in range(comps.shape[0])])
 fpca_loadings_df.to_csv("fpca_temporal_loadings.csv")
 
+# Optionally, set force_control here (None or "Empty-Split")
+force_control = None  # or "Empty-Split" to force control group
+
 # Compare Nicknames with Controls
 results = []
 
 # Combine FPCA scores with metadata
 fpca_scores_with_meta = pd.concat([metadata_data.reset_index(drop=True), fpca_scores_df], axis=1)
+
+# Determine suffix for output files
+suffix = "_emptysplit" if force_control == "Empty-Split" else "_tailoredctrls"
+
+# Save as feather for downstream use (ID card)
+fpca_scores_with_meta.to_feather(f"fpca_temporal_with_metadata{suffix}.feather")
 
 # Select FPCA components up to 90% variance
 selected_dims = fpca_scores_df.columns[:n_dims]
@@ -191,7 +204,12 @@ results = []
 all_nicknames = fpca_scores_with_meta["Nickname"].unique()
 
 for nickname in all_nicknames:
-    subset = Config.get_subset_data(fpca_scores_with_meta, col="Nickname", value=nickname, force_control="Empty-Split")
+    subset = Config.get_subset_data(
+        fpca_scores_with_meta,
+        col="Nickname",
+        value=nickname,
+        force_control=force_control,  # pass force_control to subset function
+    )
     if subset.empty or (subset["Nickname"] == nickname).sum() == 0:
         continue
     control_names = subset["Nickname"].unique()
@@ -230,16 +248,18 @@ for nickname in all_nicknames:
     perm_stat, perm_pval = permutation_test(group_matrix, control_matrix)
     maha_stat, maha_pval = mahalanobis_permutation_test(group_matrix, control_matrix)
 
-    results.append({
-        "Nickname": nickname,
-        "Control": control_name,
-        "MannWhitney_any_dim_significant": mannwhitney_any,
-        "MannWhitney_significant_dims": significant_dims,
-        "Permutation_stat": perm_stat,
-        "Permutation_pval": perm_pval,
-        "Mahalanobis_stat": maha_stat,
-        "Mahalanobis_pval": maha_pval
-    })
+    results.append(
+        {
+            "Nickname": nickname,
+            "Control": control_name,
+            "MannWhitney_any_dim_significant": mannwhitney_any,
+            "MannWhitney_significant_dims": significant_dims,
+            "Permutation_stat": perm_stat,
+            "Permutation_pval": perm_pval,
+            "Mahalanobis_stat": maha_stat,
+            "Mahalanobis_pval": maha_pval,
+        }
+    )
 
 results_df = pd.DataFrame(results)
 for col in ["Permutation_pval", "Mahalanobis_pval"]:
@@ -247,10 +267,13 @@ for col in ["Permutation_pval", "Mahalanobis_pval"]:
     results_df[col.replace("_pval", "_FDR_significant")] = rejected
     results_df[col.replace("_pval", "_FDR_pval")] = pvals_corrected
 
-results_df.to_csv("fpca_temporal_stats_results_allmethods.csv", index=False)
+# Save results CSV with appropriate suffix
+results_df.to_csv(f"fpca_temporal_stats_results_allmethods{suffix}.csv", index=False)
 print("Significant hits for all methods:")
-print(results_df[
-    (results_df["MannWhitney_any_dim_significant"].astype(bool)) &
-    (results_df["Permutation_FDR_significant"].astype(bool)) &
-    (results_df["Mahalanobis_FDR_significant"].astype(bool))
-])
+print(
+    results_df[
+        (results_df["MannWhitney_any_dim_significant"].astype(bool))
+        & (results_df["Permutation_FDR_significant"].astype(bool))
+        & (results_df["Mahalanobis_FDR_significant"].astype(bool))
+    ]
+)

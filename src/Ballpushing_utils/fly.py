@@ -16,6 +16,7 @@ from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
 from Ballpushing_utils.learning_metrics import LearningMetrics
 from Ballpushing_utils.f1_metrics import F1Metrics
 from Ballpushing_utils.interactions_metrics import InteractionsMetrics
+from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 
 
 class Fly:
@@ -73,13 +74,15 @@ class Fly:
         if custom_config:
             self._apply_custom_config(custom_config)
 
-        print(f" Time range: {self.config.time_range}")
+        if self.config.debugging:
+            print(f" Time range: {self.config.time_range}")
 
         self.metadata = FlyMetadata(self)
 
         self.Genotype = self.metadata.arena_metadata.get("Genotype", "Unknown")
 
         self._tracking_data = None
+        self._trajectory_metrics = None
 
         # Check if the fly has valid tracking data
         try:
@@ -94,6 +97,29 @@ class Fly:
 
         self.flyball_positions = None
         self.fly_skeleton = None
+
+        # After tracking data is loaded and valid, build flyball_positions with both fly and ball data
+        if self.tracking_data is not None and self.tracking_data.valid_data:
+            # Get fly and ball DataFrames (first object for each)
+            fly_df = None
+            ball_df = None
+            if self.tracking_data.flytrack is not None and len(self.tracking_data.flytrack.objects) > 0:
+                fly_df = self.tracking_data.flytrack.objects[0].dataset
+            if self.tracking_data.balltrack is not None and len(self.tracking_data.balltrack.objects) > 0:
+                ball_df = self.tracking_data.balltrack.objects[0].dataset
+            if fly_df is not None and ball_df is not None:
+                # Merge on index, suffixing overlapping columns
+                self.flyball_positions = fly_df.join(ball_df, lsuffix="_fly", rsuffix="_ball", how="outer")
+            elif fly_df is not None:
+                self.flyball_positions = fly_df.copy()
+            elif ball_df is not None:
+                self.flyball_positions = ball_df.copy()
+            # Add percent_completion column if rel_x_ball is present
+            if self.flyball_positions is not None and "rel_x_ball" in self.flyball_positions:
+                from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+
+                ball_x_metrics = TrajectoryMetrics(self)
+                self.flyball_positions["percent_completion"] = ball_x_metrics.percent_completion()
 
         self._event_metrics = None
 
@@ -186,6 +212,22 @@ class Fly:
             self._skeleton_metrics = SkeletonMetrics(self)
 
         return self._skeleton_metrics
+
+    @property
+    def trajectory_metrics(self):
+        """
+        Lazy-loaded property for TrajectoryMetrics, using the fly's y position (y_thorax) by default.
+        Returns:
+            TrajectoryMetrics or None: Instance if data available, else None.
+        """
+        if self._trajectory_metrics is None:
+            if self.flyball_positions is not None and "y_thorax" in self.flyball_positions:
+                self._trajectory_metrics = TrajectoryMetrics(self.flyball_positions["y_thorax"].values)
+            else:
+                if self.config.debugging:
+                    print(f"No 'y_thorax' in flyball_positions for {self.metadata.name}.")
+                self._trajectory_metrics = None
+        return self._trajectory_metrics
 
     def __str__(self):
         # Handle cases where tracking data might be None

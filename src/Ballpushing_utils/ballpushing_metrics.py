@@ -17,9 +17,9 @@ class BallPushingMetrics:
         #     for fly_idx in range(len(self.tracking_data.flytrack.objects))
         # }
 
-        # if self.fly.config.debugging:
-        for fly_idx, exit_time in self.tracking_data.chamber_exit_times.items():
-            print(f"Fly {fly_idx} chamber exit time: {exit_time}")
+        if self.fly.config.debugging:
+            for fly_idx, exit_time in self.tracking_data.chamber_exit_times.items():
+                print(f"Fly {fly_idx} chamber exit time: {exit_time}")
 
         self.metrics = {}
         if compute_metrics_on_init:
@@ -540,7 +540,8 @@ class BallPushingMetrics:
         ball_data_start = ball_data["time"].iloc[0]
         ball_data_end = ball_data["time"].iloc[-1]
 
-        print(f"Ball data time range: {ball_data_start} to {ball_data_end}")
+        if self.fly.config.debugging:
+            print(f"Ball data time range: {ball_data_start} to {ball_data_end}")
 
         # # Apply time range filtering
         # time_range = self.tracking_data.fly.config.time_range
@@ -558,15 +559,15 @@ class BallPushingMetrics:
                 threshold = self.fly.config.final_event_threshold
             else:
                 threshold = self.fly.config.final_event_F1_threshold
-
+        if self.fly.config.debugging:
             print(f"Threshold for fly {fly_idx}, ball {ball_idx}: {threshold}")
 
         # Find the final event based on the threshold
         final_event, final_event_idx = self.find_event_by_distance(
             fly_idx, ball_idx, threshold, distance_type="threshold"
         )
-
-        print(f"Final event for fly {fly_idx}, ball {ball_idx}: {final_event}")
+        if self.fly.config.debugging:
+            print(f"Final event for fly {fly_idx}, ball {ball_idx}: {final_event}")
 
         # If no final event is found, return None
         if not final_event:
