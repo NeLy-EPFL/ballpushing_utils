@@ -11,6 +11,7 @@ class FlyTrackingData:
         self.fly = fly
         self.flytrack = None
         self.balltrack = None
+        self.raw_balltrack = None  # Raw (unsmoothed) balltrack
         self.skeletontrack = None
         self.valid_data = True
         self.log_missing = log_missing
@@ -20,6 +21,7 @@ class FlyTrackingData:
         try:
             # Load tracking files
             self.balltrack = self.load_tracking_file("*ball*.h5", "ball")
+            self.raw_balltrack = self.load_tracking_file("*ball*.h5", "ball", smoothing=False)
             self.flytrack = self.load_tracking_file("*fly*.h5", "fly")
             self.skeletontrack = self.load_tracking_file(
                 "*full_body*.h5",
@@ -51,6 +53,7 @@ class FlyTrackingData:
         if self.valid_data or self.keep_idle:
 
             self.start_x, self.start_y = self.get_initial_position()
+            self.calculate_relative_positions()
 
             time_range_start = self.fly.config.time_range[0] if self.fly.config.time_range else None
             self.chamber_exit_times = {
@@ -956,5 +959,22 @@ class FlyTrackingData:
         with open(f"{log_path}/missing_flies.log", "a") as f:
             f.write(f"{name}: {metadata}\n")
 
-
-# TODO : Test the valid_data function in conditions where I know the fly is dead or the arena is empty or not to check success
+    def calculate_relative_positions(self):
+        """
+        Add relative x and y columns to flytrack and balltrack datasets, using start_x and start_y as reference.
+        The relative positions are the absolute distance from the start position for each frame.
+        """
+        # Fly relative positions
+        if self.flytrack is not None and self.start_x is not None and self.start_y is not None:
+            for obj in self.flytrack.objects:
+                df = obj.dataset
+                if "x_thorax" in df.columns and "y_thorax" in df.columns:
+                    df["rel_x_fly"] = np.abs(df["x_thorax"] - self.start_x)
+                    df["rel_y_fly"] = np.abs(df["y_thorax"] - self.start_y)
+        # Ball relative positions
+        if self.balltrack is not None and self.start_x is not None and self.start_y is not None:
+            for obj in self.balltrack.objects:
+                df = obj.dataset
+                if "x_centre" in df.columns and "y_centre" in df.columns:
+                    df["rel_x_ball"] = np.abs(df["x_centre"] - self.start_x)
+                    df["rel_y_ball"] = np.abs(df["y_centre"] - self.start_y)
