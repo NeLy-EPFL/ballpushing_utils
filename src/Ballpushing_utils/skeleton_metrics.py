@@ -13,7 +13,7 @@ class SkeletonMetrics:
 
     def __init__(self, fly):
         self.fly = fly
-        self.ball = self.fly.tracking_data.balltrack
+        self.ball = self.fly.tracking_data.raw_balltrack
         self.preprocess_ball()
 
         # Find all contact events
@@ -32,6 +32,8 @@ class SkeletonMetrics:
             self.contacts = self.all_contacts
 
         # print(f"Number of final contact events: {len(self.contacts)}")
+
+        self.flyball_dataset = self.get_contact_annotated_dataset()
 
         self.ball_displacements = self.compute_ball_displacements()
 
@@ -447,3 +449,32 @@ class SkeletonMetrics:
         concatenated_clip.write_videofile(str(output_path), codec="libx264")
 
         print(f"Contacts video saved to {output_path}")
+
+    def get_contact_annotated_dataset(self):
+        """
+        Generate a DataFrame containing the skeleton tracks, and only the non-overlapping columns from raw balltracks, plus a column indicating contact frames.
+        Returns:
+            pd.DataFrame: Combined DataFrame with 'is_contact' column.
+        """
+        skeleton_df = self.fly.tracking_data.skeletontrack.objects[0].dataset.copy()
+        ball_df = self.fly.tracking_data.raw_balltrack.objects[0].dataset.copy()
+
+        # Find columns in ball_df not already in skeleton_df
+        new_ball_cols = [col for col in ball_df.columns if col not in skeleton_df.columns]
+        # Merge only these columns (plus index alignment)
+        merged = skeleton_df.join(ball_df[new_ball_cols])
+
+        # Get contact events (list of [start, end, duration] lists)
+        contact_events = self.find_contact_events()
+
+        # Create a boolean array for contact frames
+        is_contact = np.zeros(len(merged), dtype=bool)
+        for event in contact_events:
+            if isinstance(event, (tuple, list)) and len(event) >= 2:
+                start, end = event[0], event[1]
+                is_contact[start:end] = True
+            else:
+                print(f"[WARN] Malformed contact event (expected list/tuple of at least 2): {event}")
+        merged["is_contact"] = is_contact
+
+        return merged

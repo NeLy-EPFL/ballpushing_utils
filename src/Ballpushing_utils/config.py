@@ -76,7 +76,7 @@ class Config:
     pause_window: int = 5
     pause_min_duration: int = 5
 
-    backoff_threshold: int = 40
+    backoff_threshold: int = 30
 
     # Skeleton tracking configuration attributes
 
@@ -91,17 +91,17 @@ class Config:
 
     # # Skeleton metrics
 
-    contact_nodes = ["Rfront", "Lfront"]
+    contact_nodes = ["Rfront", "Lfront", "Head"]
 
     contact_threshold: tuple = (0, 13)
-    gap_between_contacts: float = 1 / 2
-    contact_min_length: float = 1 / 2
+    gap_between_contacts: float = 1 / 4
+    contact_min_length: float = 1 / 4
 
     # Skeleton metrics: longer
 
     skeleton_tracks_smoothing: bool = False
 
-    # contact_nodes = ["Thorax", "Head"]
+    # contact_nodes = ["Thorax",  "Head"]
 
     # contact_threshold: tuple = (0, 40)
     # gap_between_contacts: int = 3 / 2
