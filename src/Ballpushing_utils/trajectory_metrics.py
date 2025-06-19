@@ -39,15 +39,17 @@ class TrajectoryMetrics:
         percent = np.clip(percent, 0, 100)
         return percent
 
-    def plot_y_positions_over_time(self, output_path, zoom_major=True):
+    def plot_y_positions_over_time(self, output_path, zoom_major=True, zoom_separate=False):
         """
         Plots y_centre_preprocessed of the ball and y_Head of the fly over time from the annotated contact dataset and saves the plot.
         Args:
             output_path (str): Path to save the plot (e.g., 'output.png')
             zoom_major (bool): If True, show an inset zoom around the major event. If False, only show the main plot.
+            zoom_separate (bool): If True and zoom_major is True, save the zoomed plot as a separate file instead of as an inset.
         """
         import matplotlib.pyplot as plt
         import numpy as np
+        import os
 
         # Try to get the annotated contact dataset
         annotated_df = None
@@ -86,6 +88,8 @@ class TrajectoryMetrics:
         config = getattr(self.fly, "config", None)
         major_push_thresh = getattr(config, "major_event_threshold", 20) if config is not None else 20
         trim_end_time = time[-1]
+        event_start_time = None
+        event_end_time = None
         found_major_event = False
         if hasattr(self.fly, "event_metrics") and self.fly.event_metrics is not None:
             event_metrics = self.fly.event_metrics
@@ -160,58 +164,135 @@ class TrajectoryMetrics:
                 )
                 main_start_idx = i
                 main_current_contact = contact
+        # Determine fly name for directory grouping (move this up before using fly_name)
+        fly_name = getattr(getattr(self.fly, "metadata", None), "name", None)
+        if not fly_name:
+            fly_name = getattr(self.fly, "name", None)
+        if not fly_name:
+            fly_name = "Unknown"
         # Highlight the major event window on the main plot
         if found_major_event and event_start_time is not None and event_end_time is not None:
             ax.axvspan(event_start_time, event_end_time, color="yellow", alpha=0.2, label="Major event window")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Y Position (inverted, image coordinates)")
-        ax.set_title("Y Positions Over Time (Ball & Fly, Intuitive Y)\nBall: red=in contact, blue=not in contact")
-        ax.legend()
-        plt.tight_layout()
-        # Add inset zoom around the major event (±10s) if zoom_major is True
-        if zoom_major and found_major_event and event_start_time is not None and event_end_time is not None:
-            from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+        ax.set_title(f"Y Positions Over Time — {fly_name}")
+        # Custom legend handles for ball contact/no contact
+        from matplotlib.lines import Line2D
 
+        custom_lines = [
+            Line2D([0], [0], color="tab:orange", lw=1, alpha=0.4, label="Fly y_Head"),
+            Line2D([0], [0], color="tab:blue", lw=3.5, label="Ball trajectory (no contact)"),
+            Line2D([0], [0], color="red", lw=3.5, label="Ball trajectory (contact)"),
+        ]
+        legend_handles = custom_lines.copy()
+        if found_major_event and event_start_time is not None and event_end_time is not None:
+            import matplotlib.patches as mpatches
+
+            legend_handles.append(mpatches.Patch(color="yellow", alpha=0.2, label="Major event window"))
+        ax.legend(handles=legend_handles)
+        plt.tight_layout()
+        # Always create a directory for the fly and save all plots there
+        fly_dir = None
+        if output_path is not None:
+            base_dir = os.path.dirname(output_path)
+            fly_dir = os.path.join(base_dir, fly_name)
+            os.makedirs(fly_dir, exist_ok=True)
+            # Main plot filename (no fly name in filename)
+            main_plot_path = os.path.join(fly_dir, "fly_ball_y_positions_contact_annotated.png")
+            output_path = main_plot_path
+        # Add inset zoom around the major event (±10s) if zoom_major is True and zoom_separate is False
+        if zoom_major and found_major_event and event_start_time is not None and event_end_time is not None:
             zoom_start = max(time[0], event_start_time - 10)
             zoom_end = min(time[-1], event_end_time + 10)
             inset_mask = (time >= zoom_start) & (time <= zoom_end)
             inset_indices = np.where(inset_mask)[0]
-            axins = inset_axes(ax, width="40%", height="40%", loc="upper right", borderpad=2)
-            # Fly trace in inset
-            axins.plot(
-                time[inset_mask],
-                -y_head[inset_mask],
-                color="tab:orange",
-                linewidth=1,
-                alpha=0.4,
-                zorder=1,
-            )
-            # Ball trace in inset
-            inset_start_idx = None
-            inset_current_contact = None
-            for j, idx in enumerate(inset_indices):
-                contact = is_contact[idx]
-                if inset_start_idx is None:
-                    inset_start_idx = j
-                    inset_current_contact = contact
-                elif contact != inset_current_contact or j == len(inset_indices) - 1:
-                    seg_end = j if j < len(inset_indices) - 1 else j + 1
-                    color = "red" if inset_current_contact else "tab:blue"
-                    axins.plot(
-                        time[inset_mask][inset_start_idx:seg_end],
-                        -y_ball[inset_mask][inset_start_idx:seg_end],
-                        color=color,
-                        linewidth=3.5,
-                        alpha=1.0,
-                        zorder=2,
-                    )
-                    inset_start_idx = j
-                    inset_current_contact = contact
-            axins.axvspan(event_start_time, event_end_time, color="yellow", alpha=0.2)
-            axins.set_xlim(zoom_start, zoom_end)
-            axins.set_ylabel("")
-            axins.set_xlabel("")
-            axins.set_title("Zoom on major event", fontsize=9)
-            axins.tick_params(axis="both", which="major", labelsize=8)
+            if not zoom_separate:
+                from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+                axins = inset_axes(ax, width="40%", height="40%", loc="upper right", borderpad=2)
+                # Fly trace in inset
+                axins.plot(
+                    time[inset_mask],
+                    -y_head[inset_mask],
+                    color="tab:orange",
+                    linewidth=1,
+                    alpha=0.4,
+                    zorder=1,
+                )
+                # Ball trace in inset
+                inset_start_idx = None
+                inset_current_contact = None
+                for j, idx in enumerate(inset_indices):
+                    contact = is_contact[idx]
+                    if inset_start_idx is None:
+                        inset_start_idx = j
+                        inset_current_contact = contact
+                    elif contact != inset_current_contact or j == len(inset_indices) - 1:
+                        seg_end = j if j < len(inset_indices) - 1 else j + 1
+                        color = "red" if inset_current_contact else "tab:blue"
+                        axins.plot(
+                            time[inset_mask][inset_start_idx:seg_end],
+                            -y_ball[inset_mask][inset_start_idx:seg_end],
+                            color=color,
+                            linewidth=3.5,
+                            alpha=1.0,
+                            zorder=2,
+                        )
+                        inset_start_idx = j
+                        inset_current_contact = contact
+                axins.axvspan(event_start_time, event_end_time, color="yellow", alpha=0.2)
+                axins.set_xlim(zoom_start, zoom_end)
+                axins.set_ylabel("")
+                axins.set_xlabel("")
+                axins.set_title("Zoom on major event", fontsize=9)
+                axins.tick_params(axis="both", which="major", labelsize=8)
+                # Save the plot with the inset in the fly directory as 'with_inset.png'
+                if fly_dir is not None:
+                    inset_plot_path = os.path.join(fly_dir, "with_inset.png")
+                    plt.savefig(inset_plot_path, dpi=150)
+            else:
+                # Save zoomed plot as a separate file in the fly directory as 'zoom.png'
+                fig_zoom, ax_zoom = plt.subplots(figsize=(8, 4))
+                ax_zoom.plot(
+                    time[inset_mask],
+                    -y_head[inset_mask],
+                    color="tab:orange",
+                    linewidth=1,
+                    alpha=0.4,
+                    zorder=1,
+                    label="Fly y_Head",
+                )
+                inset_start_idx = None
+                inset_current_contact = None
+                for j, idx in enumerate(inset_indices):
+                    contact = is_contact[idx]
+                    if inset_start_idx is None:
+                        inset_start_idx = j
+                        inset_current_contact = contact
+                    elif contact != inset_current_contact or j == len(inset_indices) - 1:
+                        seg_end = j if j < len(inset_indices) - 1 else j + 1
+                        color = "red" if inset_current_contact else "tab:blue"
+                        ax_zoom.plot(
+                            time[inset_mask][inset_start_idx:seg_end],
+                            -y_ball[inset_mask][inset_start_idx:seg_end],
+                            color=color,
+                            linewidth=3.5,
+                            alpha=1.0,
+                            zorder=2,
+                            label=None,
+                        )
+                        inset_start_idx = j
+                        inset_current_contact = contact
+                ax_zoom.axvspan(event_start_time, event_end_time, color="yellow", alpha=0.2)
+                ax_zoom.set_xlim(zoom_start, zoom_end)
+                ax_zoom.set_xlabel("Time (s)")
+                ax_zoom.set_ylabel("Y Position (inverted, image coordinates)")
+                ax_zoom.set_title("Zoom on major event")
+                ax_zoom.legend()
+                plt.tight_layout()
+                if fly_dir is not None:
+                    zoom_path = os.path.join(fly_dir, "zoom.png")
+                    fig_zoom.savefig(zoom_path, dpi=150)
+                plt.close(fig_zoom)
         plt.savefig(output_path, dpi=150)
         plt.close()

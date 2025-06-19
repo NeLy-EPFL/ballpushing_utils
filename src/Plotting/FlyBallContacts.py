@@ -27,14 +27,22 @@ except Exception as e:
     print(f"Failed to plot and save: {e}")
 
 
-def plot_fly_contact(fly_dir, output_path=None, save=False):
+def plot_fly_contact(fly_dir, output_path=None, save=False, yaml_stem=None, output_dir="outputs"):
     fly = Fly(Path(fly_dir), as_individual=True)
     metrics = TrajectoryMetrics(fly)
     fly_name = getattr(fly.metadata, "name", Path(fly_dir).stem)
     if output_path is None:
-        output_path = f"outputs/{fly_name}_fly_ball_y_positions_contact_annotated.png"
+        if yaml_stem is not None:
+            dir_path = os.path.join(output_dir, yaml_stem)
+            os.makedirs(dir_path, exist_ok=True)
+            output_path = os.path.join(dir_path, f"{fly_name}_fly_ball_y_positions_contact_annotated.png")
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, f"{fly_name}_fly_ball_y_positions_contact_annotated.png")
+    else:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
-        metrics.plot_y_positions_over_time(output_path if save else None)
+        metrics.plot_y_positions_over_time(output_path if save else None, zoom_separate=True)
         if save:
             print(f"Plot saved to {output_path}")
         else:
@@ -62,15 +70,12 @@ if __name__ == "__main__":
         with open(args.yaml, "r") as f:
             fly_dirs = yaml.safe_load(f).get("directories", [])
         yaml_base = os.path.splitext(os.path.basename(args.yaml))[0]
-        yaml_output_dir = os.path.join(args.output_dir, yaml_base)
-        os.makedirs(yaml_output_dir, exist_ok=True)
         for fly_dir in fly_dirs:
-            fly = Fly(Path(fly_dir), as_individual=True)
-            fly_name = getattr(fly.metadata, "name", Path(fly_dir).stem)
-            output_path = os.path.join(yaml_output_dir, f"{fly_name}_fly_ball_y_positions_contact_annotated.png")
-            plot_fly_contact(fly_dir, output_path=output_path, save=args.save)
+            plot_fly_contact(fly_dir, output_path=None, save=args.save, yaml_stem=yaml_base, output_dir=args.output_dir)
     else:
-        # Fallback to example fly
         fly_name = getattr(fly.metadata, "name", Path(exFly).stem)
-        output_path = f"outputs/{fly_name}_fly_ball_y_positions_contact_annotated.png"
+        output_path = os.path.join(
+            args.output_dir, "example_fly", f"{fly_name}_fly_ball_y_positions_contact_annotated.png"
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         plot_fly_contact(exFly, output_path=output_path, save=True)
