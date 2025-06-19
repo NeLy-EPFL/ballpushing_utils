@@ -187,6 +187,38 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: Contacts Grid Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/contacts_grid.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--fly_dir",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--output",
+                "${workspaceFolder}/outputs/contacts_grid_test.mp4"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Contact Annotated Interaction Events Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/contact_annotated_interaction_events.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--fly_dir",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--output",
+                "${workspaceFolder}/outputs/contact_annotated_interaction_events_test.mp4"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

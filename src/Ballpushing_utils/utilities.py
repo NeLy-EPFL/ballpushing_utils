@@ -51,105 +51,66 @@ def find_interaction_events(
     nodes1=["Lfront", "Rfront"],
     nodes2=["x_centre", "y_centre"],
     threshold=[0, 11],
-    gap_between_events=4,
-    event_min_length=2,
+    gap_between_events=None,
+    event_min_length=None,
     fps=29,
 ):
     """
-    This function finds interaction events where the specified nodes of two protagonists are within a certain distance for a minimum amount of time.
-
-    Parameters:
-    protagonist1 (DataFrame): DataFrame containing the first protagonist's tracking data.
-    protagonist2 (DataFrame): DataFrame containing the second protagonist's tracking data.
-    nodes1 (list): List of nodes for the first protagonist to check the distance with the second protagonist (e.g., ["Lfront", "Rfront"]).
-    nodes2 (list): List of nodes for the second protagonist to check the distance with the first protagonist (e.g., ["Centre",]).
-    threshold (int): The distance threshold (in pixels) for the nodes to be considered in interaction.
-    gap_between_events (int): The minimum gap required between two events, expressed in seconds.
-    event_min_length (int): The minimum length of an event, expressed in seconds.
-    fps (int): Frames per second of the video.
-
-    Returns:
-    list: A list of interaction events, where each event is represented as [start_frame, end_frame, duration].
+    Finds interaction events as runs of frames where the distance between nodes is within threshold.
+    Optionally merges runs separated by gap_between_events (in seconds), and/or filters by event_min_length (in seconds).
     """
-
-    # Convert the gap between events and the minimum event length from seconds to frames
-    gap_between_events = gap_between_events * fps
-    event_min_length = event_min_length * fps
-
-    # Initialize a list to store distances for all specified nodes
+    # Compute distances for all node pairs
     distances = []
-
-    # Compute the Euclidean distance for each specified node
     for node1 in nodes1:
         for node2 in nodes2:
-
-            # x1 = protagonist1[f"x_{node1}"]
-            # y1 = protagonist1[f"y_{node1}"]
-            # x2 = protagonist2[f"x_{node2}"]
-            # y2 = protagonist2[f"y_{node2}"]
-
-            # # Check for NaN values
-            # if x1.isna().any() or y1.isna().any() or x2.isna().any() or y2.isna().any():
-            #     print(f"NaN values found in data for nodes {node1} and {node2}")
-            #     print(f"x1: {x1}")
-            #     print(f"y1: {y1}")
-            #     print(f"x2: {x2}")
-            #     print(f"y2: {y2}")
-
-            # # Print intermediate values
-            # print(f"x1: {x1}")
-            # print(f"y1: {y1}")
-            # print(f"x2: {x2}")
-            # print(f"y2: {y2}")
-
             distances_node = np.sqrt(
                 (protagonist1[f"x_{node1}"] - protagonist2[f"x_{node2}"]) ** 2
                 + (protagonist1[f"y_{node1}"] - protagonist2[f"y_{node2}"]) ** 2
             )
-            # print(f"Distances for {node1} and {node2}: {distances_node}")
             distances.append(distances_node)
-
-    # Combine distances to find frames where any node is within the threshold distance
     combined_distances = np.min(distances, axis=0)
-    interaction_frames = np.where(
-        (np.array(combined_distances) > threshold[0]) & (np.array(combined_distances) < threshold[1])
-    )[0]
-
-    # Debug: Print the combined distances and interaction frames
-    # print(f"Combined distances: {combined_distances}")
-    # print(f"Interaction frames: {interaction_frames}")
-
-    # If no interaction frames are found, return an empty list
+    interaction_mask = (np.array(combined_distances) > threshold[0]) & (np.array(combined_distances) < threshold[1])
+    interaction_frames = np.where(interaction_mask)[0]
     if len(interaction_frames) == 0:
         return []
 
-    # Find the distance between consecutive interaction frames
-    distance_betw_frames = np.diff(interaction_frames)
+    # Find consecutive runs of interaction frames
+    runs = []
+    start = interaction_frames[0]
+    prev = interaction_frames[0]
+    for f in interaction_frames[1:]:
+        if f == prev + 1:
+            prev = f
+        else:
+            runs.append([start, prev])
+            start = f
+            prev = f
+    runs.append([start, prev])
 
-    # Find the points where the distance between frames is greater than the gap between events
-    split_points = np.where(distance_betw_frames > gap_between_events)[0]
+    # Merge runs if gap_between_events is set
+    if gap_between_events is not None:
+        gap_frames = int(round(gap_between_events * fps))
+        merged_runs = []
+        cur_start, cur_end = runs[0]
+        for s, e in runs[1:]:
+            if s - cur_end - 1 <= gap_frames:
+                cur_end = e
+            else:
+                merged_runs.append([cur_start, cur_end])
+                cur_start, cur_end = s, e
+        merged_runs.append([cur_start, cur_end])
+        runs = merged_runs
 
-    # Add the first and last points to the split points
-    split_points = np.insert(split_points, 0, -1)
-    split_points = np.append(split_points, len(interaction_frames) - 1)
+    # Filter by min length if set
+    if event_min_length is not None:
+        min_length_frames = int(round(event_min_length * fps))
+        runs = [[s, e] for s, e in runs if (e - s + 1) >= min_length_frames]
 
-    # Initialize the list of interaction events
-    interaction_events = []
-
-    # Iterate over the split points to find events
-    for f in range(0, len(split_points) - 1):
-        # Define the start and end of the region of interest (ROI)
-        start_roi = interaction_frames[split_points[f] + 1]
-        end_roi = interaction_frames[split_points[f + 1]]
-
-        # Calculate the duration of the event
-        duration = end_roi - start_roi
-
-        # If the duration of the event is greater than the minimum length, add the event to the list
-        if duration > event_min_length:
-            interaction_events.append([start_roi, end_roi, duration])
-
-    return interaction_events
+    # If neither gap nor min length is set, return each frame as its own event
+    if gap_between_events is None and event_min_length is None:
+        return [[f, f, 1] for f in interaction_frames]
+    else:
+        return [[s, e, e - s + 1] for s, e in runs]
 
 
 def find_interaction_boundaries(
