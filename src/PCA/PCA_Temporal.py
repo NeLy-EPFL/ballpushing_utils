@@ -75,7 +75,7 @@ controls = ["Empty-Split", "Empty-Gal4", "TNTxPR"]
 
 dataset = Config.cleanup_data(dataset)
 
-exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS"]
+exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "854 (OK107-Gal4)"]
 
 dataset = dataset[~dataset["Nickname"].isin(exclude_nicknames)]
 

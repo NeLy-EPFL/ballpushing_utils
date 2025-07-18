@@ -62,7 +62,7 @@ dataset = pd.read_feather(
     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250520_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
 dataset = Config.cleanup_data(dataset)
-exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS"]
+exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "854 (OK107-Gal4)"]
 dataset = dataset[~dataset["Nickname"].isin(exclude_nicknames)]
 
 # Convert boolean metrics to numeric
@@ -219,6 +219,7 @@ for nickname in all_nicknames:
     else:
         significant_dims = []
         mannwhitney_any = False
+        pvals_corr = []
 
     # Permutation test (multivariate)
     group_matrix = subset[subset["Nickname"] == nickname][selected_dims].values
@@ -234,10 +235,13 @@ for nickname in all_nicknames:
             "Control": control_name,
             "MannWhitney_any_dim_significant": mannwhitney_any,
             "MannWhitney_significant_dims": significant_dims,
-            "Permutation_stat": perm_stat,
-            "Permutation_pval": perm_pval,
-            "Mahalanobis_stat": maha_stat,
-            "Mahalanobis_pval": maha_pval,
+            "MannWhitney_corrected_pvals": [float(p) for p in pvals_corr] if len(mannwhitney_pvals_np) > 0 else [],
+            "MannWhitney_raw_pvals": [float(p) for p in mannwhitney_pvals_np] if len(mannwhitney_pvals_np) > 0 else [],
+            "MannWhitney_dims_tested": dims_tested_np if len(mannwhitney_pvals_np) > 0 else [],
+            "Permutation_stat": float(perm_stat),
+            "Permutation_pval": float(perm_pval),
+            "Mahalanobis_stat": float(maha_stat),
+            "Mahalanobis_pval": float(maha_pval),
         }
     )
 
