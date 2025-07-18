@@ -20,7 +20,7 @@ from sklearn.covariance import EmpiricalCovariance
 from scipy.stats import chi2
 
 # Enable Bokeh backend for HoloViews
-hv.extension('bokeh')
+hv.extension("bokeh")
 
 # Add the parent directory to the path to import Config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,8 +39,8 @@ hv_main = {
         "height": 400,
         "show_grid": True,
         "fontscale": 1.2,
-        "tools": ['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-        "active_tools": ['wheel_zoom'],
+        "tools": ["pan", "wheel_zoom", "box_zoom", "reset", "save"],
+        "active_tools": ["wheel_zoom"],
     },
     "ellipse": {
         "line_width": 2,
@@ -49,7 +49,7 @@ hv_main = {
     "layout": {
         "shared_axes": False,
         "merge_tools": True,
-    }
+    },
 }
 
 hv_presentation = {
@@ -64,8 +64,8 @@ hv_presentation = {
         "height": 500,
         "show_grid": True,
         "fontscale": 1.5,
-        "tools": ['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-        "active_tools": ['wheel_zoom'],
+        "tools": ["pan", "wheel_zoom", "box_zoom", "reset", "save"],
+        "active_tools": ["wheel_zoom"],
     },
     "ellipse": {
         "line_width": 3,
@@ -74,7 +74,7 @@ hv_presentation = {
     "layout": {
         "shared_axes": False,
         "merge_tools": True,
-    }
+    },
 }
 
 
@@ -82,37 +82,33 @@ def get_control_assignment(nickname, pca_data=None):
     """Get the control assignment for a given genotype nickname"""
     try:
         # If we have the PCA data, we can look up the Split value directly
-        if pca_data is not None and 'Split' in pca_data.columns:
-            nickname_data = pca_data[pca_data['Nickname'] == nickname]
+        if pca_data is not None and "Split" in pca_data.columns:
+            nickname_data = pca_data[pca_data["Nickname"] == nickname]
             if len(nickname_data) > 0:
-                split_value = nickname_data['Split'].iloc[0]
+                split_value = nickname_data["Split"].iloc[0]
             else:
                 # Fallback to SplitRegistry lookup
-                split_data = Config.SplitRegistry[Config.SplitRegistry['Nickname'] == nickname]
+                split_data = Config.SplitRegistry[Config.SplitRegistry["Nickname"] == nickname]
                 if len(split_data) > 0:
-                    split_value = split_data['Split'].iloc[0]
+                    split_value = split_data["Split"].iloc[0]
                 else:
-                    return 'Unknown'
+                    return "Unknown"
         else:
             # Fallback to SplitRegistry lookup
-            split_data = Config.SplitRegistry[Config.SplitRegistry['Nickname'] == nickname]
+            split_data = Config.SplitRegistry[Config.SplitRegistry["Nickname"] == nickname]
             if len(split_data) > 0:
-                split_value = split_data['Split'].iloc[0]
+                split_value = split_data["Split"].iloc[0]
             else:
-                return 'Unknown'
-        
+                return "Unknown"
+
         # Map Split values to readable control names
-        split_mapping = {
-            'y': 'Empty-Split',
-            'n': 'Empty-Gal4', 
-            'm': 'TNTxPR'
-        }
-        
-        return split_mapping.get(split_value, f'Unknown ({split_value})')
-        
+        split_mapping = {"y": "Empty-Split", "n": "Empty-Gal4", "m": "TNTxPR"}
+
+        return split_mapping.get(split_value, f"Unknown ({split_value})")
+
     except (KeyError, AttributeError, IndexError) as e:
         print(f"Warning: Could not determine control assignment for {nickname}: {e}")
-        return 'Unknown'
+        return "Unknown"
 
 
 def load_temporal_data_with_brain_regions():
@@ -174,7 +170,7 @@ def create_confidence_ellipse_data(data_x, data_y, confidence=0.95):
         return None, None
 
     points = np.column_stack([data_x, data_y])
-    
+
     # Calculate covariance matrix
     cov = EmpiricalCovariance().fit(points)
     mean = np.mean(points, axis=0)
@@ -191,21 +187,15 @@ def create_confidence_ellipse_data(data_x, data_y, confidence=0.95):
     height = 2 * np.sqrt(chi2_val * eigenvals[1])
 
     # Generate ellipse points
-    theta = np.linspace(0, 2*np.pi, 100)
-    ellipse_points = np.column_stack([
-        width/2 * np.cos(theta),
-        height/2 * np.sin(theta)
-    ])
-    
+    theta = np.linspace(0, 2 * np.pi, 100)
+    ellipse_points = np.column_stack([width / 2 * np.cos(theta), height / 2 * np.sin(theta)])
+
     # Rotate ellipse
-    rotation_matrix = np.array([
-        [np.cos(angle), -np.sin(angle)],
-        [np.sin(angle), np.cos(angle)]
-    ])
-    
+    rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+
     ellipse_points = ellipse_points @ rotation_matrix.T
     ellipse_points += mean
-    
+
     return ellipse_points[:, 0], ellipse_points[:, 1]
 
 
@@ -213,12 +203,12 @@ def create_control_ellipses(pca_data, pc_x, pc_y, confidence=0.95):
     """Create confidence ellipses for each control line"""
     control_lines = {
         "Empty-Split": "#ffb7b7",
-        "Empty-Gal4": "#C6F7B0", 
+        "Empty-Gal4": "#C6F7B0",
         "TNTxPR": "#B4EAFF",
     }
 
     ellipse_curves = []
-    
+
     for control_name, color in control_lines.items():
         # Get data for this specific control line
         control_data = pca_data[pca_data["Nickname"] == control_name]
@@ -228,23 +218,14 @@ def create_control_ellipses(pca_data, pc_x, pc_y, confidence=0.95):
             control_y = control_data[pc_y].values
 
             # Create ellipse data
-            ellipse_x, ellipse_y = create_confidence_ellipse_data(
-                control_x, control_y, confidence=confidence
-            )
-            
+            ellipse_x, ellipse_y = create_confidence_ellipse_data(control_x, control_y, confidence=confidence)
+
             if ellipse_x is not None:
                 # Create ellipse curve
-                ellipse_df = pd.DataFrame({
-                    pc_x: ellipse_x,
-                    pc_y: ellipse_y,
-                    'control_line': control_name
-                })
-                
+                ellipse_df = pd.DataFrame({pc_x: ellipse_x, pc_y: ellipse_y, "control_line": control_name})
+
                 ellipse_curve = hv.Curve(ellipse_df, kdims=[pc_x], vdims=[pc_y]).opts(
-                    color=color,
-                    line_width=2,
-                    alpha=0.8,
-                    line_dash='dashed'
+                    color=color, line_width=2, alpha=0.8, line_dash="dashed"
                 )
                 ellipse_curves.append(ellipse_curve)
 
@@ -253,26 +234,28 @@ def create_control_ellipses(pca_data, pc_x, pc_y, confidence=0.95):
 
 def prepare_individual_plotting_data(pca_data, static_significance, temporal_significance, genotypes_with_samples):
     """Prepare individual fly data for plotting with significance markers and metadata"""
-    
+
     # Get significant genotypes
     static_significant = [
-        g for g in static_significance.keys()
+        g
+        for g in static_significance.keys()
         if static_significance[g]["is_significant"] and g in genotypes_with_samples
     ]
     temporal_significant = [
-        g for g in temporal_significance.keys()
+        g
+        for g in temporal_significance.keys()
         if temporal_significance[g]["is_significant"] and g in genotypes_with_samples
     ]
 
     # Combine all significant genotypes
     all_significant = list(set(static_significant + temporal_significant))
-    
+
     # Filter data to significant genotypes only - keep all individual flies
     significant_data = pca_data[pca_data["Nickname"].isin(all_significant)].copy()
-    
+
     # Rename Brain region column to avoid issues with spaces in hover tooltips
-    significant_data = significant_data.rename(columns={'Brain region': 'Brain_region'})
-    
+    significant_data = significant_data.rename(columns={"Brain region": "Brain_region"})
+
     # Add significance type information
     def get_significance_type(nickname):
         if nickname in static_significant and nickname in temporal_significant:
@@ -283,7 +266,7 @@ def prepare_individual_plotting_data(pca_data, static_significance, temporal_sig
             return "Temporal Only"
         else:
             return "Not Significant"
-    
+
     def get_marker_style(nickname):
         if nickname in static_significant and nickname in temporal_significant:
             return "circle"  # Both
@@ -293,221 +276,259 @@ def prepare_individual_plotting_data(pca_data, static_significance, temporal_sig
             return "triangle"  # Temporal only
         else:
             return "circle"
-    
+
     def get_marker_size(nickname):
         if nickname in static_significant and nickname in temporal_significant:
             return 6  # Both - larger (but smaller than genotype averages)
         else:
             return 4  # Single significance type
-    
-    significant_data['significance_type'] = significant_data['Nickname'].apply(get_significance_type)
-    significant_data['marker_style'] = significant_data['Nickname'].apply(get_marker_style)
-    significant_data['marker_size'] = significant_data['Nickname'].apply(get_marker_size)
-    
+
+    significant_data["significance_type"] = significant_data["Nickname"].apply(get_significance_type)
+    significant_data["marker_style"] = significant_data["Nickname"].apply(get_marker_style)
+    significant_data["marker_size"] = significant_data["Nickname"].apply(get_marker_size)
+
     # Get brain region colors
     brain_region_colors = get_brain_region_colors()
-    significant_data['brain_region_color'] = significant_data['Brain_region'].map(brain_region_colors)
-    
+    significant_data["brain_region_color"] = significant_data["Brain_region"].map(brain_region_colors)
+
     # Create fly ID for tooltips
-    significant_data['fly_id'] = significant_data['Nickname'] + '_' + significant_data['fly'].astype(str)
-    
+    significant_data["fly_id"] = significant_data["Nickname"] + "_" + significant_data["fly"].astype(str)
+
     # Add statistical significance values
-    static_pvals = {g: static_significance[g]["permutation_pval"] for g in static_significance.keys() if g in all_significant}
-    temporal_pvals = {g: temporal_significance[g]["permutation_pval"] for g in temporal_significance.keys() if g in all_significant}
-    
-    significant_data['static_pval'] = significant_data['Nickname'].map(static_pvals).fillna(1.0)
-    significant_data['temporal_pval'] = significant_data['Nickname'].map(temporal_pvals).fillna(1.0)
-    
+    static_pvals = {
+        g: static_significance[g]["permutation_pval"] for g in static_significance.keys() if g in all_significant
+    }
+    temporal_pvals = {
+        g: temporal_significance[g]["permutation_pval"] for g in temporal_significance.keys() if g in all_significant
+    }
+
+    significant_data["static_pval"] = significant_data["Nickname"].map(static_pvals).fillna(1.0)
+    significant_data["temporal_pval"] = significant_data["Nickname"].map(temporal_pvals).fillna(1.0)
+
     # Add control assignment information using the Split column from the data
     def get_control_from_split(split_value):
-        split_mapping = {
-            'y': 'Empty-Split',
-            'n': 'Empty-Gal4', 
-            'm': 'TNTxPR'
-        }
-        return split_mapping.get(split_value, f'Unknown ({split_value})')
-    
-    significant_data['control_assignment'] = significant_data['Split'].apply(get_control_from_split)
-    
+        split_mapping = {"y": "Empty-Split", "n": "Empty-Gal4", "m": "TNTxPR"}
+        return split_mapping.get(split_value, f"Unknown ({split_value})")
+
+    significant_data["control_assignment"] = significant_data["Split"].apply(get_control_from_split)
+
     return significant_data, all_significant, static_significant, temporal_significant
 
 
-def create_interactive_scatterplot(fly_data, pca_data, pc_x_col, pc_y_col, pc_x_label, pc_y_label, plot_options=hv_main, show_legend=False, legend_type=None):
+def create_interactive_scatterplot(
+    fly_data,
+    pca_data,
+    pc_x_col,
+    pc_y_col,
+    pc_x_label,
+    pc_y_label,
+    plot_options=hv_main,
+    show_legend=False,
+    legend_type=None,
+):
     """Create an interactive scatterplot for a pair of temporal PCA components showing individual flies"""
-    
+
     # Define comprehensive hover tooltips for individual flies
     hover_tooltips = [
-        ('Genotype', '@Nickname'),
-        ('Brain Region', '@Brain_region'),
-        ('Control', '@control_assignment'),
-        ('Significance', '@significance_type'),
-        ('Fly ID', '@fly'),
-        (f'{pc_x_label}', f'@{pc_x_col}{{0.000}}'),
-        (f'{pc_y_label}', f'@{pc_y_col}{{0.000}}'),
-        ('Static p-val', '@static_pval{0.0000}'),
-        ('Temporal p-val', '@temporal_pval{0.0000}'),
+        ("Genotype", "@Nickname"),
+        ("Brain Region", "@Brain_region"),
+        ("Control", "@control_assignment"),
+        ("Significance", "@significance_type"),
+        ("Fly ID", "@fly"),
+        (f"{pc_x_label}", f"@{pc_x_col}{{0.000}}"),
+        (f"{pc_y_label}", f"@{pc_y_col}{{0.000}}"),
+        ("Static p-val", "@static_pval{0.0000}"),
+        ("Temporal p-val", "@temporal_pval{0.0000}"),
     ]
-    
+
     hover = HoverTool(tooltips=hover_tooltips)
-    
+
     # Create separate scatter plots for each significance type to control marker shapes
     plot_elements = []
-    
+
     # Both static and temporal - circles (larger)
-    both_data = fly_data[fly_data['significance_type'] == 'Both Static & Temporal']
+    both_data = fly_data[fly_data["significance_type"] == "Both Static & Temporal"]
     if len(both_data) > 0:
         scatter_both = hv.Scatter(
-            both_data, 
-            kdims=[pc_x_col], 
-            vdims=[pc_y_col, 'Nickname', 'Brain_region', 'control_assignment', 'significance_type', 'fly',
-                   'brain_region_color', 'marker_style', 'marker_size', 'static_pval', 'temporal_pval'],
-            label='Both Static & Temporal' if show_legend else ''
+            both_data,
+            kdims=[pc_x_col],
+            vdims=[
+                pc_y_col,
+                "Nickname",
+                "Brain_region",
+                "control_assignment",
+                "significance_type",
+                "fly",
+                "brain_region_color",
+                "marker_style",
+                "marker_size",
+                "static_pval",
+                "temporal_pval",
+            ],
+            label="Both Static & Temporal" if show_legend else "",
         ).opts(
-            color='brain_region_color',
+            color="brain_region_color",
             size=6,  # Larger for both
             alpha=plot_options["scatter"]["alpha"],
-            line_color='black',
+            line_color="black",
             line_width=0.3,
-            marker='circle',
+            marker="circle",
             tools=[hover],
         )
         plot_elements.append(scatter_both)
-    
+
     # Static only - squares
-    static_data = fly_data[fly_data['significance_type'] == 'Static Only']
+    static_data = fly_data[fly_data["significance_type"] == "Static Only"]
     if len(static_data) > 0:
         scatter_static = hv.Scatter(
-            static_data, 
-            kdims=[pc_x_col], 
-            vdims=[pc_y_col, 'Nickname', 'Brain_region', 'control_assignment', 'significance_type', 'fly',
-                   'brain_region_color', 'marker_style', 'marker_size', 'static_pval', 'temporal_pval'],
-            label='Static Only' if show_legend else ''
+            static_data,
+            kdims=[pc_x_col],
+            vdims=[
+                pc_y_col,
+                "Nickname",
+                "Brain_region",
+                "control_assignment",
+                "significance_type",
+                "fly",
+                "brain_region_color",
+                "marker_style",
+                "marker_size",
+                "static_pval",
+                "temporal_pval",
+            ],
+            label="Static Only" if show_legend else "",
         ).opts(
-            color='brain_region_color',
+            color="brain_region_color",
             size=4,
             alpha=plot_options["scatter"]["alpha"],
-            line_color='black',
+            line_color="black",
             line_width=0.3,
-            marker='square',
+            marker="square",
             tools=[hover],
         )
         plot_elements.append(scatter_static)
-    
+
     # Temporal only - triangles
-    temporal_data = fly_data[fly_data['significance_type'] == 'Temporal Only']
+    temporal_data = fly_data[fly_data["significance_type"] == "Temporal Only"]
     if len(temporal_data) > 0:
         scatter_temporal = hv.Scatter(
-            temporal_data, 
-            kdims=[pc_x_col], 
-            vdims=[pc_y_col, 'Nickname', 'Brain_region', 'control_assignment', 'significance_type', 'fly',
-                   'brain_region_color', 'marker_style', 'marker_size', 'static_pval', 'temporal_pval'],
-            label='Temporal Only' if show_legend else ''
+            temporal_data,
+            kdims=[pc_x_col],
+            vdims=[
+                pc_y_col,
+                "Nickname",
+                "Brain_region",
+                "control_assignment",
+                "significance_type",
+                "fly",
+                "brain_region_color",
+                "marker_style",
+                "marker_size",
+                "static_pval",
+                "temporal_pval",
+            ],
+            label="Temporal Only" if show_legend else "",
         ).opts(
-            color='brain_region_color',
+            color="brain_region_color",
             size=4,
             alpha=plot_options["scatter"]["alpha"],
-            line_color='black',
+            line_color="black",
             line_width=0.3,
-            marker='triangle',
+            marker="triangle",
             tools=[hover],
         )
         plot_elements.append(scatter_temporal)
-    
+
     # Create control ellipses
     ellipse_curves = create_control_ellipses(pca_data, pc_x_col, pc_y_col)
     if ellipse_curves:
         plot_elements.extend(ellipse_curves)
-        
+
     # Add reference lines at zero
-    zero_h = hv.HLine(0).opts(color='black', alpha=0.3, line_width=1)
-    zero_v = hv.VLine(0).opts(color='black', alpha=0.3, line_width=1)
-    
+    zero_h = hv.HLine(0).opts(color="black", alpha=0.3, line_width=1)
+    zero_v = hv.VLine(0).opts(color="black", alpha=0.3, line_width=1)
+
     plot_elements.extend([zero_h, zero_v])
-    
+
     # Create the overlay and apply common options
     plot_opts = {
-        'width': plot_options["plot"]["width"],
-        'height': plot_options["plot"]["height"],
-        'show_grid': plot_options["plot"]["show_grid"],
-        'fontscale': plot_options["plot"]["fontscale"],
-        'xlabel': pc_x_label,
-        'ylabel': pc_y_label,
-        'tools': ['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-        'active_tools': ['wheel_zoom'],
-        'show_legend': show_legend,
+        "width": plot_options["plot"]["width"],
+        "height": plot_options["plot"]["height"],
+        "show_grid": plot_options["plot"]["show_grid"],
+        "fontscale": plot_options["plot"]["fontscale"],
+        "xlabel": pc_x_label,
+        "ylabel": pc_y_label,
+        "tools": ["pan", "wheel_zoom", "box_zoom", "reset", "save"],
+        "active_tools": ["wheel_zoom"],
+        "show_legend": show_legend,
     }
-    
+
     if show_legend:
-        plot_opts['legend_position'] = 'right'
-    
+        plot_opts["legend_position"] = "right"
+
     plot = hv.Overlay(plot_elements).opts(**plot_opts)
-    
+
     return plot
 
 
 def create_interactive_histogram(fly_data, pc_col, pc_label, plot_options=hv_main, show_legend=False):
     """Create an interactive histogram for a single temporal PCA component using overlapping histograms with better styling"""
-    
+
     # Get brain region colors
     brain_region_colors = get_brain_region_colors()
-    
+
     # Get unique brain regions in the data
-    unique_regions = sorted(fly_data['Brain_region'].unique())
-    
+    unique_regions = sorted(fly_data["Brain_region"].unique())
+
     # Calculate appropriate bins for the histogram
     pc_values = fly_data[pc_col].values
     n_bins = max(8, min(15, int(np.sqrt(len(pc_values)))))  # More bins for individual flies
-    
+
     # Create common bin edges for all histograms
     bin_edges = np.linspace(pc_values.min(), pc_values.max(), n_bins + 1)
-    
+
     # Create histograms for each brain region using the same bin edges
     plot_elements = []
-    
+
     for brain_region in unique_regions:
-        region_data = fly_data[fly_data['Brain_region'] == brain_region]
+        region_data = fly_data[fly_data["Brain_region"] == brain_region]
         if len(region_data) > 0:
-            color = brain_region_colors.get(brain_region, '#000000')
-            
+            color = brain_region_colors.get(brain_region, "#000000")
+
             # Create histogram for this brain region with consistent bins
             counts, edges = np.histogram(region_data[pc_col].values, bins=bin_edges)
-            
-            hist = hv.Histogram(
-                (edges, counts), 
-                kdims=[pc_label], 
-                vdims=['Frequency'],
-                label=brain_region
-            ).opts(
+
+            hist = hv.Histogram((edges, counts), kdims=[pc_label], vdims=["Frequency"], label=brain_region).opts(
                 fill_color=color,
                 fill_alpha=0.35,  # Increased alpha between previous (0.2) and original (0.5)
                 line_color=color,
                 line_width=2,
                 # Removed line_dash to use normal solid lines
-                tools=['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
+                tools=["pan", "wheel_zoom", "box_zoom", "reset", "save"],
             )
             plot_elements.append(hist)
-    
+
     # Add reference line at zero
-    zero_v = hv.VLine(0).opts(color='black', alpha=0.5, line_width=2)
+    zero_v = hv.VLine(0).opts(color="black", alpha=0.5, line_width=2)
     plot_elements.append(zero_v)
-    
+
     # Create the overlay
     plot_opts = {
-        'width': plot_options["plot"]["width"],
-        'height': plot_options["plot"]["height"],
-        'show_grid': plot_options["plot"]["show_grid"],
-        'fontscale': plot_options["plot"]["fontscale"],
-        'xlabel': pc_label,
-        'ylabel': "Frequency",
-        'tools': ['pan', 'wheel_zoom', 'box_zoom', 'reset', 'save'],
-        'show_legend': show_legend,
+        "width": plot_options["plot"]["width"],
+        "height": plot_options["plot"]["height"],
+        "show_grid": plot_options["plot"]["show_grid"],
+        "fontscale": plot_options["plot"]["fontscale"],
+        "xlabel": pc_label,
+        "ylabel": "Frequency",
+        "tools": ["pan", "wheel_zoom", "box_zoom", "reset", "save"],
+        "show_legend": show_legend,
     }
-    
+
     if show_legend:
-        plot_opts['legend_position'] = 'right'
-    
+        plot_opts["legend_position"] = "right"
+
     plot = hv.Overlay(plot_elements).opts(**plot_opts)
-    
+
     return plot
 
 
@@ -518,7 +539,7 @@ def create_interactive_scatterplot_matrix_individual(
     n_components=6,
     significance_threshold=0.05,
     plot_options=hv_main,
-    save_prefix="interactive_temporal_pca_scatterplot_matrix_individual"
+    save_prefix="interactive_temporal_pca_scatterplot_matrix_individual",
 ):
     """
     Create interactive scatterplot matrix using HoloViews for temporal PCA showing individual flies
@@ -561,10 +582,10 @@ def create_interactive_scatterplot_matrix_individual(
     # Create matrix of plots
     plots = {}
     n_pcs = len(available_fpca_cols)
-    
+
     for i, (pc_y_col, pc_y_label) in enumerate(zip(available_fpca_cols, available_fpc_labels)):
         for j, (pc_x_col, pc_x_label) in enumerate(zip(available_fpca_cols, available_fpc_labels)):
-            
+
             if i == j:
                 # Diagonal: show distribution as histogram - no legends
                 plot = create_interactive_histogram(fly_data, pc_x_col, pc_x_label, plot_options, show_legend=False)
@@ -572,7 +593,15 @@ def create_interactive_scatterplot_matrix_individual(
             else:
                 # Off-diagonal: scatter plot - no legends
                 plot = create_interactive_scatterplot(
-                    fly_data, pca_data, pc_x_col, pc_y_col, pc_x_label, pc_y_label, plot_options, show_legend=False, legend_type=None
+                    fly_data,
+                    pca_data,
+                    pc_x_col,
+                    pc_y_col,
+                    pc_x_label,
+                    pc_y_label,
+                    plot_options,
+                    show_legend=False,
+                    legend_type=None,
                 )
                 plots[(i, j)] = plot
 
@@ -582,11 +611,9 @@ def create_interactive_scatterplot_matrix_individual(
     for i in range(n_pcs):
         for j in range(n_pcs):
             all_plots.append(plots[(i, j)])
-    
+
     # Create matrix layout - keep this as the main 6x6 matrix
-    matrix_layout = hv.Layout(all_plots).cols(n_pcs).opts(
-        **plot_options["layout"]
-    )
+    matrix_layout = hv.Layout(all_plots).cols(n_pcs).opts(**plot_options["layout"])
 
     # Return just the matrix without external legends to maintain 6x6 structure
     final_layout = matrix_layout
@@ -616,20 +643,20 @@ def create_interactive_scatterplot_matrix_individual(
 def save_plots_multiple_formats(plot, base_filename):
     """Save plots in multiple formats for different use cases"""
     saved_files = []
-    
+
     # Save HTML (always works)
     try:
         html_filename = f"{base_filename}.html"
-        hv.save(plot, html_filename, fmt='html')
+        hv.save(plot, html_filename, fmt="html")
         saved_files.append(html_filename)
         print(f"✓ Interactive web version: {html_filename}")
     except Exception as e:
         print(f"✗ Could not save HTML: {e}")
-    
+
     # Save PNG (requires selenium and webdriver)
     try:
         png_filename = f"{base_filename}.png"
-        hv.save(plot, png_filename, fmt='png')
+        hv.save(plot, png_filename, fmt="png")
         saved_files.append(png_filename)
         print(f"✓ Static raster for presentations: {png_filename}")
     except Exception as e:
@@ -638,13 +665,13 @@ def save_plots_multiple_formats(plot, base_filename):
         print(f"  1. Use the HTML version and take screenshots")
         print(f"  2. Export individual plots from the browser")
         print(f"  3. Use print-to-PDF in browser, then convert to PNG")
-    
+
     # Information about vector graphics
     print(f"ℹ For vector graphics (EPS/SVG):")
     print(f"  • Use browser's print-to-PDF for high quality")
     print(f"  • Convert PDF to EPS/SVG using external tools")
     print(f"  • Or extract individual plots for vector export")
-    
+
     return saved_files
 
 
@@ -668,29 +695,31 @@ def main():
 
     # Create interactive scatterplot matrix for individual flies
     print("\nCreating interactive temporal PCA scatterplot matrix for individual flies...")
-    
+
     # Choose plot style
     plot_style = hv_main
-    
-    final_layout, fly_data, all_significant, static_significant, temporal_significant = create_interactive_scatterplot_matrix_individual(
-        pca_data,
-        static_results,
-        temporal_results,
-        n_components=6,  # Use first 6 components
-        significance_threshold=0.05,
-        plot_options=plot_style,
-        save_prefix="interactive_temporal_pca_scatterplot_matrix_individual",
+
+    final_layout, fly_data, all_significant, static_significant, temporal_significant = (
+        create_interactive_scatterplot_matrix_individual(
+            pca_data,
+            static_results,
+            temporal_results,
+            n_components=6,  # Use first 6 components
+            significance_threshold=0.05,
+            plot_options=plot_style,
+            save_prefix="interactive_temporal_pca_scatterplot_matrix_individual",
+        )
     )
 
     # Save the interactive plot in multiple formats
     print("\nSaving plots in multiple formats...")
     saved_files = save_plots_multiple_formats(final_layout, "interactive_temporal_pca_scatterplot_matrix_individual")
-    
+
     print("\nFiles saved:")
     for file in saved_files:
         print(f"- Plot: {file}")
     print("- Note: Use the legend from the main script (pca_legend_combined.png)")
-    
+
     return final_layout
 
 
