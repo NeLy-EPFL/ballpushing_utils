@@ -6,6 +6,8 @@ This document provides a comprehensive explanation of all metrics computed by th
 
 The Ball Pushing Metrics system analyzes behavioral data from experiments where flies interact with balls in controlled environments. Each metric captures different aspects of the fly's learning and motor behavior during ball manipulation tasks.
 
+**Pixel-to-millimeter conversion**: All thresholds are given in both pixels and millimeters. The conversion factor is 1 pixel = 0.06 mm (based on 30 mm = 500 pixels).
+
 ## Core Event Definitions
 
 ### Basic Event Types
@@ -13,9 +15,14 @@ The Ball Pushing Metrics system analyzes behavioral data from experiments where 
 These are metrics that are used as tools to generate the summary metrics.
 
 - **Interaction Event**: A period where the fly is in close proximity to the ball and potentially manipulating it
-- **Significant Event**: An interaction event that results in meaningful ball displacement (> 5 pixels by default)
-- **Major Event**: The first significant event that crosses a higher threshold, often considered the "aha moment"
-- **Final Event**: The last interaction event that achieves a specified distance threshold
+  - *Close proximity threshold*: ≤ 45 pixels (2.7 mm) distance between fly and ball
+- **Significant Event**: An interaction event that results in significant ball displacement
+  - *Threshold*: > 5 pixels (0.3 mm) ball displacement
+- **First Major Event**: The first significant event that crosses a higher threshold, often considered the "aha moment"
+  - *Threshold*: ≥ 20 pixels (1.2 mm) ball displacement
+- **Final Event**: The last interaction event that achieves the final distance threshold before task completion
+  - *Threshold*: 170 pixels (10.2 mm) for standard experiments, 100 pixels (6.0 mm) for F1 experiments
+  - *Note*: This represents the last significant interaction that moves the ball toward the task goal
 
 ## Temporal Metrics
 
@@ -37,7 +44,7 @@ These metrics capture how behavior changes over time:
 
 **Description**: Number of significant interaction events
 
-**Calculation**: Count of events where ball displacement exceeds threshold (default 5 pixels)
+**Calculation**: Count of events where ball displacement exceeds threshold (5 pixels / 0.3 mm)
 
 **Range**: 0 to `nb_events`
 
@@ -69,16 +76,24 @@ These metrics capture how behavior changes over time:
 **Interpretation**: Learning onset time - how quickly the fly discovers the task
 
 #### `major_event` / `major_event_time`
-**Description**: The "aha moment" - first major breakthrough
-**Calculation**: Event preceding the first significant displacement above major threshold
+
+**Description**: The "aha moment" - first major breakthrough event
+
+**Calculation**: Event preceding the first significant displacement above major threshold (≥ 20 pixels / 1.2 mm)
+
 **Units**: Index / seconds
+
 **Interpretation**: Moment of behavioral insight or strategy change
 
 #### `final_event` / `final_event_time`
-**Description**: Last meaningful interaction
-**Calculation**: Final event achieving distance threshold before task completion
+
+**Description**: Last significant interaction before task completion
+
+**Calculation**: Final event achieving distance threshold (170 pixels / 10.2 mm for standard experiments, 100 pixels / 6.0 mm for F1 experiments) before fly exits chamber
+
 **Units**: Index / seconds
-**Interpretation**: Task completion time
+
+**Interpretation**: Task completion time and final achievement level
 
 ### Temporal Dynamics
 
@@ -128,22 +143,35 @@ These metrics describe the spatial aspects of ball manipulation:
 ### Directional Behavior
 
 #### `pushed` / `pulled`
-**Description**: Count of pushing vs. pulling events
-**Calculation**: Events classified by whether ball moves away from or toward fly's starting position
+
+**Description**: Count of significant pushing vs. pulling events
+
+**Calculation**: Events classified by whether ball moves away from or toward fly's starting position, using significant event threshold (5 pixels / 0.3 mm)
+
 **Units**: count
-**Interpretation**: Reveals manipulation strategy preferences
+
+**Interpretation**: Reveals manipulation strategy preferences for significant interactions
 
 #### `pulling_ratio`
-**Description**: Preference for pulling vs. pushing
-**Calculation**: `pulled / (pushed + pulled)`
+
+**Description**: Preference for significant pulling vs. pushing events
+
+**Calculation**: `pulled / (pushed + pulled)` where both events exceed significant threshold (5 pixels / 0.3 mm)
+
 **Range**: 0.0 to 1.0
+
 **Interpretation**: 0.5 = balanced, > 0.5 = pulling more often than pushing, < 0.5 = pushing more often than pulling.
 
 #### `success_direction`
+
 **Description**: Primary successful manipulation direction
+
 *Note*: This metric is particularly relevant for F1 experiments where the task can be achieved by pulling the ball as well as pushing it.
+
 **Values**: "push", "pull", "both", or None
-**Calculation**: Direction that achieved threshold displacement
+
+**Calculation**: Direction that achieved threshold displacement (25 pixels / 1.5 mm)
+
 **Interpretation**: Identifies the fly's successful strategy
 
 ## Movement and Locomotion Metrics
@@ -248,8 +276,52 @@ These metrics describe the spatial aspects of ball manipulation:
 ### Timing References
 
 #### `exit_time` / `chamber_exit_time`
+
 **Description**: When fly left experimental chamber
+
 *Note*: Exit time is also used to compute timing based metrics such as `final_event_time`
+
 **Calculation**: Timestamp when fly moved beyond chamber radius
+
 **Units**: seconds
+
 **Interpretation**: Later exit_time can indicate struggle to exit or lack of motivation to explore.
+
+## Threshold Summary
+
+The following table summarizes all thresholds used in the metrics:
+
+| Threshold Type | Pixels | Millimeters | Used For |
+|---|---|---|---|
+| **Interaction proximity** | ≤ 45 | ≤ 2.7 mm | Detecting when fly is close enough to ball for interaction events |
+| **Significant event** | > 5 | > 0.3 mm | Significant ball displacement; used for significant events, push/pull classification |
+| **Major event** | ≥ 20 | ≥ 1.2 mm | First major breakthrough ("aha moment") |
+| **Success direction** | ≥ 25 | ≥ 1.5 mm | Determining successful manipulation direction (push/pull/both) |
+| **Final event (standard)** | 170 | 10.2 mm | Task completion threshold for standard experiments |
+| **Final event (F1)** | 100 | 6.0 mm | Task completion threshold for F1 experiments |
+
+## Frequently Asked Questions
+
+**Q: What exactly is "close proximity" for interaction events?**
+A: Close proximity is defined as ≤ 45 pixels (2.7 mm) distance between the fly and ball.
+
+**Q: What does "> 5 pixels" mean in millimeters for significant events?**
+A: 5 pixels equals 0.3 mm ball displacement.
+
+**Q: What is the "higher threshold" for major events?**
+A: The major event threshold is ≥ 20 pixels (1.2 mm) ball displacement.
+
+**Q: Should "Major event" be called "First major event"?**
+A: Yes, this would be more accurate since it refers to the first event exceeding the major threshold.
+
+**Q: What is the "specified distance threshold" for final events?**
+A: Final events use different thresholds: 170 pixels (10.2 mm) for standard experiments and 100 pixels (6.0 mm) for F1 experiments. This is distinct from both significant and major event thresholds.
+
+**Q: Are push/pull events classified using the significant event threshold?**
+A: Yes, pushed and pulled events are classified using the significant event threshold (5 pixels / 0.3 mm). Only meaningful interactions that exceed this threshold are counted.
+
+**Q: Does pulling ratio use the same threshold as pushing?**
+A: Yes, the pulling ratio calculation only includes events that exceed the significant event threshold (5 pixels / 0.3 mm) for both pushing and pulling directions.
+
+**Q: Can a fly have a final_event if the ball doesn't reach the task completion distance?**
+A: Yes, the final_event represents the last interaction that moved the ball significantly toward the goal, regardless of whether the full task was completed. The task completion is determined by whether the ball reaches the final_event_threshold distance.
