@@ -299,29 +299,3 @@ The following table summarizes all thresholds used in the metrics:
 | **Success direction** | ≥ 25 | ≥ 1.5 mm | Determining successful manipulation direction (push/pull/both) |
 | **Final event (standard)** | 170 | 10.2 mm | Task completion threshold for standard experiments |
 | **Final event (F1)** | 100 | 6.0 mm | Task completion threshold for F1 experiments |
-
-## Frequently Asked Questions
-
-**Q: What exactly is "close proximity" for interaction events?**
-A: Close proximity is defined as ≤ 45 pixels (2.7 mm) distance between the fly and ball.
-
-**Q: What does "> 5 pixels" mean in millimeters for significant events?**
-A: 5 pixels equals 0.3 mm ball displacement.
-
-**Q: What is the "higher threshold" for major events?**
-A: The major event threshold is ≥ 20 pixels (1.2 mm) ball displacement.
-
-**Q: Should "Major event" be called "First major event"?**
-A: Yes, this would be more accurate since it refers to the first event exceeding the major threshold.
-
-**Q: What is the "specified distance threshold" for final events?**
-A: Final events use different thresholds: 170 pixels (10.2 mm) for standard experiments and 100 pixels (6.0 mm) for F1 experiments. This is distinct from both significant and major event thresholds.
-
-**Q: Are push/pull events classified using the significant event threshold?**
-A: Yes, pushed and pulled events are classified using the significant event threshold (5 pixels / 0.3 mm). Only meaningful interactions that exceed this threshold are counted.
-
-**Q: Does pulling ratio use the same threshold as pushing?**
-A: Yes, the pulling ratio calculation only includes events that exceed the significant event threshold (5 pixels / 0.3 mm) for both pushing and pulling directions.
-
-**Q: Can a fly have a final_event if the ball doesn't reach the task completion distance?**
-A: Yes, the final_event represents the last interaction that moved the ball significantly toward the goal, regardless of whether the full task was completed. The task completion is determined by whether the ball reaches the final_event_threshold distance.
