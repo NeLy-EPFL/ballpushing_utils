@@ -35,7 +35,14 @@ from Ballpushing_utils import utilities, config
 
 
 # Example usage:
+# Process experiment folders:
 # python dataset_builder.py --mode experiment --yaml config.yaml
+#
+# Process individual fly directories from a combined YAML file:
+# python dataset_builder.py --mode flies --yaml combined_flies.yaml
+#
+# Process experiments with filter (no YAML):
+# python dataset_builder.py --mode experiment
 
 # ==================================================================
 # CONFIGURATION SECTION - EDIT THESE VALUES TO MODIFY BEHAVIOR
@@ -50,14 +57,14 @@ from Ballpushing_utils import utilities, config
 CONFIG = {
     "PATHS": {
         "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"),
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/TNT_Hits"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for experiment folders
-        "metrics": ["summary"],  # Metrics to process (add/remove as needed)
+        "metrics": ["summary", "event_metrics"],  # Metrics to process (add/remove as needed)
     },
 }
 
@@ -177,6 +184,100 @@ def process_experiment(folder, metrics, output_data):
         logging.error(f"Error processing experiment {folder.name}: {str(e)}")
 
 
+def process_fly_directory(fly_dir, metrics, output_data):
+    """
+    Process an individual fly directory in flies mode.
+
+    Parameters
+    ----------
+    fly_dir : Path
+        Path to the fly directory (e.g., /path/to/experiment/arena1/corridor1).
+    metrics : list
+        List of metrics to process.
+    output_data : Path
+        Output directory for datasets.
+    """
+    logging.info(f"Processing fly directory: {fly_dir}")
+
+    try:
+        # Extract meaningful name from fly directory path
+        # e.g., /path/to/240111_TNT_Fine_1_Videos_Tracked/arena6/corridor1
+        # becomes 240111_TNT_Fine_1_Videos_Tracked_arena6_corridor1
+        experiment_folder = fly_dir.parent.parent  # experiment folder (where Metadata.json is located)
+        experiment_name = experiment_folder.name  # experiment folder name
+        arena_name = fly_dir.parent.name  # arena folder name
+        corridor_name = fly_dir.name  # corridor folder name
+        fly_name = f"{experiment_name}_{arena_name}_{corridor_name}"
+
+        # Verify that the experiment folder exists and contains Metadata.json
+        metadata_path = experiment_folder / "Metadata.json"
+        if not metadata_path.exists():
+            logging.error(f"Metadata.json not found in experiment folder: {experiment_folder}")
+            return
+
+        # Check if all datasets already exist
+        all_datasets_exist = True
+        for metric in metrics:
+            dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
+            if not dataset_path.exists():
+                all_datasets_exist = False
+                break
+
+        if all_datasets_exist:
+            logging.info(f"All datasets for {fly_name} already exist. Skipping.")
+            return
+
+        # Create individual Fly object with as_individual=True to avoid loading full experiment
+        fly = Ballpushing_utils.Fly(fly_dir, as_individual=True)
+
+        # Process each metric for this specific fly
+        for metric in metrics:
+            dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
+
+            if dataset_path.exists():
+                logging.info(f"Dataset {dataset_path} already exists. Skipping.")
+                continue
+
+            # Create dataset for this specific fly (pass the fly object directly)
+            dataset = Ballpushing_utils.Dataset(fly, dataset_type=metric)
+
+            if dataset.data is not None and not dataset.data.empty:
+                # No need to filter since we're working with individual fly data
+                dataset_path.parent.mkdir(parents=True, exist_ok=True)
+                dataset.data.to_feather(dataset_path)
+                logging.info(f"Saved {metric} dataset for {fly_name} to {dataset_path} ({len(dataset.data)} rows)")
+            else:
+                logging.warning(f"No data available for {fly_name} with metric {metric}")
+
+    except Exception as e:
+        logging.error(f"Error processing fly directory {fly_dir}: {str(e)}")
+        import traceback
+
+        logging.error(f"Traceback: {traceback.format_exc()}")
+
+
+def extract_experiment_folders_from_fly_dirs(fly_dirs):
+    """
+    Extract unique experiment folders from a list of fly directories.
+
+    Parameters
+    ----------
+    fly_dirs : list
+        List of fly directory paths.
+
+    Returns
+    -------
+    list
+        List of unique experiment folder paths.
+    """
+    experiment_folders = set()
+    for fly_dir in fly_dirs:
+        # Assume fly_dir structure is: /path/to/experiment/arena/corridor
+        experiment_folder = fly_dir.parent.parent
+        experiment_folders.add(experiment_folder)
+    return list(experiment_folders)
+
+
 # ==================================================================
 # MAIN PROCESSING SCRIPT
 # ==================================================================
@@ -186,6 +287,13 @@ if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Dataset Builder Script")
     parser.add_argument("--yaml", type=str, help="Path to the YAML file specifying directories", default=None)
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["experiment", "flies"],
+        default="experiment",
+        help="Processing mode: 'experiment' for experiment folders, 'flies' for individual fly directories (default: experiment)",
+    )
     parser.add_argument(
         "--threads",
         type=int,
@@ -233,26 +341,54 @@ if __name__ == "__main__":
     output_summary.mkdir(parents=True, exist_ok=True)
     output_data.mkdir(parents=True, exist_ok=True)
 
-    # Get list of experiment folders to process
-    Exp_folders = []
-    if args.yaml:
-        yaml_dirs = load_yaml_config(args.yaml)
-        Exp_folders.extend(yaml_dirs)
-    else:
-        for root in CONFIG["PATHS"]["data_root"]:
-            Exp_folders.extend(
-                folder
-                for folder in root.iterdir()
-                if folder.is_dir() and CONFIG["PROCESSING"]["experiment_filter"] in folder.name
-            )
+    # Get list of folders to process based on mode
+    processing_items = []
 
-    if CONFIG["PATHS"]["excluded_folders"]:
-        Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
+    if args.mode == "experiment":
+        # Original experiment mode logic
+        Exp_folders = []
+        if args.yaml:
+            yaml_dirs = load_yaml_config(args.yaml)
+            Exp_folders.extend(yaml_dirs)
+        else:
+            for root in CONFIG["PATHS"]["data_root"]:
+                Exp_folders.extend(
+                    folder
+                    for folder in root.iterdir()
+                    if folder.is_dir() and CONFIG["PROCESSING"]["experiment_filter"] in folder.name
+                )
 
-    if not Exp_folders:
-        raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
+        if CONFIG["PATHS"]["excluded_folders"]:
+            Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
 
-    logging.info(f"Folders to analyze: {[f.name for f in Exp_folders]}")
+        if not Exp_folders:
+            raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
+
+        logging.info(f"Experiment folders to analyze: {[f.name for f in Exp_folders]}")
+        processing_items = Exp_folders
+
+    elif args.mode == "flies":
+        # New flies mode logic
+        if not args.yaml:
+            raise ValueError("--yaml argument is required when using --mode flies")
+
+        fly_dirs = load_yaml_config(args.yaml)
+
+        # Validate that all directories exist
+        missing_dirs = [d for d in fly_dirs if not d.exists()]
+        if missing_dirs:
+            logging.warning(f"The following directories do not exist and will be skipped: {missing_dirs}")
+            fly_dirs = [d for d in fly_dirs if d.exists()]
+
+        if not fly_dirs:
+            raise ValueError("No valid fly directories found in YAML file.")
+
+        logging.info(f"Fly directories to analyze: {len(fly_dirs)} directories")
+        logging.info(f"Sample directories: {[str(d) for d in fly_dirs[:5]]}")
+        if len(fly_dirs) > 5:
+            logging.info(f"... and {len(fly_dirs) - 5} more directories")
+
+        processing_items = fly_dirs
 
     # Create metric subdirectories
     for metric in CONFIG["PROCESSING"]["metrics"]:
@@ -264,32 +400,46 @@ if __name__ == "__main__":
     # Load checkpoint if exists
     if checkpoint_file.exists():
         with open(checkpoint_file, "r") as f:
-            processed_folders = set(json.load(f))
-        logging.info(f"Resuming from checkpoint, {len(processed_folders)} folders already processed")
+            processed_items = set(json.load(f))
+        logging.info(f"Resuming from checkpoint, {len(processed_items)} items already processed")
     else:
-        processed_folders = set()
+        processed_items = set()
 
-    for folder in Exp_folders:
-        exp_name = folder.name
+    for item in processing_items:
+        # Initialize variables for each item
+        item_name = ""
+        log_label = ""
 
-        if exp_name in processed_folders:
-            logging.info(f"Skipping already processed experiment: {exp_name}")
+        if args.mode == "experiment":
+            item_name = item.name
+            log_label = f"experiment {item_name}"
+        elif args.mode == "flies":
+            # Create a unique name for the fly directory
+            item_name = f"{item.parent.parent.name}_{item.parent.name}_{item.name}"
+            log_label = f"fly {item_name}"
+
+        if item_name in processed_items:
+            logging.info(f"Skipping already processed {log_label}")
             continue
 
-        log_memory_usage(f"Before processing {exp_name}")
+        log_memory_usage(f"Before processing {log_label}")
 
         try:
-            process_experiment(folder, CONFIG["PROCESSING"]["metrics"], output_data)
-            processed_folders.add(exp_name)
+            if args.mode == "experiment":
+                process_experiment(item, CONFIG["PROCESSING"]["metrics"], output_data)
+            elif args.mode == "flies":
+                process_fly_directory(item, CONFIG["PROCESSING"]["metrics"], output_data)
 
-            # Save checkpoint after each successful experiment
+            processed_items.add(item_name)
+
+            # Save checkpoint after each successful processing
             with open(checkpoint_file, "w") as f:
-                json.dump(list(processed_folders), f)
+                json.dump(list(processed_items), f)
 
         except Exception as e:
-            logging.error(f"Error processing {exp_name}: {str(e)}")
+            logging.error(f"Error processing {log_label}: {str(e)}")
 
-        log_memory_usage(f"After processing {exp_name}")
+        log_memory_usage(f"After processing {log_label}")
 
     if checkpoint_file.exists():
         checkpoint_file.unlink()

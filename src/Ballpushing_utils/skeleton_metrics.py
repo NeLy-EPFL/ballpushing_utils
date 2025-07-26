@@ -4,6 +4,7 @@ import numpy as np
 from utils_behavior import Sleap_utils
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 from matplotlib import pyplot as plt
+from moviepy.video.fx.speedx import speedx
 
 
 class SkeletonMetrics:
@@ -120,9 +121,9 @@ class SkeletonMetrics:
         if threshold is None:
             threshold = self.fly.experiment.config.contact_threshold
         if gap_between_events is None:
-            gap_between_events = self.fly.experiment.config.gap_between_contacts
+            gap_between_events = 0  # 0 means no gap merging
         if event_min_length is None:
-            event_min_length = self.fly.experiment.config.contact_min_length
+            event_min_length = 0  # 0 means no min length filtering
 
         fly_data = self.fly.tracking_data.skeletontrack.objects[0].dataset
         ball_data = self.ball.objects[0].dataset
@@ -137,9 +138,6 @@ class SkeletonMetrics:
             gap_between_events=gap_between_events,
             event_min_length=event_min_length,
         )
-
-        # print(f"Number of contact events: {len(contact_events)}")
-        # print(f"Contact events: {contact_events}")
 
         return contact_events
 
@@ -449,6 +447,139 @@ class SkeletonMetrics:
         concatenated_clip.write_videofile(str(output_path), codec="libx264")
 
         print(f"Contacts video saved to {output_path}")
+
+    def generate_contacts_grid_video(self, output_path, min_duration_sec=1.0, slow_factor=4, grid_max_contacts=12):
+        """
+        Generate a grid video of contact events, slowed down, with padding for short contacts.
+        Args:
+            output_path (str): Path to save the output video.
+            min_duration_sec (float): Minimum duration (in seconds) for each contact clip.
+            slow_factor (int): Slowdown factor (e.g., 4 means 4x slower).
+            grid_max_contacts (int): Max number of contacts to show in the grid (default 12).
+        """
+        import math
+        from moviepy.editor import VideoFileClip, vfx, clips_array
+
+        # Get contact-annotated dataset and video
+        annotated_df = self.get_contact_annotated_dataset()
+        video = VideoFileClip(str(self.fly.tracking_data.skeletontrack.video))
+        fps = self.fly.experiment.fps
+
+        # Find contact events
+        contact_events = self.find_contact_events()
+        clips = []
+        for event in contact_events[:grid_max_contacts]:
+            start, end = event[0], event[1]
+            duration_frames = end - start
+            duration_sec = duration_frames / fps
+            # Pad if too short
+            if duration_sec < min_duration_sec:
+                pad_frames = int((min_duration_sec * fps - duration_frames) / 2)
+                start = max(0, start - pad_frames)
+                end = min(int(video.duration * fps), end + pad_frames)
+            # Extract and slow down
+            clip = video.subclip(start / fps, end / fps)
+            clip = clip.fx(speedx, 1.0 / slow_factor)
+            clips.append(clip)
+
+        # Compute grid size for 16:9 aspect ratio
+        n = len(clips)
+        if n == 0:
+            print("No contacts to display.")
+            return
+        best_rows, best_cols, best_diff = 1, n, float("inf")
+        for rows in range(1, n + 1):
+            cols = math.ceil(n / rows)
+            ratio = (cols * clip.w) / (rows * clip.h)
+            diff = abs(ratio - 16 / 9)
+            if diff < best_diff:
+                best_rows, best_cols, best_diff = rows, cols, diff
+        # Pad clips to fill grid
+        while len(clips) < best_rows * best_cols:
+            clips.append(clips[0].fx(vfx.colorx, 0.2).set_opacity(0))  # Invisible filler
+        # Arrange in grid
+        grid = []
+        for r in range(best_rows):
+            row = clips[r * best_cols : (r + 1) * best_cols]
+            grid.append(row)
+        grid_clip = clips_array(grid)
+        grid_clip.write_videofile(str(output_path), codec="libx264")
+        print(f"Contacts grid video saved to {output_path}")
+
+    def generate_contact_annotated_interaction_events_video(self, output_path, min_duration_sec=1.0, slow_factor=1):
+        """
+        Generate a video of interaction events (from fly tracking),
+        annotated with blue (no contact) and red (contact) overlays per frame based on skeleton metrics.
+        Args:
+            output_path (str): Path to save the output video.
+            min_duration_sec (float): Minimum duration (in seconds) for each event.
+            slow_factor (int): Slowdown factor (default 1, i.e., no slow down).
+        """
+        from moviepy.editor import VideoFileClip, CompositeVideoClip, ColorClip, concatenate_videoclips, vfx
+        import numpy as np
+
+        video = VideoFileClip(str(self.fly.tracking_data.skeletontrack.video))
+        fps = self.fly.experiment.fps
+        annotated_df = self.get_contact_annotated_dataset()
+        interaction_events = self.fly.tracking_data.interaction_events
+        # Flatten all events (may be nested dict)
+        events = []
+        if isinstance(interaction_events, dict):
+            for fly_dict in interaction_events.values():
+                if isinstance(fly_dict, dict):
+                    for evlist in fly_dict.values():
+                        events.extend(evlist)
+                else:
+                    events.extend(fly_dict)
+        else:
+            events = interaction_events
+
+        video_clips = []
+        for idx, event in enumerate(events):
+            start, end = event[0], event[1]
+            duration_frames = end - start
+            duration_sec = duration_frames / fps
+            # Pad if too short
+            if duration_sec < min_duration_sec:
+                pad_frames = int((min_duration_sec * fps - duration_frames) / 2)
+                start = max(0, start - pad_frames)
+                end = min(int(video.duration * fps), end + pad_frames)
+            # Get contact status for each frame in this event
+            contact_frames = annotated_df.loc[start:end, "is_contact"].values if "is_contact" in annotated_df else None
+            if contact_frames is None or len(contact_frames) == 0:
+                continue
+            # Find segments of consecutive contact status
+            segments = []
+            prev_status = contact_frames[0]
+            seg_start = start
+            for i, status in enumerate(contact_frames):
+                if status != prev_status or i == len(contact_frames) - 1:
+                    seg_end = start + i if status != prev_status else start + i + 1
+                    segments.append((seg_start, seg_end, prev_status))
+                    seg_start = seg_end
+                    prev_status = status
+            # Create subclips for each segment
+            seg_clips = []
+            for seg_start, seg_end, status in segments:
+                if seg_end <= seg_start:
+                    continue
+                clip = video.subclip(seg_start / fps, seg_end / fps)
+                if slow_factor != 1:
+                    clip = clip.fx(speedx, 1.0 / slow_factor)
+                color = (255, 0, 0) if status else (0, 0, 255)
+                bar = ColorClip(size=(clip.w, 20), color=color, duration=clip.duration)
+                bar = bar.set_position((0, clip.h - 20))
+                annotated_clip = CompositeVideoClip([clip, bar])
+                seg_clips.append(annotated_clip)
+            if seg_clips:
+                event_clip = concatenate_videoclips(seg_clips)
+                video_clips.append(event_clip)
+        if not video_clips:
+            print("No interaction events to display.")
+            return
+        final_clip = concatenate_videoclips(video_clips)
+        final_clip.write_videofile(str(output_path), codec="libx264")
+        print(f"Contact-annotated interaction events video saved to {output_path}")
 
     def get_contact_annotated_dataset(self):
         """

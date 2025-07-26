@@ -93,9 +93,9 @@ class Config:
 
     contact_nodes = ["Rfront", "Lfront", "Head"]
 
-    contact_threshold: tuple = (0, 13)
-    gap_between_contacts: float = 1 / 4
-    contact_min_length: float = 1 / 4
+    contact_threshold: tuple = (0, 14)  # Was 13 before
+    gap_between_contacts: Optional[float] = None  # 1 / 4  # Set to None to allow disabling gap merging
+    contact_min_length: Optional[float] = None  # 1 / 4  # Set to None to allow disabling min length filtering
 
     # Skeleton metrics: longer
 
