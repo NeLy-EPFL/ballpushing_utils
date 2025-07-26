@@ -177,7 +177,7 @@ if __name__ == "__main__":
                 "first_significant_event",
                 "first_significant_event_time",
                 "major_event",
-                "major_event_time",
+                "first_major_event_time",
                 "major_event_first",
                 "cumulated_breaks_duration",
                 "chamber_time",

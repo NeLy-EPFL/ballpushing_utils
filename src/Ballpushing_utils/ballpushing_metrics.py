@@ -73,7 +73,7 @@ class BallPushingMetrics:
                         else len(safe_call(self.get_significant_events, fly_idx, ball_idx, default=[]))
                     ),
                     "first_significant_event": lambda: safe_call(self.get_first_significant_event, fly_idx, ball_idx),
-                    "major_event": lambda: safe_call(self.get_major_event, fly_idx, ball_idx),
+                    "first_major_event": lambda: safe_call(self.get_major_event, fly_idx, ball_idx),
                     "events_direction": lambda: safe_call(
                         self.find_events_direction, fly_idx, ball_idx, default=([], [])
                     ),
@@ -129,7 +129,7 @@ class BallPushingMetrics:
                     e for e in filtered_events_direction[1] if e in [ev[0] for ev in filtered_significant_events]
                 ]
 
-                major_event = metrics["major_event"]()
+                major_event = metrics["first_major_event"]()
                 events_direction = metrics["events_direction"]()
                 insight_effect = metrics["insight_effect"]()
                 pause_metrics = safe_call(
@@ -171,8 +171,8 @@ class BallPushingMetrics:
                     ),
                     "first_significant_event": metrics["first_significant_event"]()[0],
                     "first_significant_event_time": metrics["first_significant_event"]()[1],
-                    "major_event": major_event[0],
-                    "major_event_time": major_event[1],
+                    "first_major_event": major_event[0],
+                    "first_major_event_time": major_event[1],
                     "major_event_first": insight_effect["first_event"],
                     # "insight_effect": safe_call(self.get_insight_effect, fly_idx, ball_idx, subset=filtered_events)[
                     #     "raw_effect"
@@ -905,11 +905,13 @@ class BallPushingMetrics:
                 major_event_idx -= 1
 
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                major_event_time = major_event_instance[0] / self.fly.experiment.fps
+                first_major_event_time = major_event_instance[0] / self.fly.experiment.fps
             else:
-                major_event_time = (major_event_instance[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+                first_major_event_time = (
+                    major_event_instance[0] / self.fly.experiment.fps
+                ) - self.tracking_data.exit_time
 
-            return major_event_idx, major_event_time
+            return major_event_idx, first_major_event_time
         else:
             return -1, self.tracking_data.duration
 

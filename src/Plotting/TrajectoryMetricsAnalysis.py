@@ -13,6 +13,7 @@ import numpy as np
 
 try:
     import seaborn as sns
+
     HAS_SEABORN = True
 except ImportError:
     HAS_SEABORN = False
@@ -41,9 +42,9 @@ def compute_fly_metrics(fly_dir):
 
         # Compute metrics
         contact_prop = metrics.contact_proportion()
-        event_length = metrics.major_event_length()
-        ball_displacement = metrics.ball_displacement_to_major_event()
-        ball_displacement_during = metrics.ball_displacement_during_major_event()
+        event_length = metrics.first_major_event_length()
+        ball_displacement = metrics.ball_displacement_to_first_major_event()
+        ball_displacement_during = metrics.ball_displacement_during_first_major_event()
 
         return {
             "fly_name": fly_name,
@@ -51,10 +52,10 @@ def compute_fly_metrics(fly_dir):
             "genotype": genotype,
             "brain_region": brain_region,
             "contact_proportion": contact_prop,
-            "major_event_length": event_length,
-            "ball_displacement_to_major_event": ball_displacement,
-            "ball_displacement_during_major_event": ball_displacement_during,
-            "fly_dir": fly_dir
+            "first_major_event_length": event_length,
+            "ball_displacement_to_first_major_event": ball_displacement,
+            "ball_displacement_during_first_major_event": ball_displacement_during,
+            "fly_dir": fly_dir,
         }
 
     except Exception as e:
@@ -111,28 +112,25 @@ def create_boxplot_with_scatter(df, metric_name, output_path=None, title=None):
     if HAS_SEABORN:
         # Create boxplot with seaborn
         import seaborn as sns
-        sns.boxplot(data=df_filtered, x="nickname", y=metric_name,
-                    color="lightblue", width=0.6, showfliers=False)
+
+        sns.boxplot(data=df_filtered, x="nickname", y=metric_name, color="lightblue", width=0.6, showfliers=False)
 
         # Superimpose scatterplot with jitter
-        sns.stripplot(data=df_filtered, x="nickname", y=metric_name,
-                      color="red", size=6, alpha=0.7, jitter=True)
+        sns.stripplot(data=df_filtered, x="nickname", y=metric_name, color="red", size=6, alpha=0.7, jitter=True)
     else:
         # Use matplotlib only
         nicknames = df_filtered["nickname"].unique()
         positions = range(len(nicknames))
 
         # Create boxplot data
-        box_data = [df_filtered[df_filtered["nickname"] == nickname][metric_name].values
-                   for nickname in nicknames]
+        box_data = [df_filtered[df_filtered["nickname"] == nickname][metric_name].values for nickname in nicknames]
 
         # Create boxplot
-        bp = plt.boxplot(box_data, positions=positions, patch_artist=True,
-                        showfliers=False, widths=0.6)
+        bp = plt.boxplot(box_data, positions=positions, patch_artist=True, showfliers=False, widths=0.6)
 
         # Color the boxes
-        for patch in bp['boxes']:
-            patch.set_facecolor('lightblue')
+        for patch in bp["boxes"]:
+            patch.set_facecolor("lightblue")
 
         # Add scatter points with jitter
         for i, nickname in enumerate(nicknames):
@@ -143,22 +141,22 @@ def create_boxplot_with_scatter(df, metric_name, output_path=None, title=None):
         plt.xticks(positions, nicknames)
 
     # Customize plot
-    plt.xticks(rotation=45, ha='right')
+    plt.xticks(rotation=45, ha="right")
     plt.xlabel("Genotype Nickname")
 
     if metric_name == "contact_proportion":
         plt.ylabel("Contact Proportion During Major Event")
         if title is None:
             title = "Contact Proportion During Major Events by Genotype"
-    elif metric_name == "major_event_length":
+    elif metric_name == "first_major_event_length":
         plt.ylabel("Major Event Length (seconds)")
         if title is None:
             title = "Major Event Duration by Genotype"
-    elif metric_name == "ball_displacement_to_major_event":
+    elif metric_name == "ball_displacement_to_first_major_event":
         plt.ylabel("Ball Displacement to Major Event (pixels)")
         if title is None:
             title = "Ball Displacement from Start to Major Event by Genotype"
-    elif metric_name == "ball_displacement_during_major_event":
+    elif metric_name == "ball_displacement_during_first_major_event":
         plt.ylabel("Ball Displacement During Major Event (pixels)")
         if title is None:
             title = "Ball Displacement During Major Event by Genotype"
@@ -167,7 +165,7 @@ def create_boxplot_with_scatter(df, metric_name, output_path=None, title=None):
         if title is None:
             title = f"{metric_name.replace('_', ' ').title()} by Genotype"
 
-    plt.title(title, fontsize=14, fontweight='bold')
+    plt.title(title, fontsize=14, fontweight="bold")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
 
@@ -175,12 +173,18 @@ def create_boxplot_with_scatter(df, metric_name, output_path=None, title=None):
     for i, nickname in enumerate(df_filtered["nickname"].unique()):
         subset = df_filtered[df_filtered["nickname"] == nickname]
         n_samples = len(subset)
-        plt.text(i, plt.ylim()[0], f'n={n_samples}',
-                ha='center', va='top', fontsize=10,
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8))
+        plt.text(
+            i,
+            plt.ylim()[0],
+            f"n={n_samples}",
+            ha="center",
+            va="top",
+            fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+        )
 
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"Plot saved to {output_path}")
     else:
         plt.show()
@@ -196,7 +200,12 @@ def create_summary_statistics(df, output_path=None):
         df (pd.DataFrame): DataFrame containing the data
         output_path (str, optional): Path to save the summary table
     """
-    metrics = ["contact_proportion", "major_event_length", "ball_displacement_to_major_event", "ball_displacement_during_major_event"]
+    metrics = [
+        "contact_proportion",
+        "first_major_event_length",
+        "ball_displacement_to_first_major_event",
+        "ball_displacement_during_first_major_event",
+    ]
 
     summary_stats = []
 
@@ -208,14 +217,20 @@ def create_summary_statistics(df, output_path=None):
 
         grouped = df_metric.groupby("nickname")[metric]
 
-        stats = grouped.agg([
-            'count', 'mean', 'std', 'median',
-            ('q25', lambda x: x.quantile(0.25)),
-            ('q75', lambda x: x.quantile(0.75)),
-            'min', 'max'
-        ]).round(4)
+        stats = grouped.agg(
+            [
+                "count",
+                "mean",
+                "std",
+                "median",
+                ("q25", lambda x: x.quantile(0.25)),
+                ("q75", lambda x: x.quantile(0.75)),
+                "min",
+                "max",
+            ]
+        ).round(4)
 
-        stats['metric'] = metric
+        stats["metric"] = metric
         stats = stats.reset_index()
         summary_stats.append(stats)
 
@@ -242,7 +257,7 @@ def main():
     parser.add_argument(
         "--yaml",
         type=str,
-        nargs='+',
+        nargs="+",
         required=True,
         help="Path(s) to YAML file(s) listing experiment directories.",
     )
@@ -250,18 +265,11 @@ def main():
         "--output_dir",
         type=str,
         default="outputs/trajectory_analysis",
-        help="Base output directory for plots and data."
+        help="Base output directory for plots and data.",
     )
+    parser.add_argument("--save_data", action="store_true", help="Save the computed metrics data to CSV.")
     parser.add_argument(
-        "--save_data",
-        action="store_true",
-        help="Save the computed metrics data to CSV."
-    )
-    parser.add_argument(
-        "--min_samples",
-        type=int,
-        default=3,
-        help="Minimum number of samples per genotype to include in analysis."
+        "--min_samples", type=int, default=3, help="Minimum number of samples per genotype to include in analysis."
     )
 
     args = parser.parse_args()
@@ -315,7 +323,12 @@ def main():
         print(f"Data saved to {data_path}")
 
     # Create plots
-    metrics_to_plot = ["contact_proportion", "major_event_length", "ball_displacement_to_major_event", "ball_displacement_during_major_event"]
+    metrics_to_plot = [
+        "contact_proportion",
+        "first_major_event_length",
+        "ball_displacement_to_first_major_event",
+        "ball_displacement_during_first_major_event",
+    ]
 
     for metric in metrics_to_plot:
         plot_path = os.path.join(args.output_dir, f"{metric}_boxplot.png")

@@ -48,7 +48,7 @@ metric_names = [
     # "first_significant_event",
     # "first_significant_event_time",
     "major_event",
-    "major_event_time",
+    "first_major_event_time",
     # "major_event_first",
     # "insight_effect",
     # "insight_effect_log",
@@ -100,7 +100,7 @@ dataset["major_event"] = dataset["major_event"].fillna(-1)
 dataset["final_event"] = dataset["final_event"].fillna(-1)
 dataset["max_event_time"] = dataset["max_event_time"].fillna(3600)
 dataset["first_significant_event_time"] = dataset["first_significant_event_time"].fillna(3600)
-dataset["major_event_time"] = dataset["major_event_time"].fillna(3600)
+dataset["first_major_event_time"] = dataset["first_major_event_time"].fillna(3600)
 dataset["final_event_time"] = dataset["final_event_time"].fillna(3600)
 
 # Check which metrics have NA values

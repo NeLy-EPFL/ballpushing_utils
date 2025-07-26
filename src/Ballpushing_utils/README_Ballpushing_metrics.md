@@ -75,7 +75,7 @@ These metrics capture how behavior changes over time:
 **Units**: Index / seconds
 **Interpretation**: Learning onset time - how quickly the fly discovers the task
 
-#### `major_event` / `major_event_time`
+#### `first_major_event` / `first_major_event_time`
 
 **Description**: The "aha moment" - first major breakthrough event
 
@@ -252,7 +252,7 @@ These metrics describe the spatial aspects of ball manipulation:
 #### `major_event_first`
 **Description**: Whether major breakthrough occurred in first event
 **Values**: True/False
-**Calculation**: Boolean indicating if major_event index = 0
+**Calculation**: Boolean indicating if first_major_event index = 0
 **Interpretation**: Immediate vs. gradual task discovery
 
 ## Temporal Structure Metrics

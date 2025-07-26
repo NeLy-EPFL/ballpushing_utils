@@ -374,7 +374,7 @@ class TrajectoryMetrics:
 
         return proportion
 
-    def major_event_length(self):
+    def first_major_event_length(self):
         """
         Returns the duration of the major event in seconds.
 
@@ -393,7 +393,7 @@ class TrajectoryMetrics:
 
         return event_end_time - event_start_time
 
-    def ball_displacement_to_major_event(self):
+    def ball_displacement_to_first_major_event(self):
         """
         Returns the total displacement of the ball from the beginning of the recording
         until the start of the major event.
@@ -440,7 +440,7 @@ class TrajectoryMetrics:
 
         return displacement
 
-    def ball_displacement_during_major_event(self):
+    def ball_displacement_during_first_major_event(self):
         """
         Returns the total displacement of the ball during the major event.
 
@@ -502,12 +502,7 @@ class TrajectoryMetrics:
         config = getattr(self.fly, "config", None)
         major_push_thresh = getattr(config, "major_event_threshold", 20) if config is not None else 20
 
-        result = {
-            "found": False,
-            "start_time": None,
-            "end_time": None,
-            "displacement": None
-        }
+        result = {"found": False, "start_time": None, "end_time": None, "displacement": None}
 
         if not (hasattr(self.fly, "event_metrics") and self.fly.event_metrics is not None):
             return result

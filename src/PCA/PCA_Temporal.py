@@ -106,7 +106,7 @@ metric_names += binned_slope_cols + interaction_rate_cols + binned_auc_cols
 # dataset["final_event"] = dataset["final_event"].fillna(-1)
 # dataset["max_event_time"] = dataset["max_event_time"].fillna(3600)
 # dataset["first_significant_event_time"] = dataset["first_significant_event_time"].fillna(3600)
-# dataset["major_event_time"] = dataset["major_event_time"].fillna(3600)
+# dataset["first_major_event_time"] = dataset["first_major_event_time"].fillna(3600)
 # dataset["final_event_time"] = dataset["final_event_time"].fillna(3600)
 
 # Check which metrics have NA values

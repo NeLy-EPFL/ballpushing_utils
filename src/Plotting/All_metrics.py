@@ -59,8 +59,8 @@ metric_names = [
     "significant_ratio",
     "first_significant_event",
     "first_significant_event_time",
-    "major_event",
-    "major_event_time",
+    "first_major_event",
+    "first_major_event_time",
     "major_event_first",
     # "insight_effect",
     # "insight_effect_log",
@@ -110,8 +110,8 @@ events_metrics = [
     "significant_ratio",
     "first_significant_event",
     "first_significant_event_time",
-    "major_event",
-    "major_event_time",
+    "first_major_event",
+    "first_major_event_time",
     "major_event_first",
 ]
 
@@ -177,7 +177,7 @@ dataset["final_event"].fillna(-1, inplace=True)
 # For max event time, first significant event time, major event final event time, if missing, set to 3600
 dataset["max_event_time"].fillna(3600, inplace=True)
 dataset["first_significant_event_time"].fillna(3600, inplace=True)
-dataset["major_event_time"].fillna(3600, inplace=True)
+dataset["first_major_event_time"].fillna(3600, inplace=True)
 dataset["final_event_time"].fillna(3600, inplace=True)
 
 # Remove columns insight_effect, insight_effect_log, exit_time
