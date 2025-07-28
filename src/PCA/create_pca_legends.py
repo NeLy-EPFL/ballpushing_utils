@@ -133,9 +133,14 @@ def create_combined_legend():
 
     plt.suptitle("PCA Scatterplot Matrix Legend", fontsize=16, fontweight="bold")
     plt.tight_layout()
-    plt.savefig("pca_legend_combined.png", dpi=300, bbox_inches="tight")
+
+    # Ensure pca_matrices directory exists
+    os.makedirs("pca_matrices", exist_ok=True)
+
+    # Save legend to pca_matrices directory
+    plt.savefig("pca_matrices/pca_legend_combined.png", dpi=300, bbox_inches="tight")
     plt.close()
-    print("Combined legend saved as 'pca_legend_combined.png'")
+    print("Combined legend saved as 'pca_matrices/pca_legend_combined.png'")
 
 
 def main():
@@ -150,7 +155,7 @@ def main():
     create_combined_legend()
 
     print("\nLegend file created:")
-    print("- pca_legend_combined.png")
+    print("- pca_matrices/pca_legend_combined.png")
 
 
 if __name__ == "__main__":
