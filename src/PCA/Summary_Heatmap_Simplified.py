@@ -10,9 +10,55 @@ from matplotlib.colors import Normalize
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../Ballpushing_utils")))
 from utilities import brain_regions_path
 
-# Find tailored CSVs for static and temporal only
-tailored_csvs = glob.glob("*_allmethods_tailored*.csv")
-filtered_csvs = [f for f in tailored_csvs if ("static" in f.lower() or "temporal" in f.lower())]
+# Configuration: Choose which analysis types to include
+# Options: "both", "static", "temporal"
+ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
+
+def detect_most_recent_pca_method():
+    """Detect the most recent PCA method used based on file timestamps"""
+    pca_files = glob.glob("static_pca_stats_results_allmethods*tailored*.csv")
+    sparsepca_files = glob.glob("static_sparsepca_stats_results_allmethods*tailored*.csv")
+    
+    all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
+    
+    if not all_files:
+        print("No PCA result files found")
+        return "pca", []
+    
+    # Sort by modification time (most recent first)
+    all_files.sort(key=lambda x: os.path.getmtime(x[0]), reverse=True)
+    most_recent_file, method = all_files[0]
+    
+    print(f"Most recent PCA method detected: {method.upper()}")
+    print(f"Using file: {most_recent_file}")
+    
+    # Return all files of the most recent method
+    method_files = [f for f, m in all_files if m == method]
+    return method, method_files
+
+# Detect most recent PCA method and get appropriate files
+pca_method, method_files = detect_most_recent_pca_method()
+
+# Find tailored CSVs for static and temporal based on detected method
+if pca_method == "sparsepca":
+    pattern = "*_sparsepca_*allmethods*tailored*.csv"
+else:
+    pattern = "*_pca_*allmethods*tailored*.csv"
+
+tailored_csvs = glob.glob(pattern)
+print(f"Found CSV files matching pattern '{pattern}': {tailored_csvs}")
+
+# Filter based on ANALYSIS_TYPE configuration
+if ANALYSIS_TYPE == "static":
+    filtered_csvs = [f for f in tailored_csvs if "static" in f.lower()]
+elif ANALYSIS_TYPE == "temporal":
+    filtered_csvs = [f for f in tailored_csvs if "temporal" in f.lower()]
+elif ANALYSIS_TYPE == "both":
+    filtered_csvs = [f for f in tailored_csvs if ("static" in f.lower() or "temporal" in f.lower())]
+else:
+    raise ValueError("ANALYSIS_TYPE must be 'static', 'temporal', or 'both'")
+
+print(f"Filtered CSV files for analysis type '{ANALYSIS_TYPE}': {filtered_csvs}")
 
 
 # Map for pretty column names
@@ -82,26 +128,55 @@ except Exception as e:
     color_dict = {}
     nickname_to_brainregion = {}
 
-# Sort by ascending Static p-value only
+# Sort by ascending p-value based on available columns
 if "Static" in heatmap_df.columns:
     heatmap_df = heatmap_df.sort_values(by=["Static"], ascending=[True])
+elif "Temporal" in heatmap_df.columns:
+    heatmap_df = heatmap_df.sort_values(by=["Temporal"], ascending=[True])
 
-# Categorize flies based on significance
+# Categorize flies based on significance and available analysis types
 no_hit = []
 static_only = []
 temporal_only = []
 both = []
+
 for idx, row in heatmap_df.iterrows():
-    static_sig = row["Static"] < 0.05 if "Static" in row else False
-    temporal_sig = row["Temporal"] < 0.05 if "Temporal" in row else False
-    if static_sig and temporal_sig:
-        both.append(idx)
-    elif static_sig:
-        static_only.append(idx)
-    elif temporal_sig:
-        temporal_only.append(idx)
-    else:
-        no_hit.append(idx)
+    static_sig = False
+    temporal_sig = False
+
+    if "Static" in heatmap_df.columns:
+        try:
+            static_val = heatmap_df.at[idx, "Static"]
+            static_sig = static_val < 0.05 and not pd.isna(static_val)
+        except:
+            static_sig = False
+
+    if "Temporal" in heatmap_df.columns:
+        try:
+            temporal_val = heatmap_df.at[idx, "Temporal"]
+            temporal_sig = temporal_val < 0.05 and not pd.isna(temporal_val)
+        except:
+            temporal_sig = False
+
+    if ANALYSIS_TYPE == "both":
+        if static_sig and temporal_sig:
+            both.append(idx)
+        elif static_sig:
+            static_only.append(idx)
+        elif temporal_sig:
+            temporal_only.append(idx)
+        else:
+            no_hit.append(idx)
+    elif ANALYSIS_TYPE == "static":
+        if static_sig:
+            static_only.append(idx)
+        else:
+            no_hit.append(idx)
+    elif ANALYSIS_TYPE == "temporal":
+        if temporal_sig:
+            temporal_only.append(idx)
+        else:
+            no_hit.append(idx)
 
 # Filter all subsets to only include Nicknames present in the DataFrame
 all_valid_nicknames = set(heatmap_df.index)
@@ -113,19 +188,37 @@ no_hit = [n for n in no_hit if n in all_valid_nicknames]
 # Sort the 'activity hits' (temporal_only) subset by ascending Temporal p-value
 if "Temporal" in heatmap_df.columns:
     temporal_only_sorted = sorted(
-        temporal_only, key=lambda n: float(pd.to_numeric(heatmap_df.loc[n, "Temporal"], errors="coerce"))
+        temporal_only,
+        key=lambda n: float(heatmap_df.at[n, "Temporal"]) if not pd.isna(heatmap_df.at[n, "Temporal"]) else 1.0,
     )
 else:
     temporal_only_sorted = temporal_only
-# Update the subset for plotting
-subsets = [
-    (both, "Ball pushing & activity hits"),
-    (static_only, "Ball pushing hits"),
-    (temporal_only_sorted, "Activity hits"),
-    (no_hit, "No hit"),
-]
-# --- Regular scale plot ---
-n_rows, n_cols = 2, 2
+# Update the subset for plotting based on analysis type
+subsets = []  # Initialize subsets
+if ANALYSIS_TYPE == "both":
+    subsets = [
+        (both, "Ball pushing & activity hits"),
+        (static_only, "Ball pushing hits"),
+        (temporal_only_sorted, "Activity hits"),
+        (no_hit, "No hit"),
+    ]
+elif ANALYSIS_TYPE == "static":
+    subsets = [
+        (static_only, "Ball pushing hits"),
+        (no_hit, "No hit"),
+    ]
+elif ANALYSIS_TYPE == "temporal":
+    subsets = [
+        (temporal_only_sorted, "Activity hits"),
+        (no_hit, "No hit"),
+    ]
+
+# Adjust subplot layout based on number of subsets
+n_subsets = len(subsets)
+if n_subsets <= 2:
+    n_rows, n_cols = 1, 2
+else:
+    n_rows, n_cols = 2, 2
 fig1, axes1 = plt.subplots(
     n_rows,
     n_cols,
@@ -151,8 +244,11 @@ for ax, (subset, title) in zip(axes1, subsets):
         ax.set_ylabel("Nickname")
         for y, nickname in enumerate(heatmap_df.loc[subset].index):
             for x, col in enumerate(heatmap_df.columns):
-                pval = heatmap_df.loc[nickname, col]
-                pval_float = pd.to_numeric(pval, errors="coerce")
+                pval = heatmap_df.at[nickname, col]
+                try:
+                    pval_float = float(pval) if not pd.isna(pval) else 1.0
+                except:
+                    pval_float = 1.0
                 if pval_float < 0.001:
                     annotation = "***"
                 elif pval_float < 0.01:
@@ -192,8 +288,11 @@ fig1.text(0.5, 0.01, "PCA Type", ha="center", va="bottom", fontsize=12)  # lower
 # Reduce ytick label fontsize
 for ax in axes1:
     ax.set_yticklabels(ax.get_yticklabels(), fontsize=7)
-fig1.savefig("mannwhitney_static_temporal_tailored_split.png", dpi=200)
-fig1.savefig("mannwhitney_static_temporal_tailored_split.pdf", dpi=200)
+
+# Generate output filename based on analysis type
+filename_suffix = ANALYSIS_TYPE if ANALYSIS_TYPE != "both" else "static_temporal"
+fig1.savefig(f"mannwhitney_{filename_suffix}_tailored_split.png", dpi=200)
+fig1.savefig(f"mannwhitney_{filename_suffix}_tailored_split.pdf", dpi=200)
 plt.close(fig1)
 
 # --- Log scale plot ---
@@ -232,8 +331,11 @@ for ax, (subset, title) in zip(axes2, subsets):
         ax.set_ylabel("Nickname")
         for y, nickname in enumerate(heatmap_df.loc[subset].index):
             for x, col in enumerate(heatmap_df.columns):
-                pval = heatmap_df.loc[nickname, col]
-                pval_float = pd.to_numeric(pval, errors="coerce")
+                pval = heatmap_df.at[nickname, col]
+                try:
+                    pval_float = float(pval) if not pd.isna(pval) else 1.0
+                except:
+                    pval_float = 1.0
                 if pval_float < 0.001:
                     annotation = "***"
                 elif pval_float < 0.01:
@@ -272,6 +374,6 @@ cbar2.set_ticklabels(log_ticklabels)
 fig2.text(0.5, 0.01, "PCA Type", ha="center", va="bottom", fontsize=12)
 for ax in axes2:
     ax.set_yticklabels(ax.get_yticklabels(), fontsize=7)
-fig2.savefig("mannwhitney_static_temporal_tailored_split_log.png", dpi=200)
-fig2.savefig("mannwhitney_static_temporal_tailored_split_log.pdf", dpi=200)
+fig2.savefig(f"mannwhitney_{filename_suffix}_tailored_split_log.png", dpi=200)
+fig2.savefig(f"mannwhitney_{filename_suffix}_tailored_split_log.pdf", dpi=200)
 plt.close(fig2)
