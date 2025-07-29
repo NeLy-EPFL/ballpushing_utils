@@ -14,27 +14,29 @@ from utilities import brain_regions_path
 # Options: "both", "static", "temporal"
 ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
 
+
 def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
     pca_files = glob.glob("static_pca_stats_results_allmethods*tailored*.csv")
     sparsepca_files = glob.glob("static_sparsepca_stats_results_allmethods*tailored*.csv")
-    
+
     all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
-    
+
     if not all_files:
         print("No PCA result files found")
         return "pca", []
-    
+
     # Sort by modification time (most recent first)
     all_files.sort(key=lambda x: os.path.getmtime(x[0]), reverse=True)
     most_recent_file, method = all_files[0]
-    
+
     print(f"Most recent PCA method detected: {method.upper()}")
     print(f"Using file: {most_recent_file}")
-    
+
     # Return all files of the most recent method
     method_files = [f for f, m in all_files if m == method]
     return method, method_files
+
 
 # Detect most recent PCA method and get appropriate files
 pca_method, method_files = detect_most_recent_pca_method()

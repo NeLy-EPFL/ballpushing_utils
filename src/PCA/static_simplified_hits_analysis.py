@@ -21,20 +21,20 @@ def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
     pca_files = glob.glob("static_pca_stats_results_allmethods*tailored*.csv")
     sparsepca_files = glob.glob("static_sparsepca_stats_results_allmethods*tailored*.csv")
-    
+
     all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
-    
+
     if not all_files:
         print("No PCA result files found")
         return "pca", "static_pca_stats_results_allmethods_tailoredctrls.csv"
-    
+
     # Sort by modification time (most recent first)
     all_files.sort(key=lambda x: os.path.getmtime(x[0]), reverse=True)
     most_recent_file, method = all_files[0]
-    
+
     print(f"Most recent PCA method detected: {method.upper()}")
     print(f"Using file: {most_recent_file}")
-    
+
     return method, most_recent_file
 
 
@@ -44,7 +44,7 @@ def perform_simplified_static_analysis():
     # Detect the most recent PCA method and get the appropriate file
     pca_method, comprehensive_file = detect_most_recent_pca_method()
     method_prefix = "SparsePCA" if pca_method == "sparsepca" else "PCA"
-    
+
     # Load the existing comprehensive results to get permutation-significant hits
     try:
         comprehensive_results = pd.read_csv(comprehensive_file)
@@ -228,7 +228,7 @@ def create_hits_heatmap(results_df):
     ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=10)
 
     plt.tight_layout()
-    
+
     # Save with method-specific naming
     png_file = f"static_{pca_method}_hits_simplified_heatmap.png"
     pdf_file = f"static_{pca_method}_hits_simplified_heatmap.pdf"
