@@ -57,14 +57,16 @@ from Ballpushing_utils import utilities, config
 CONFIG = {
     "PATHS": {
         "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/TNT_Hits"),
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
     },
     "PROCESSING": {
-        "experiment_filter": "",  # Filter for experiment folders
-        "metrics": ["summary", "event_metrics"],  # Metrics to process (add/remove as needed)
+        "experiment_filter": "",  # Filter for a specific experiment folder to test
+        "metrics": [
+            "standardized_contacts",
+        ],  # Metrics to process (add/remove as needed)
     },
 }
 

@@ -1,6 +1,7 @@
 import pandas as pd
 from Ballpushing_utils import utilities
 import numpy as np
+import math
 from utils_behavior import Sleap_utils
 from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 from matplotlib import pyplot as plt
@@ -44,12 +45,20 @@ class SkeletonMetrics:
 
     def resize_coordinates(self, x, y, original_width, original_height, new_width, new_height):
         """Resize the coordinates according to the new frame size."""
+        # Check for NaN values and return None for both coordinates if either is NaN
+        if math.isnan(x) or math.isnan(y):
+            return None, None
+
         x_scale = new_width / original_width
         y_scale = new_height / original_height
         return int(x * x_scale), int(y * y_scale)
 
     def apply_arena_mask_to_labels(self, x, y, mask_padding, crop_top, crop_bottom, new_height):
         """Adjust the coordinates according to the cropping and padding applied to the frame."""
+        # Check if coordinates are None (from NaN handling)
+        if x is None or y is None:
+            return None, None
+
         # Crop from top and bottom
         if crop_top <= y < (new_height - crop_bottom):
             y -= crop_top
@@ -105,8 +114,20 @@ class SkeletonMetrics:
             for x, y in ball_coords
         ]
 
-        ball_data["x_centre_preprocessed"] = [x for x, y in ball_coords if x is not None and y is not None]
-        ball_data["y_centre_preprocessed"] = [y for x, y in ball_coords if x is not None and y is not None]
+        # Convert to numpy arrays and preserve NaN values for missing data points
+        # This maintains the same length as the original data
+        ball_coords_x = []
+        ball_coords_y = []
+        for x, y in ball_coords:
+            if x is not None and y is not None:
+                ball_coords_x.append(x)
+                ball_coords_y.append(y)
+            else:
+                ball_coords_x.append(np.nan)
+                ball_coords_y.append(np.nan)
+
+        ball_data["x_centre_preprocessed"] = ball_coords_x
+        ball_data["y_centre_preprocessed"] = ball_coords_y
 
         # Add x_centre_preprocessed and y_centre_preprocessed in the node_names
 
@@ -219,6 +240,14 @@ class SkeletonMetrics:
         else:
             print("No standardized interactions found")
 
+        # Process contact-based standardized events based on config
+        if self.fly.config.standardized_events_mode == "contact_events":
+            contact_events = self.get_standardized_contact_events()
+            for event_counter, event_data in enumerate(contact_events):
+                event_data["event_id"] = len(events) + event_counter  # Continue event ID numbering
+                event_data["event_type"] = "contact"
+                events.append(event_data)
+
         if self.fly.config.generate_random:
             # Process standardized random events
             if hasattr(self.fly.tracking_data, "standardized_random_events"):
@@ -260,6 +289,99 @@ class SkeletonMetrics:
 
         return pd.concat(events).reset_index(drop=True) if events else pd.DataFrame()
 
+    def get_standardized_contact_events(self):
+        """
+        Generate standardized contact events based on continuous contact periods.
+
+        Returns:
+            list: List of DataFrames, each representing a standardized contact event
+        """
+        events = []
+
+        # Get the annotated contact dataset
+        annotated_df = self.get_contact_annotated_dataset()
+        if annotated_df is None or annotated_df.empty:
+            print("No annotated contact dataset available")
+            return events
+
+        # Find continuous contact periods
+        contact_periods = self._find_contact_periods(annotated_df)
+
+        # Create standardized events around each contact period
+        frames_before = self.fly.config.frames_before_onset
+        frames_after = self.fly.config.frames_after_onset
+
+        for period_start, period_end in contact_periods:
+            # Calculate the center of the contact period
+            period_center = (period_start + period_end) // 2
+
+            # Define standardized event window
+            event_start = max(0, period_center - frames_before)
+            event_end = min(len(annotated_df), period_center + frames_after)
+
+            # Skip if window is too small
+            if event_end - event_start < frames_before + frames_after // 2:
+                continue
+
+            # Extract the event data
+            event_data = annotated_df.iloc[event_start:event_end].copy()
+
+            # Add standardized columns
+            event_data["time_rel_onset"] = (event_data.index - event_start) / self.fly.experiment.fps
+            event_data["fly_idx"] = 0  # Default fly index
+            event_data["ball_idx"] = 0  # Default ball index
+            event_data["adjusted_frame"] = range(len(event_data))
+            event_data["contact_period_start"] = period_start
+            event_data["contact_period_end"] = period_end
+            event_data["contact_period_center"] = period_center
+
+            # Calculate ball displacement relative to event start
+            if "x_centre_preprocessed" in event_data.columns and "y_centre_preprocessed" in event_data.columns:
+                ball_disp = np.sqrt(
+                    (event_data["x_centre_preprocessed"] - event_data["x_centre_preprocessed"].iloc[0]) ** 2
+                    + (event_data["y_centre_preprocessed"] - event_data["y_centre_preprocessed"].iloc[0]) ** 2
+                )
+                event_data["ball_displacement"] = ball_disp
+
+            events.append(event_data)
+
+        print(f"Generated {len(events)} standardized contact events")
+        return events
+
+    def _find_contact_periods(self, annotated_df):
+        """
+        Find continuous periods where is_contact is True.
+
+        Args:
+            annotated_df: DataFrame with 'is_contact' column
+
+        Returns:
+            list: List of (start_frame, end_frame) tuples for contact periods
+        """
+        if "is_contact" not in annotated_df.columns:
+            print("No 'is_contact' column found in annotated dataset")
+            return []
+
+        is_contact = annotated_df["is_contact"].values
+        contact_periods = []
+
+        # Find start and end of contact periods
+        contact_diff = np.diff(np.concatenate(([False], is_contact, [False])).astype(int))
+        starts = np.where(contact_diff == 1)[0]
+        ends = np.where(contact_diff == -1)[0]
+
+        # Pair starts and ends
+        for start, end in zip(starts, ends):
+            # Apply minimum length filter if configured
+            min_length = getattr(self.fly.config, "contact_min_length", None)
+            if min_length is not None and (end - start) < min_length:
+                continue
+
+            contact_periods.append((start, end))
+
+        print(f"Found {len(contact_periods)} contact periods")
+        return contact_periods
+
     def get_final_contact(self, threshold=None, init=False):
         if threshold is None:
             threshold = self.fly.config.final_event_threshold
@@ -282,9 +404,14 @@ class SkeletonMetrics:
         for event in self.contacts:
             # Get the ball positions for the event
             ball_positions = self.ball.objects[0].dataset.loc[event[0] : event[1]]
-            # Get the derivative of the ball positions
 
-            ball_velocity = np.mean(abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0)))
+            # Check if event has more than one frame to avoid empty diff
+            if len(ball_positions) > 1:
+                # Get the derivative of the ball positions
+                ball_velocity = np.mean(abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0)))
+            else:
+                # Single-frame event, no velocity can be computed
+                ball_velocity = 0.0
 
             self.ball_displacements.append(ball_velocity)
 
@@ -303,6 +430,11 @@ class SkeletonMetrics:
         # Add ball coordinates to tracking data
         tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset["x_centre_preprocessed"]
         tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset["y_centre_preprocessed"]
+
+        # Add raw ball coordinates when fly_only is False
+        if not self.fly.config.fly_only:
+            tracking_data["x_centre_raw"] = self.ball.objects[0].dataset["x_centre"]
+            tracking_data["y_centre_raw"] = self.ball.objects[0].dataset["y_centre"]
 
         # Get reference points
         thorax_x = tracking_data["x_Thorax"].values
@@ -357,6 +489,11 @@ class SkeletonMetrics:
 
         tracking_data["x_centre_preprocessed"] = self.ball.objects[0].dataset["x_centre_preprocessed"]
         tracking_data["y_centre_preprocessed"] = self.ball.objects[0].dataset["y_centre_preprocessed"]
+
+        # Add raw ball coordinates when fly_only is False
+        if not self.fly.config.fly_only:
+            tracking_data["x_centre_raw"] = self.ball.objects[0].dataset["x_centre"]
+            tracking_data["y_centre_raw"] = self.ball.objects[0].dataset["y_centre"]
 
         thorax = tracking_data[["x_Thorax", "y_Thorax"]].values
         head = tracking_data[["x_Head", "y_Head"]].values

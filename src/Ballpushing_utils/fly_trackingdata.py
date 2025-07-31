@@ -21,7 +21,7 @@ class FlyTrackingData:
         try:
             # Load tracking files
             self.balltrack = self.load_tracking_file("*ball*.h5", "ball")
-            self.raw_balltrack = self.load_tracking_file("*ball*.h5", "ball", smoothing=False)
+            self.raw_balltrack = self.load_tracking_file("*ball*.h5", "ball")
             self.flytrack = self.load_tracking_file("*fly*.h5", "fly")
             self.skeletontrack = self.load_tracking_file(
                 "*full_body*.h5",

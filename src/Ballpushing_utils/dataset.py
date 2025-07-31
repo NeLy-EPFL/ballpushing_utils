@@ -980,6 +980,11 @@ class Dataset:
             # Filter data for the specific event_id and event_type
             event_df = data[(data["event_id"] == event_id) & (data["event_type"] == event_type)]
 
+            # Check if event_df is empty
+            if event_df.empty:
+                print(f"No data found for event_id {event_id}, event_type {event_type}.")
+                return results
+
             # Filter keypoint columns based on fly_relative
             if fly_relative:
                 keypoint_columns = [col for col in keypoint_columns if "_fly" in col]
@@ -993,10 +998,18 @@ class Dataset:
             # Vectorized statistical calculations
             for col in keypoint_columns:
                 col_values = event_df[col].values
-                results[f"{col}_mean"] = np.nanmean(col_values)
-                results[f"{col}_std"] = np.nanstd(col_values)
-                results[f"{col}_skew"] = pd.Series(col_values).skew()
-                results[f"{col}_kurt"] = pd.Series(col_values).kurtosis()
+                # Check if col_values is empty to avoid warnings
+                if len(col_values) > 0:
+                    results[f"{col}_mean"] = np.nanmean(col_values)
+                    results[f"{col}_std"] = np.nanstd(col_values)
+                    results[f"{col}_skew"] = pd.Series(col_values).skew()
+                    results[f"{col}_kurt"] = pd.Series(col_values).kurtosis()
+                else:
+                    # No data available for this column
+                    results[f"{col}_mean"] = np.nan
+                    results[f"{col}_std"] = np.nan
+                    results[f"{col}_skew"] = np.nan
+                    results[f"{col}_kurt"] = np.nan
 
         except Exception as e:
             print(f"Error in _calculate_statistical_measures for event_id {event_id}, event_type {event_type}: {e}")

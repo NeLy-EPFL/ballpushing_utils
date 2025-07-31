@@ -34,7 +34,7 @@ class Config:
     time_range: Optional[tuple] = None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
-    tracks_smoothing: bool = True
+    tracks_smoothing: bool = False
     chamber_radius: int = 50
     rolling_window: int = 10
 
@@ -97,6 +97,10 @@ class Config:
     gap_between_contacts: Optional[float] = None  # 1 / 4  # Set to None to allow disabling gap merging
     contact_min_length: Optional[float] = None  # 1 / 4  # Set to None to allow disabling min length filtering
 
+    # Standardized events mode: "interaction_events" uses standardized interactions from tracking data,
+    # "contact_events" uses skeleton-based contact detection for creating standardized events
+    standardized_events_mode: str = "contact_events"  # Options: "interaction_events", "contact_events"
+
     # Skeleton metrics: longer
 
     skeleton_tracks_smoothing: bool = False
@@ -107,7 +111,7 @@ class Config:
     # gap_between_contacts: int = 3 / 2
     # contact_min_length: int = 2
 
-    fly_only = True
+    fly_only = False
 
     # hidden_value: int = -1
     hidden_value: int = -9999
