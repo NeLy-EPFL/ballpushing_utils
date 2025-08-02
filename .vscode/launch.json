@@ -219,6 +219,63 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: Debug Ball Coordinates Fly",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_ball_coordinates.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--movement-threshold",
+                "10"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Debug Ball Coordinates Fly (Manual Frames)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_ball_coordinates.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--frames",
+                "1000",
+                "2500",
+                "5000",
+                "--use-default-frames"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Debug Ball Coordinates Experiment",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_ball_coordinates.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked",
+                "--movement-threshold",
+                "15"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

@@ -217,8 +217,8 @@ suffix = "_emptysplit" if force_control == "Empty-Split" else "_tailoredctrls"
 # Save as feather for downstream use (ID card)
 pca_scores_with_meta.to_feather(f"static_{method_name.lower()}_with_metadata{suffix}.feather")
 
-# Select PCA components up to % variance
-Explained_variance = 95  # Set the desired explained variance threshold
+# Select PCA components up to % variance or all components
+Explained_variance = None  # Set to a percentage (e.g., 95) or None to use all components
 
 # Print explained variance of each component
 print("Explained variance by each component:")
@@ -226,8 +226,16 @@ for i, var in enumerate(explained_variance_ratio):
     print(f"{method_name}{i+1}: {var:.4f}")
 
 cumulative_variance = np.cumsum(explained_variance_ratio * 100)
-n_dims = np.searchsorted(cumulative_variance, Explained_variance) + 1
-print(f"Using first {n_dims} {method_name} components to cover {Explained_variance}% variance")
+
+if Explained_variance is None:
+    # Use all available components
+    n_dims = len(pca_scores_df.columns)
+    print(f"Using all {n_dims} {method_name} components (100% variance)")
+else:
+    # Use components up to the specified variance threshold
+    n_dims = np.searchsorted(cumulative_variance, Explained_variance) + 1
+    print(f"Using first {n_dims} {method_name} components to cover {Explained_variance}% variance")
+
 selected_dims = pca_scores_df.columns[:n_dims]
 
 # --- Statistical comparison for PCA components with three methods ---

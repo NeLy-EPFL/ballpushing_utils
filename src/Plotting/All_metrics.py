@@ -59,8 +59,8 @@ metric_names = [
     "significant_ratio",
     "first_significant_event",
     "first_significant_event_time",
-    "first_major_event",
-    "first_major_event_time",
+    "major_event",
+    "major_event_time",
     "major_event_first",
     # "insight_effect",
     # "insight_effect_log",
@@ -110,8 +110,8 @@ events_metrics = [
     "significant_ratio",
     "first_significant_event",
     "first_significant_event_time",
-    "first_major_event",
-    "first_major_event_time",
+    "major_event",
+    "major_event_time",
     "major_event_first",
 ]
 
@@ -177,7 +177,7 @@ dataset["final_event"].fillna(-1, inplace=True)
 # For max event time, first significant event time, major event final event time, if missing, set to 3600
 dataset["max_event_time"].fillna(3600, inplace=True)
 dataset["first_significant_event_time"].fillna(3600, inplace=True)
-dataset["first_major_event_time"].fillna(3600, inplace=True)
+dataset["major_event_time"].fillna(3600, inplace=True)
 dataset["final_event_time"].fillna(3600, inplace=True)
 
 # Remove columns insight_effect, insight_effect_log, exit_time
@@ -486,6 +486,337 @@ def generate_jitterboxplots_for_all_metrics(
         plt.close(fig)
 
 
+def generate_jitterboxplots_with_mannwhitney(
+    data,
+    metrics,
+    y="Nickname",
+    split_col="Split",
+    hue=None,
+    palette="Set2",
+    figsize=(15, 10),
+    output_dir="mann_whitney_plots",
+):
+    """
+    Generates jitterboxplots for each metric with Mann-Whitney U tests between each nickname and its control.
+    Adds significance annotations (* p<0.05, ** p<0.01, *** p<0.001) and colored backgrounds for significant results.
+
+    The nicknames are sorted in three distinct groups:
+    1. TOP: Significantly increased compared to control (green background)
+    2. MIDDLE: Controls and non-significant results (blue/gray backgrounds)
+    3. BOTTOM: Significantly decreased compared to control (coral background)
+
+    Within each group, nicknames are sorted by median value (highest to lowest for increased/middle groups,
+    lowest to highest for decreased group).
+
+    Parameters:
+        data (pd.DataFrame): The dataset to plot.
+        metrics (list): List of metric names to plot.
+        y (str): The name of the column for the y-axis (categorical values). Default is "Nickname".
+        split_col (str): Column name indicating the split type to determine control. Default is "Split".
+        hue (str, optional): The name of the column for color grouping. Default is None.
+        palette (str or dict, optional): Color palette for the plots. Default is "Set2".
+        figsize (tuple, optional): Size of each figure. Default is (15, 10).
+        output_dir (str or Path, optional): Directory to save the plots. Default is "mann_whitney_plots".
+
+    Returns:
+        pd.DataFrame: Statistics table with Mann-Whitney U test results.
+    """
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    all_stats = []
+
+    for metric in metrics:
+        print(f"Generating Mann-Whitney jitterboxplot for metric: {metric}")
+
+        plot_data = data.dropna(subset=[metric, y, split_col])
+
+        # First, perform Mann-Whitney U tests for all nicknames to get significance info
+        nicknames = plot_data[y].unique()
+        temp_stats = {}
+
+        for nickname in nicknames:
+            if pd.isna(nickname):
+                continue
+
+            nickname_data = plot_data[plot_data[y] == nickname]
+            if nickname_data.empty:
+                continue
+
+            split_val = nickname_data[split_col].iloc[0]
+            control_name = nickname_control_map(split_val)
+
+            if control_name is None or nickname == control_name:
+                # Controls get neutral sorting (no significance test)
+                temp_stats[nickname] = {
+                    "pval": 1.0,
+                    "significant": False,
+                    "sig_level": "control",
+                    "direction": "none",
+                    "median": plot_data[plot_data[y] == nickname][metric].median(),
+                }
+                continue
+
+            group_vals = nickname_data[metric].dropna()
+            control_vals = plot_data[plot_data[y] == control_name][metric].dropna()
+
+            if len(group_vals) > 0 and len(control_vals) > 0:
+                try:
+                    stat, pval = mannwhitneyu(group_vals, control_vals, alternative="two-sided")
+                    # Determine direction of effect
+                    group_median = group_vals.median()
+                    control_median = control_vals.median()
+                    direction = "increased" if group_median > control_median else "decreased"
+                except Exception:
+                    pval = 1.0
+                    direction = "none"
+            else:
+                pval = 1.0
+                direction = "none"
+
+            # Determine significance level
+            if pval < 0.001:
+                sig_level = "***"
+                significant = True
+            elif pval < 0.01:
+                sig_level = "**"
+                significant = True
+            elif pval < 0.05:
+                sig_level = "*"
+                significant = True
+            else:
+                sig_level = "ns"
+                significant = False
+
+            temp_stats[nickname] = {
+                "pval": pval,
+                "significant": significant,
+                "sig_level": sig_level,
+                "direction": direction if significant else "none",
+                "median": plot_data[plot_data[y] == nickname][metric].median(),
+            }
+
+        # Create sorting key: significance groups (increased > none > decreased), then by median
+        def sort_key(nickname):
+            stats = temp_stats.get(nickname, {"direction": "none", "significant": False, "median": 0})
+
+            # Primary sort: significance and direction
+            if stats["sig_level"] == "control":
+                priority = 2  # Controls in middle
+            elif stats["significant"] and stats["direction"] == "increased":
+                priority = 1  # Significant increases at top
+            elif stats["significant"] and stats["direction"] == "decreased":
+                priority = 3  # Significant decreases at bottom
+            else:
+                priority = 2  # Non-significant in middle
+
+            # Secondary sort: by median (descending for increased/none, ascending for decreased)
+            if priority == 3:  # For decreased group, sort by median ascending (least decrease first)
+                median_sort = stats["median"]
+            else:  # For increased and none groups, sort by median descending (highest first)
+                median_sort = -stats["median"]
+
+            return (priority, median_sort)
+
+        # Sort categories using the custom sorting key
+        sorted_categories = sorted(plot_data[y].unique(), key=sort_key)
+        plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_categories, ordered=True)
+        plot_data = plot_data.sort_values(by=[y], key=lambda col: col.cat.codes)
+
+        # Perform Mann-Whitney U tests again for the final stats (reusing temp_stats)
+        metric_stats = []
+        for nickname in nicknames:
+            if nickname not in temp_stats:
+                continue
+
+            stats = temp_stats[nickname]
+            if stats["sig_level"] == "control":
+                continue  # Skip controls from final stats
+
+            nickname_data = plot_data[plot_data[y] == nickname]
+            split_val = nickname_data[split_col].iloc[0]
+            control_name = nickname_control_map(split_val)
+
+            metric_stats.append(
+                {
+                    "Nickname": nickname,
+                    "Metric": metric,
+                    "Control": control_name,
+                    "pval": stats["pval"],
+                    "significant": stats["significant"],
+                    "sig_level": stats["sig_level"],
+                }
+            )
+
+        all_stats.extend(metric_stats)
+
+        # Calculate appropriate figure height based on number of categories
+        n_categories = len(plot_data[y].cat.categories)
+        # Minimum 0.4 inches per category, with a minimum of 10 inches
+        fig_height = max(figsize[1], n_categories * 0.4 + 4)  # +4 for margins and title
+        # Increase width to accommodate legend outside
+        fig_width = figsize[0] + 4  # Extra width for external legend
+
+        # Create the plot with adjusted size
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+        # Add colored backgrounds for significance groups and separators
+        control_names = set([s["Control"] for s in metric_stats if s["Control"] is not None])
+
+        # Track group boundaries for adding separators
+        group_boundaries = []
+        last_group = None
+
+        for idx, nickname in enumerate(plot_data[y].cat.categories):
+            stats = temp_stats.get(nickname, {"sig_level": "control", "significant": False, "direction": "none"})
+
+            # Determine current group
+            if stats["sig_level"] == "control":
+                current_group = "control"
+                bg_color = "lightblue"
+                alpha = 0.1
+            elif stats["significant"] and stats["direction"] == "increased":
+                current_group = "increased"
+                bg_color = "lightgreen"
+                alpha = 0.15
+            elif stats["significant"] and stats["direction"] == "decreased":
+                current_group = "decreased"
+                bg_color = "lightcoral"
+                alpha = 0.15
+            else:
+                current_group = "none"
+                bg_color = "lightgray"
+                alpha = 0.1
+
+            # Add group separator line when group changes
+            if last_group is not None and last_group != current_group:
+                group_boundaries.append(idx - 0.5)
+
+            # Add background color
+            ax.axhspan(idx - 0.4, idx + 0.4, color=bg_color, alpha=alpha, zorder=0)
+
+            last_group = current_group
+
+        # Add separator lines between groups
+        for boundary in group_boundaries:
+            ax.axhline(y=boundary, color="black", linewidth=2, linestyle="-", alpha=0.7, zorder=1)
+
+        # Draw boxplots with different styling for controls vs test groups
+        for nickname in plot_data[y].cat.categories:
+            nickname_data = plot_data[plot_data[y] == nickname]
+            if nickname_data.empty:
+                continue
+
+            is_control = nickname in control_names
+
+            if is_control:
+                # Control group styling - red dashed boxes
+                sns.boxplot(
+                    data=nickname_data,
+                    x=metric,
+                    y=y,
+                    showfliers=False,
+                    width=0.4,  # Reduced width for better spacing
+                    ax=ax,
+                    boxprops=dict(facecolor="none", edgecolor="red", linewidth=2, linestyle="--"),
+                    medianprops=dict(color="red", linewidth=2),
+                    whiskerprops=dict(color="red", linewidth=1.5, linestyle="--"),
+                    capprops=dict(color="red", linewidth=1.5),
+                )
+            else:
+                # Test group styling - black solid boxes
+                sns.boxplot(
+                    data=nickname_data,
+                    x=metric,
+                    y=y,
+                    showfliers=False,
+                    width=0.4,  # Reduced width for better spacing
+                    ax=ax,
+                    boxprops=dict(facecolor="none", edgecolor="black", linewidth=1),
+                    medianprops=dict(color="black", linewidth=1.5),
+                    whiskerprops=dict(color="black", linewidth=1),
+                    capprops=dict(color="black", linewidth=1),
+                )
+
+        # Overlay stripplot for jitter
+        sns.stripplot(
+            data=plot_data, x=metric, y=y, dodge=False, alpha=0.7, jitter=True, hue=hue, palette=palette, size=4, ax=ax
+        )
+
+        # Add significance annotations
+        yticklabels = [label.get_text() for label in ax.get_yticklabels()]
+        x_range = ax.get_xlim()[1] - ax.get_xlim()[0]
+
+        for idx, label in enumerate(yticklabels):
+            stats_for_nickname = [s for s in metric_stats if s["Nickname"] == label]
+            if stats_for_nickname:
+                stat_info = stats_for_nickname[0]
+                if stat_info["significant"]:
+                    yticklocs = ax.get_yticks()
+                    # Add significance stars
+                    ax.text(
+                        x=ax.get_xlim()[1] + 0.01 * x_range,
+                        y=float(yticklocs[idx]),
+                        s=stat_info["sig_level"],
+                        color="red",
+                        fontsize=14,
+                        fontweight="bold",
+                        va="center",
+                        ha="left",
+                        clip_on=False,
+                    )
+
+        # Set xlim to accommodate annotations
+        x_max = plot_data[metric].quantile(0.99)
+        ax.set_xlim(left=None, right=x_max * 1.2)  # Less extra space since legend will be outside
+
+        # Font and labels with larger sizes for readability
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=10)
+        plt.xlabel(metric, fontsize=14)
+        plt.ylabel(y, fontsize=14)
+        plt.title(f"Mann-Whitney U Test: {metric} by {y}", fontsize=16)
+
+        # Create custom legend
+        legend_elements = [
+            Patch(facecolor="none", edgecolor="red", linestyle="--", linewidth=2, label="Control Groups"),
+            Patch(facecolor="none", edgecolor="black", linewidth=1, label="Test Groups"),
+            Patch(facecolor="lightgreen", alpha=0.15, label="Significantly Increased"),
+            Patch(facecolor="lightblue", alpha=0.1, label="Controls & Non-significant"),
+            Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
+        ]
+
+        if hue:
+            handles, labels = ax.get_legend_handles_labels()
+            # Combine custom legend with hue legend
+            unique_hue = dict(zip(labels, handles))
+            all_handles = list(unique_hue.values()) + legend_elements
+            all_labels = list(unique_hue.keys()) + [elem.get_label() for elem in legend_elements]
+            ax.legend(all_handles, all_labels, title=hue, fontsize=10, bbox_to_anchor=(1.05, 1), loc="upper left")
+        else:
+            ax.legend(handles=legend_elements, fontsize=10, bbox_to_anchor=(1.05, 1), loc="upper left")
+
+        # Use tight_layout with padding to accommodate external legend
+        plt.tight_layout(rect=(0, 0, 0.85, 1))  # Leave 15% space on right for legend
+
+        # Save the plot
+        output_path = output_dir / f"{metric.replace(' ', '_')}_mannwhitney.pdf"
+        plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        output_eps = output_dir / f"{metric.replace(' ', '_')}_mannwhitney.eps"
+        plt.savefig(output_eps, dpi=300, bbox_inches="tight")
+
+        plt.close(fig)
+
+    # Create and save statistics DataFrame
+    stats_df = pd.DataFrame(all_stats)
+    stats_csv_path = output_dir / "mann_whitney_statistics.csv"
+    stats_df.to_csv(stats_csv_path, index=False)
+    print(f"Statistics saved to {stats_csv_path}")
+
+    return stats_df
+
+
 # Now let's create one example layout with the first metric group
 group = "Events Metrics"
 
@@ -672,3 +1003,59 @@ generate_jitterboxplots_for_all_metrics(
     control_name="TNTxPR",  # Control name for mutants
     stats_df=stats_df,
 )
+
+# Generate new Mann-Whitney U test plots with significance annotations
+print("\n" + "=" * 50)
+print("Generating Mann-Whitney U Test Plots")
+print("=" * 50)
+
+# For Split lines
+print("Processing Split lines...")
+stats_split = generate_jitterboxplots_with_mannwhitney(
+    data=SplitLines,
+    metrics=metric_names,
+    y="Nickname",
+    split_col="Split",
+    hue="Brain region",
+    palette=Config.color_dict,
+    figsize=(12, 30),
+    output_dir=OUTPUT_DIR / "mannwhitney_split",
+)
+
+# For No Split lines
+print("Processing No Split lines...")
+stats_nosplit = generate_jitterboxplots_with_mannwhitney(
+    data=NoSplit,
+    metrics=metric_names,
+    y="Nickname",
+    split_col="Split",
+    hue="Brain region",
+    palette=Config.color_dict,
+    figsize=(12, 30),
+    output_dir=OUTPUT_DIR / "mannwhitney_nosplit",
+)
+
+# For Mutants
+print("Processing Mutants...")
+stats_mutants = generate_jitterboxplots_with_mannwhitney(
+    data=Mutants,
+    metrics=metric_names,
+    y="Nickname",
+    split_col="Split",
+    hue="Brain region",
+    palette=Config.color_dict,
+    figsize=(12, 30),
+    output_dir=OUTPUT_DIR / "mannwhitney_mutant",
+)
+
+# Combine all statistics
+all_mannwhitney_stats = pd.concat([stats_split, stats_nosplit, stats_mutants], ignore_index=True)
+all_stats_path = OUTPUT_DIR / "all_mannwhitney_statistics.csv"
+all_mannwhitney_stats.to_csv(all_stats_path, index=False)
+
+print(f"\nAll Mann-Whitney statistics saved to: {all_stats_path}")
+print(f"Total significant results: {all_mannwhitney_stats['significant'].sum()}")
+print(f"Significance breakdown:")
+for level in ["***", "**", "*", "ns"]:
+    count = (all_mannwhitney_stats["sig_level"] == level).sum()
+    print(f"  {level}: {count} results")

@@ -10,11 +10,25 @@ from moviepy.video.fx.speedx import speedx
 
 class SkeletonMetrics:
     """
-    A class for computing metrics from the skeleton data. It requires to have a fly object with a valid skeleton data, and check whether there is a "preprocessed" ball data available.
+    A class for computing metrics from the skeleton data.
+
+    This class specifically uses raw (non-smoothed) ball tracking data to ensure accurate
+    contact detection and preprocessing. It requires a fly object with valid skeleton data
+    and raw ball tracking data.
+
+    The class preprocesses raw ball coordinates to match the skeleton coordinate space
+    and provides methods for contact detection and standardized contact datasets.
+
+    Data Flow:
+    1. Raw ball coordinates (x_centre_raw, y_centre_raw) are loaded from raw_balltrack
+    2. These are preprocessed to match skeleton coordinate space (x_centre_preprocessed, y_centre_preprocessed)
+    3. Contact detection uses preprocessed coordinates aligned with skeleton data
+    4. Standardized contact datasets include both raw and preprocessed coordinates when fly_only=False
     """
 
     def __init__(self, fly):
         self.fly = fly
+        # Always use raw (non-smoothed) ball tracking data for accurate contact detection
         self.ball = self.fly.tracking_data.raw_balltrack
         self.preprocess_ball()
 
@@ -92,11 +106,27 @@ class SkeletonMetrics:
         return x, y
 
     def preprocess_ball(self):
-        """Transform the ball coordinates to match the skeleton data."""
+        """
+        Transform raw ball coordinates to match the skeleton data coordinate space.
+
+        This method specifically uses raw (non-smoothed) ball coordinates to ensure
+        accurate spatial alignment with skeleton tracking data. The coordinates are
+        resized, cropped, and padded to match the preprocessing applied to skeleton data.
+        """
 
         ball_data = self.ball.objects[0].dataset
 
-        ball_coords = [(x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])]
+        # Check which coordinate columns are available and use the appropriate ones
+        # Priority: raw coordinates first, then fallback to regular coordinates
+        if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
+            print(f"Using raw ball coordinates: x_centre_raw, y_centre_raw")
+            ball_coords = [(x, y) for x, y in zip(ball_data["x_centre_raw"], ball_data["y_centre_raw"])]
+        elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
+            print(f"Using regular ball coordinates: x_centre, y_centre")
+            ball_coords = [(x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])]
+        else:
+            available_cols = [col for col in ball_data.columns if "centre" in col.lower()]
+            raise ValueError(f"No valid ball center coordinates found. Available center columns: {available_cols}")
 
         # Apply resizing, cropping, and padding to the ball tracking data
         ball_coords = [
@@ -433,8 +463,18 @@ class SkeletonMetrics:
 
         # Add raw ball coordinates when fly_only is False
         if not self.fly.config.fly_only:
-            tracking_data["x_centre_raw"] = self.ball.objects[0].dataset["x_centre"]
-            tracking_data["y_centre_raw"] = self.ball.objects[0].dataset["y_centre"]
+            # Check which raw coordinate columns are available
+            ball_data = self.ball.objects[0].dataset
+            if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
+                print("Adding x_centre_raw and y_centre_raw to tracking data")
+                tracking_data["x_centre_raw"] = ball_data["x_centre_raw"]
+                tracking_data["y_centre_raw"] = ball_data["y_centre_raw"]
+            elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
+                print("Adding x_centre and y_centre as raw coordinates to tracking data")
+                tracking_data["x_centre_raw"] = ball_data["x_centre"]
+                tracking_data["y_centre_raw"] = ball_data["y_centre"]
+            else:
+                print("Warning: No valid raw ball coordinates found for fly_centered_tracks")
 
         # Get reference points
         thorax_x = tracking_data["x_Thorax"].values
@@ -492,8 +532,14 @@ class SkeletonMetrics:
 
         # Add raw ball coordinates when fly_only is False
         if not self.fly.config.fly_only:
-            tracking_data["x_centre_raw"] = self.ball.objects[0].dataset["x_centre"]
-            tracking_data["y_centre_raw"] = self.ball.objects[0].dataset["y_centre"]
+            # Check which raw coordinate columns are available
+            ball_data = self.ball.objects[0].dataset
+            if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
+                tracking_data["x_centre_raw"] = ball_data["x_centre_raw"]
+                tracking_data["y_centre_raw"] = ball_data["y_centre_raw"]
+            elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
+                tracking_data["x_centre_raw"] = ball_data["x_centre"]
+                tracking_data["y_centre_raw"] = ball_data["y_centre"]
 
         thorax = tracking_data[["x_Thorax", "y_Thorax"]].values
         head = tracking_data[["x_Head", "y_Head"]].values
@@ -720,7 +766,12 @@ class SkeletonMetrics:
 
     def get_contact_annotated_dataset(self):
         """
-        Generate a DataFrame containing the skeleton tracks, and only the non-overlapping columns from raw balltracks, plus a column indicating contact frames.
+        Generate a DataFrame containing the skeleton tracks and non-overlapping columns
+        from raw (non-smoothed) ball tracks, plus a column indicating contact frames.
+
+        This method specifically uses raw ball tracking data to ensure accurate contact
+        detection without smoothing artifacts.
+
         Returns:
             pd.DataFrame: Combined DataFrame with 'is_contact' column.
         """
