@@ -65,7 +65,7 @@ CONFIG = {
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
-            "standardized_contacts",
+            "summary",
         ],  # Metrics to process (add/remove as needed)
     },
 }
@@ -342,6 +342,27 @@ if __name__ == "__main__":
     output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
     output_summary.mkdir(parents=True, exist_ok=True)
     output_data.mkdir(parents=True, exist_ok=True)
+
+    # Save the configuration used for this dataset generation
+    config_save_path = output_data / CONFIG["PATHS"]["config_path"]
+    try:
+        # Include both the CONFIG dictionary and the ball pushing config
+        config_to_save = {
+            "dataset_builder_config": CONFIG,
+            "ballpushing_config": current_config.__dict__,
+            "processing_info": {
+                "mode": args.mode,
+                "yaml_file": args.yaml,
+                "threads": args.threads,
+                "log_level": args.log_level,
+                "timestamp": datetime.now().isoformat(),
+            },
+        }
+        with open(config_save_path, "w") as f:
+            json.dump(config_to_save, f, indent=2, default=str)  # default=str handles Path objects
+        logging.info(f"Configuration saved to: {config_save_path}")
+    except Exception as e:
+        logging.error(f"Failed to save configuration to {config_save_path}: {str(e)}")
 
     # Get list of folders to process based on mode
     processing_items = []

@@ -1,34 +1,719 @@
 {
-    "chamber_ratio": "Error: BallPushingMetrics.chamber_ratio() missing 1 required positional argument: 'fly_idx'",
-    "check_yball_variation": "Error: BallPushingMetrics.check_yball_variation() missing 2 required positional arguments: 'event' and 'ball_data'",
-    "compute_binned_slope": "Error: BallPushingMetrics.compute_binned_slope() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_event_influence": "Error: BallPushingMetrics.compute_event_influence() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_interaction_persistence": "Error: BallPushingMetrics.compute_interaction_persistence() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_interaction_rate_by_bin": "Error: BallPushingMetrics.compute_interaction_rate_by_bin() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_learning_slope": "Error: BallPushingMetrics.compute_learning_slope() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_logistic_features": "Error: BallPushingMetrics.compute_logistic_features() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_normalized_velocity": "Error: BallPushingMetrics.compute_normalized_velocity() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_overall_interaction_rate": "Error: BallPushingMetrics.compute_overall_interaction_rate() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_overall_slope": "Error: BallPushingMetrics.compute_overall_slope() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_pause_metrics": "Error: BallPushingMetrics.compute_pause_metrics() missing 1 required positional argument: 'fly_idx'",
-    "compute_velocity_during_interactions": "Error: BallPushingMetrics.compute_velocity_during_interactions() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "compute_velocity_trend": "Error: BallPushingMetrics.compute_velocity_trend() missing 1 required positional argument: 'fly_idx'",
-    "detect_pauses": "Error: BallPushingMetrics.detect_pauses() missing 1 required positional argument: 'fly_idx'",
-    "find_breaks": "Error: BallPushingMetrics.find_breaks() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "find_event_by_distance": "Error: BallPushingMetrics.find_event_by_distance() missing 3 required positional arguments: 'fly_idx', 'ball_idx', and 'threshold'",
-    "find_events_direction": "Error: BallPushingMetrics.find_events_direction() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_adjusted_nb_events": "Error: BallPushingMetrics.get_adjusted_nb_events() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_chamber_exit_time": "Error: BallPushingMetrics.get_chamber_exit_time() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_chamber_time": "Error: BallPushingMetrics.get_chamber_time() missing 1 required positional argument: 'fly_idx'",
-    "get_cumulated_breaks_duration": "Error: BallPushingMetrics.get_cumulated_breaks_duration() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_distance_moved": "Error: BallPushingMetrics.get_distance_moved() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_distance_ratio": "Error: BallPushingMetrics.get_distance_ratio() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_final_event": "Error: BallPushingMetrics.get_final_event() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_first_significant_event": "Error: BallPushingMetrics.get_first_significant_event() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_insight_effect": "Error: BallPushingMetrics.get_insight_effect() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_major_event": "Error: BallPushingMetrics.get_major_event() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_max_distance": "Error: BallPushingMetrics.get_max_distance() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_max_event": "Error: BallPushingMetrics.get_max_event() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_significant_events": "Error: BallPushingMetrics.get_significant_events() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'",
-    "get_success_direction": "Error: BallPushingMetrics.get_success_direction() missing 2 required positional arguments: 'fly_idx' and 'ball_idx'"
+    "chamber_ratio": 0.8305763354757137,
+    "check_yball_variation": "Skipped: Requires specific event and ball_data",
+    "compute_auc": 745496.4426252431,
+    "compute_binned_auc": [
+        72566.86142046699,
+        70605.22356072787,
+        70542.21202824033,
+        70490.91983768858,
+        70470.68403467638,
+        70444.51631664408,
+        71189.62617098051,
+        63373.566839810126,
+        59925.089414662376,
+        44449.70653218241,
+        41887.71783762969,
+        39465.71126872098
+    ],
+    "compute_binned_slope": [
+        -0.11667935261915535,
+        -0.0007438812846436407,
+        -0.0006803465184082464,
+        -0.0008601291719511841,
+        3.727223757388098e-05,
+        -0.0006305162875853493,
+        0.007984445886840226,
+        -0.26663471094431646,
+        0.00854347733269798,
+        -0.11159753753845685,
+        -0.18994444097597968,
+        0.010465112868511074
+    ],
+    "compute_event_influence": {
+        "avg_displacement_after_success": 8.078047060804321,
+        "avg_displacement_after_failure": 9.754302860735946,
+        "influence_ratio": 0.8281521679341056
+    },
+    "compute_fly_distance_moved": 179351.80505020567,
+    "compute_interaction_persistence": 4.855307640297498,
+    "compute_interaction_rate_by_bin": [
+        0.006666602810317909,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.006666602810317914,
+        0.02999971264643057,
+        0.013333205620635809,
+        0.05333282248254331,
+        0.019999808430953742,
+        0.03999961686190742
+    ],
+    "compute_learning_slope": {
+        "slope": -0.03427922153434237,
+        "r2": 0.6703949230610142
+    },
+    "compute_logistic_features": {
+        "L": 244.01515194030569,
+        "k": -0.001569439816516484,
+        "t0": 3399.591690531103,
+        "r2": 0.8338542460325156
+    },
+    "compute_median_freeze_duration": 12.551724137931034,
+    "compute_normalized_velocity": 19.935116144160602,
+    "compute_overall_interaction_rate": 0.014166530971925556,
+    "compute_overall_slope": -0.03427922153434237,
+    "compute_pause_metrics": {
+        "number_of_pauses": 2,
+        "total_pause_duration": 15.172413793103448
+    },
+    "compute_persistence_at_end": 0.0856018083944752,
+    "compute_velocity_during_interactions": 49.96721713365127,
+    "compute_velocity_trend": 0.007816598527637175,
+    "detect_pauses": [
+        [
+            1282.551724137931,
+            1295.103448275862,
+            12.551724137931034
+        ]
+    ],
+    "find_breaks": [
+        [
+            0,
+            322,
+            322
+        ],
+        [
+            665,
+            711,
+            46
+        ],
+        [
+            936,
+            52813,
+            51877
+        ],
+        [
+            52947,
+            53286,
+            339
+        ],
+        [
+            53393,
+            61046,
+            7653
+        ],
+        [
+            61301,
+            61493,
+            192
+        ],
+        [
+            61533,
+            61832,
+            299
+        ],
+        [
+            61977,
+            62110,
+            133
+        ],
+        [
+            62184,
+            62251,
+            67
+        ],
+        [
+            62297,
+            63085,
+            788
+        ],
+        [
+            63128,
+            63366,
+            238
+        ],
+        [
+            63428,
+            63523,
+            95
+        ],
+        [
+            64141,
+            64292,
+            151
+        ],
+        [
+            64478,
+            69667,
+            5189
+        ],
+        [
+            69715,
+            69778,
+            63
+        ],
+        [
+            69902,
+            70229,
+            327
+        ],
+        [
+            70272,
+            70558,
+            286
+        ],
+        [
+            70624,
+            79054,
+            8430
+        ],
+        [
+            79139,
+            79205,
+            66
+        ],
+        [
+            79252,
+            79529,
+            277
+        ],
+        [
+            79598,
+            79736,
+            138
+        ],
+        [
+            80358,
+            81889,
+            1531
+        ],
+        [
+            81920,
+            81963,
+            43
+        ],
+        [
+            82123,
+            82516,
+            393
+        ],
+        [
+            82691,
+            83035,
+            344
+        ],
+        [
+            83089,
+            83599,
+            510
+        ],
+        [
+            83628,
+            83693,
+            65
+        ],
+        [
+            83775,
+            83880,
+            105
+        ],
+        [
+            83967,
+            84452,
+            485
+        ],
+        [
+            84515,
+            84902,
+            387
+        ],
+        [
+            84979,
+            85595,
+            616
+        ],
+        [
+            85791,
+            86139,
+            348
+        ],
+        [
+            86178,
+            86524,
+            346
+        ],
+        [
+            86644,
+            89903,
+            3259
+        ],
+        [
+            90025,
+            90312,
+            287
+        ],
+        [
+            90354,
+            90656,
+            302
+        ],
+        [
+            91884,
+            94240,
+            2356
+        ],
+        [
+            94348,
+            94406,
+            58
+        ],
+        [
+            94445,
+            94858,
+            413
+        ],
+        [
+            94899,
+            99208,
+            4309
+        ],
+        [
+            99287,
+            99687,
+            400
+        ],
+        [
+            99746,
+            99831,
+            85
+        ],
+        [
+            99879,
+            100074,
+            195
+        ],
+        [
+            100139,
+            100455,
+            316
+        ],
+        [
+            100535,
+            100702,
+            167
+        ],
+        [
+            100749,
+            100933,
+            184
+        ],
+        [
+            100974,
+            101411,
+            437
+        ],
+        [
+            101444,
+            101809,
+            365
+        ],
+        [
+            101883,
+            103099,
+            1216
+        ],
+        [
+            103186,
+            103647,
+            461
+        ],
+        [
+            104101,
+            104353,
+            252
+        ],
+        [
+            104392,
+            104402,
+            10
+        ]
+    ],
+    "find_event_by_distance": [
+        [
+            63523,
+            64141,
+            619
+        ],
+        11
+    ],
+    "find_events_direction": [
+        [
+            [
+                322,
+                665,
+                344
+            ],
+            [
+                711,
+                936,
+                226
+            ],
+            [
+                52813,
+                52947,
+                135
+            ],
+            [
+                61832,
+                61977,
+                146
+            ],
+            [
+                63523,
+                64141,
+                619
+            ],
+            [
+                64292,
+                64478,
+                187
+            ],
+            [
+                70229,
+                70272,
+                44
+            ],
+            [
+                79736,
+                80358,
+                623
+            ],
+            [
+                81963,
+                82123,
+                161
+            ],
+            [
+                90656,
+                91884,
+                1229
+            ],
+            [
+                100455,
+                100535,
+                81
+            ],
+            [
+                103647,
+                104101,
+                455
+            ]
+        ],
+        [
+            [
+                53286,
+                53393,
+                108
+            ],
+            [
+                62110,
+                62184,
+                75
+            ],
+            [
+                62251,
+                62297,
+                47
+            ],
+            [
+                69778,
+                69902,
+                125
+            ],
+            [
+                79054,
+                79139,
+                86
+            ],
+            [
+                82516,
+                82691,
+                176
+            ],
+            [
+                85595,
+                85791,
+                197
+            ],
+            [
+                86524,
+                86644,
+                121
+            ],
+            [
+                89903,
+                90025,
+                123
+            ],
+            [
+                94240,
+                94348,
+                109
+            ],
+            [
+                99208,
+                99287,
+                80
+            ],
+            [
+                101809,
+                101883,
+                75
+            ],
+            [
+                103099,
+                103186,
+                88
+            ]
+        ]
+    ],
+    "get_adjusted_nb_events": 14.18120103937944,
+    "get_chamber_exit_time": 3.7241379310344827,
+    "get_chamber_time": 2990.103448275862,
+    "get_cumulated_breaks_duration": 97221,
+    "get_distance_moved": 506.50437142813655,
+    "get_distance_ratio": 2.5003334176609884,
+    "get_final_event": [
+        20,
+        2745.793103448276,
+        2767.241379310345
+    ],
+    "get_first_significant_event": [
+        0,
+        7.379310344827587
+    ],
+    "get_has_finished": 1,
+    "get_insight_effect": {
+        "raw_effect": 1.0,
+        "log_effect": 0.6931471805599453,
+        "classification": "weak",
+        "first_event": true,
+        "post_aha_count": 24
+    },
+    "get_major_event": [
+        0,
+        11.10344827586207
+    ],
+    "get_max_distance": 202.57473177395727,
+    "get_max_event": [
+        20,
+        2745.793103448276
+    ],
+    "get_significant_events": [
+        [
+            [
+                322,
+                665,
+                344
+            ],
+            0
+        ],
+        [
+            [
+                711,
+                936,
+                226
+            ],
+            1
+        ],
+        [
+            [
+                52813,
+                52947,
+                135
+            ],
+            2
+        ],
+        [
+            [
+                53286,
+                53393,
+                108
+            ],
+            3
+        ],
+        [
+            [
+                61832,
+                61977,
+                146
+            ],
+            6
+        ],
+        [
+            [
+                62110,
+                62184,
+                75
+            ],
+            7
+        ],
+        [
+            [
+                62251,
+                62297,
+                47
+            ],
+            8
+        ],
+        [
+            [
+                63523,
+                64141,
+                619
+            ],
+            11
+        ],
+        [
+            [
+                64292,
+                64478,
+                187
+            ],
+            12
+        ],
+        [
+            [
+                69778,
+                69902,
+                125
+            ],
+            14
+        ],
+        [
+            [
+                70229,
+                70272,
+                44
+            ],
+            15
+        ],
+        [
+            [
+                79054,
+                79139,
+                86
+            ],
+            17
+        ],
+        [
+            [
+                79736,
+                80358,
+                623
+            ],
+            20
+        ],
+        [
+            [
+                81963,
+                82123,
+                161
+            ],
+            22
+        ],
+        [
+            [
+                82516,
+                82691,
+                176
+            ],
+            23
+        ],
+        [
+            [
+                85595,
+                85791,
+                197
+            ],
+            30
+        ],
+        [
+            [
+                86524,
+                86644,
+                121
+            ],
+            32
+        ],
+        [
+            [
+                89903,
+                90025,
+                123
+            ],
+            33
+        ],
+        [
+            [
+                90656,
+                91884,
+                1229
+            ],
+            35
+        ],
+        [
+            [
+                94240,
+                94348,
+                109
+            ],
+            36
+        ],
+        [
+            [
+                99208,
+                99287,
+                80
+            ],
+            39
+        ],
+        [
+            [
+                100455,
+                100535,
+                81
+            ],
+            43
+        ],
+        [
+            [
+                101809,
+                101883,
+                75
+            ],
+            47
+        ],
+        [
+            [
+                103099,
+                103186,
+                88
+            ],
+            48
+        ],
+        [
+            [
+                103647,
+                104101,
+                455
+            ],
+            49
+        ]
+    ],
+    "get_success_direction": "push",
+    "get_time_chamber_beginning": 874.2758620689655
 }

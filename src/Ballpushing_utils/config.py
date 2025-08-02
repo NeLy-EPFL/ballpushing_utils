@@ -3,6 +3,8 @@ from utils_behavior import Utils
 from typing import Optional
 
 # Pixel size: 30 mm = 500 pixels, 4 mm = 70 pixels, 1.5 mm = 25 pixels
+# Conversion factor: 500 pixels = 30 mm, so 1 mm = 16.67 pixels
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
 
 
 @dataclass
@@ -38,6 +40,9 @@ class Config:
     chamber_radius: int = 50
     rolling_window: int = 10
 
+    # Pixel to mm conversion factor (500 pixels = 30 mm)
+    pixels_per_mm: float = 500 / 30  # 16.67 pixels per mm
+
     log_missing = True
     log_path = Utils.get_data_server() / "MD/MultiMazeRecorder"
 
@@ -55,6 +60,7 @@ class Config:
 
     # Events related thresholds
 
+    corridor_end_threshold: int = 170  # Threshold for corridor end detection in pixels
     interaction_threshold: tuple = (0, 45)  # Default was 70
     gap_between_events: int = 1  # Default was 2
     events_min_length: int = 1  # Default was 2

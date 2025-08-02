@@ -143,6 +143,13 @@ class BallPushingMetrics:
                 velocity_during_interactions = safe_call(self.compute_velocity_during_interactions, fly_idx, ball_idx)
                 velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
 
+                # New metrics
+                has_finished = safe_call(self.get_has_finished, fly_idx, ball_idx, default=0)
+                persistence_at_end = safe_call(self.compute_persistence_at_end, fly_idx, default=np.nan)
+                fly_distance_moved = safe_call(self.compute_fly_distance_moved, fly_idx, default=np.nan)
+                time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
+                median_freeze_duration = safe_call(self.compute_median_freeze_duration, fly_idx, default=np.nan)
+
                 binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx)
                 interaction_rate_by_bin = safe_call(self.compute_interaction_rate_by_bin, fly_idx, ball_idx)
 
@@ -237,6 +244,12 @@ class BallPushingMetrics:
                     **interaction_rate_by_bin_dict,
                     "auc": auc,
                     **binned_auc_dict,
+                    # New metrics
+                    "has_finished": has_finished,
+                    "persistence_at_end": persistence_at_end,
+                    "fly_distance_moved": fly_distance_moved,
+                    "time_chamber_beginning": time_chamber_beginning,
+                    "median_freeze_duration": median_freeze_duration,
                 }
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
@@ -1588,3 +1601,162 @@ class BallPushingMetrics:
             else:
                 aucs.append(np.nan)
         return aucs
+
+    def get_has_finished(self, fly_idx, ball_idx):
+        """
+        Check if a final event exists for this fly and ball.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        int
+            1 if a final event exists, 0 otherwise.
+        """
+        final_event = self.get_final_event(fly_idx, ball_idx)
+        return 1 if final_event is not None else 0
+
+    def compute_persistence_at_end(self, fly_idx):
+        """
+        Compute the fraction of time the fly spent at a certain distance from start.
+        This distance is defined by the corridor_end config parameter.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        float
+            Fraction of time spent at corridor_end distance from start.
+        """
+        # Get fly data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Get the fly start position using median of first 10 frames
+        start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+
+        # Calculate distance from start position for each frame
+        distances = Processing.calculate_euclidian_distance(
+            fly_data["x_thorax"], fly_data["y_thorax"], start_x, start_y
+        )
+
+        # Get corridor_end distance from config (assuming it exists)
+        corridor_end_distance = getattr(self.fly.config, "corridor_end_threshold", 170)  # Default to 170 if not set
+
+        # Count frames where fly is at or beyond corridor_end distance
+        at_end = distances >= corridor_end_distance
+
+        # Calculate fraction of time
+        total_frames = len(distances)
+        if total_frames > 0:
+            return np.sum(at_end) / total_frames
+        else:
+            return np.nan
+
+    def compute_fly_distance_moved(self, fly_idx):
+        """
+        Compute the overall distance moved by the fly over the whole experiment.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        float
+            Total distance moved by the fly in millimeters.
+        """
+        # Get fly data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Calculate frame-to-frame distances
+        x_diff = fly_data["x_thorax"].diff()
+        y_diff = fly_data["y_thorax"].diff()
+
+        # Calculate Euclidean distance for each frame transition
+        frame_distances = np.sqrt(x_diff**2 + y_diff**2)
+
+        # Sum all distances (excluding NaN from first frame)
+        total_distance_pixels = np.nansum(frame_distances)
+
+        # Convert from pixels to millimeters
+        pixels_per_mm = getattr(self.fly.config, "pixels_per_mm", 500 / 30)  # Default conversion factor
+        total_distance_mm = total_distance_pixels / pixels_per_mm
+
+        return total_distance_mm
+
+    def get_time_chamber_beginning(self, fly_idx):
+        """
+        Compute the time spent by the fly in the chamber during the first 25% of the video.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        float
+            Time spent in chamber during first 25% of video in seconds.
+        """
+        # Get fly data
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+
+        # Calculate the end frame for first 25% of video
+        total_frames = len(fly_data)
+        end_frame_25_percent = int(total_frames * 0.25)
+
+        # Get the fly start position using median of first 10 frames
+        start_x, start_y, _, _ = self._calculate_median_coordinates(fly_data, start_idx=0, window=10, keypoint="thorax")
+
+        # Calculate distance from start position for first 25% of frames
+        distances = Processing.calculate_euclidian_distance(
+            fly_data["x_thorax"].iloc[:end_frame_25_percent],
+            fly_data["y_thorax"].iloc[:end_frame_25_percent],
+            start_x,
+            start_y,
+        )
+
+        # Determine frames where fly is in chamber
+        in_chamber = distances <= self.fly.config.chamber_radius
+
+        # Calculate time spent in chamber
+        time_in_chamber = np.sum(in_chamber) / self.fly.experiment.fps
+
+        return time_in_chamber
+
+    def compute_median_freeze_duration(self, fly_idx):
+        """
+        Compute the median duration of pause events for a given fly.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        float
+            Median duration of pause events in seconds.
+        """
+        # Get pause metrics which include individual pause durations
+        pauses = self.detect_pauses(fly_idx)
+
+        if not pauses:
+            return np.nan
+
+        # Extract durations from pause tuples (start_time, end_time, duration)
+        durations = [pause[2] for pause in pauses]
+
+        # Calculate median duration
+        median_duration = np.median(durations)
+
+        return median_duration
