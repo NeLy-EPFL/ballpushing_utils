@@ -495,6 +495,7 @@ def generate_jitterboxplots_with_mannwhitney(
     palette="Set2",
     figsize=(15, 10),
     output_dir="mann_whitney_plots",
+    color_y_labels_by_brain_region=False,
 ):
     """
     Generates jitterboxplots for each metric with Mann-Whitney U tests between each nickname and its control.
@@ -517,6 +518,8 @@ def generate_jitterboxplots_with_mannwhitney(
         palette (str or dict, optional): Color palette for the plots. Default is "Set2".
         figsize (tuple, optional): Size of each figure. Default is (15, 10).
         output_dir (str or Path, optional): Directory to save the plots. Default is "mann_whitney_plots".
+        color_y_labels_by_brain_region (bool, optional): Whether to color y-axis labels by brain region using
+            the color dictionary from Config. Requires 'Brain region' column in data. Default is False.
 
     Returns:
         pd.DataFrame: Statistics table with Mann-Whitney U test results.
@@ -612,8 +615,8 @@ def generate_jitterboxplots_with_mannwhitney(
                 priority = 2  # Non-significant in middle
 
             # Secondary sort: by median (descending for increased/none, ascending for decreased)
-            if priority == 3:  # For decreased group, sort by median ascending (least decrease first)
-                median_sort = stats["median"]
+            if priority == 3:  # For decreased group, sort by median descending (most decrease first)
+                median_sort = -stats["median"]
             else:  # For increased and none groups, sort by median descending (highest first)
                 median_sort = -stats["median"]
 
@@ -778,6 +781,24 @@ def generate_jitterboxplots_with_mannwhitney(
         plt.ylabel(y, fontsize=14)
         plt.title(f"Mann-Whitney U Test: {metric} by {y}", fontsize=16)
 
+        # Color y-axis labels by brain region if requested
+        if color_y_labels_by_brain_region and "Brain region" in data.columns:
+            # Create mapping from nickname to brain region using the data
+            nickname_to_brainregion = {}
+            for nickname in plot_data[y].unique():
+                if pd.notna(nickname):
+                    nickname_data = plot_data[plot_data[y] == nickname]
+                    if not nickname_data.empty:
+                        brain_region = nickname_data["Brain region"].iloc[0]
+                        nickname_to_brainregion[nickname] = brain_region
+
+            # Apply colors to y-tick labels
+            for ticklabel in ax.get_yticklabels():
+                nickname = ticklabel.get_text()
+                region = nickname_to_brainregion.get(nickname, None)
+                if region and region in Config.color_dict:
+                    ticklabel.set_color(Config.color_dict[region])
+
         # Create custom legend
         legend_elements = [
             Patch(facecolor="none", edgecolor="red", linestyle="--", linewidth=2, label="Control Groups"),
@@ -787,15 +808,44 @@ def generate_jitterboxplots_with_mannwhitney(
             Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
         ]
 
+        # Add brain region color legend if y-labels are colored by brain region
+        brain_region_elements = []
+        if color_y_labels_by_brain_region and "Brain region" in data.columns:
+            # Get unique brain regions present in the current plot data
+            present_regions = plot_data["Brain region"].unique()
+            present_regions = [r for r in present_regions if pd.notna(r) and r in Config.color_dict]
+
+            if present_regions:
+                # Add a separator and brain region legend items
+                brain_region_elements = [
+                    Patch(facecolor="none", edgecolor="none", label=""),  # Empty spacer
+                    Patch(facecolor="none", edgecolor="none", label="Brain Regions:"),  # Section header
+                ]
+
+                # Sort brain regions for consistent ordering
+                present_regions = sorted(present_regions)
+                for region in present_regions:
+                    brain_region_elements.append(
+                        Patch(facecolor=Config.color_dict[region], alpha=0.7, label=f"  {region}")
+                    )
+
         if hue:
             handles, labels = ax.get_legend_handles_labels()
-            # Combine custom legend with hue legend
+            # Combine custom legend with hue legend and brain region legend
             unique_hue = dict(zip(labels, handles))
-            all_handles = list(unique_hue.values()) + legend_elements
-            all_labels = list(unique_hue.keys()) + [elem.get_label() for elem in legend_elements]
+            all_handles = list(unique_hue.values()) + legend_elements + brain_region_elements
+            all_labels = (
+                list(unique_hue.keys())
+                + [str(elem.get_label()) for elem in legend_elements]
+                + [str(elem.get_label()) for elem in brain_region_elements]
+            )
             ax.legend(all_handles, all_labels, title=hue, fontsize=10, bbox_to_anchor=(1.05, 1), loc="upper left")
         else:
-            ax.legend(handles=legend_elements, fontsize=10, bbox_to_anchor=(1.05, 1), loc="upper left")
+            all_handles = legend_elements + brain_region_elements
+            all_labels = [str(elem.get_label()) for elem in legend_elements] + [
+                str(elem.get_label()) for elem in brain_region_elements
+            ]
+            ax.legend(all_handles, all_labels, fontsize=10, bbox_to_anchor=(1.05, 1), loc="upper left")
 
         # Use tight_layout with padding to accommodate external legend
         plt.tight_layout(rect=(0, 0, 0.85, 1))  # Leave 15% space on right for legend

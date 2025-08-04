@@ -1,20 +1,20 @@
 {
     "chamber_ratio": 0.8305763354757137,
     "check_yball_variation": "Skipped: Requires specific event and ball_data",
-    "compute_auc": 745496.4426252431,
+    "compute_auc": 393282.6391530786,
     "compute_binned_auc": [
-        72566.86142046699,
-        70605.22356072787,
-        70542.21202824033,
-        70490.91983768858,
-        70470.68403467638,
-        70444.51631664408,
-        71189.62617098051,
-        63373.566839810126,
-        59925.089414662376,
-        44449.70653218241,
-        41887.71783762969,
-        39465.71126872098
+        22360.943487740245,
+        24268.84144458054,
+        24331.853586015975,
+        24383.146614579302,
+        24403.38284921897,
+        24429.549893064755,
+        23719.66861020886,
+        31522.76618621213,
+        34961.245857961054,
+        50434.27809157987,
+        52996.5714500635,
+        55424.10870474298
     ],
     "compute_binned_slope": [
         -0.11667935261915535,
@@ -35,7 +35,10 @@
         "avg_displacement_after_failure": 9.754302860735946,
         "influence_ratio": 0.8281521679341056
     },
-    "compute_fly_distance_moved": 179351.80505020567,
+    "compute_flailing": 3.3421909080281367,
+    "compute_fly_distance_moved": 10761.10830301234,
+    "compute_fraction_not_facing_ball": 0.01049228675136116,
+    "compute_head_pushing_ratio": 0.8697478991596639,
     "compute_interaction_persistence": 4.855307640297498,
     "compute_interaction_rate_by_bin": [
         0.006666602810317909,
@@ -69,7 +72,7 @@
         "number_of_pauses": 2,
         "total_pause_duration": 15.172413793103448
     },
-    "compute_persistence_at_end": 0.0856018083944752,
+    "compute_persistence_at_end": 0.11077373996666731,
     "compute_velocity_during_interactions": 49.96721713365127,
     "compute_velocity_trend": 0.007816598527637175,
     "detect_pauses": [

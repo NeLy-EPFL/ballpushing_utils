@@ -136,8 +136,15 @@ class BallPushingMetrics:
                     self.compute_pause_metrics, fly_idx, default={"number_of_pauses": 0, "total_pause_duration": 0.0}
                 )
                 interaction_persistence = safe_call(self.compute_interaction_persistence, fly_idx, ball_idx)
-                learning_slope = safe_call(self.compute_learning_slope, fly_idx, ball_idx)
-                logistic_features = safe_call(self.compute_logistic_features, fly_idx, ball_idx)
+                learning_slope = safe_call(
+                    self.compute_learning_slope, fly_idx, ball_idx, default={"slope": np.nan, "r2": np.nan}
+                )
+                logistic_features = safe_call(
+                    self.compute_logistic_features,
+                    fly_idx,
+                    ball_idx,
+                    default={"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan},
+                )
                 event_influence = safe_call(self.compute_event_influence, fly_idx, ball_idx)
                 normalized_velocity = safe_call(self.compute_normalized_velocity, fly_idx, ball_idx)
                 velocity_during_interactions = safe_call(self.compute_velocity_during_interactions, fly_idx, ball_idx)
@@ -149,9 +156,16 @@ class BallPushingMetrics:
                 fly_distance_moved = safe_call(self.compute_fly_distance_moved, fly_idx, default=np.nan)
                 time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
                 median_freeze_duration = safe_call(self.compute_median_freeze_duration, fly_idx, default=np.nan)
+                nb_freeze = safe_call(self.compute_nb_freeze, fly_idx, default=0)
+                fraction_not_facing_ball = safe_call(
+                    self.compute_fraction_not_facing_ball, fly_idx, ball_idx, default=0.0
+                )
+                flailing = safe_call(self.compute_flailing, fly_idx, ball_idx, default=0.0)
+                head_pushing_ratio = safe_call(self.compute_head_pushing_ratio, fly_idx, ball_idx, default=0.5)
+                leg_visibility_ratio = safe_call(self.compute_leg_visibility_ratio, fly_idx, ball_idx, default=0.0)
 
-                binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx)
-                interaction_rate_by_bin = safe_call(self.compute_interaction_rate_by_bin, fly_idx, ball_idx)
+                binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx, default=[])
+                interaction_rate_by_bin = safe_call(self.compute_interaction_rate_by_bin, fly_idx, ball_idx, default=[])
 
                 binned_slope_dict = {f"binned_slope_{i}": val for i, val in enumerate(binned_slope or [])}
                 interaction_rate_by_bin_dict = {
@@ -161,7 +175,7 @@ class BallPushingMetrics:
                 overall_interaction_rate = safe_call(self.compute_overall_interaction_rate, fly_idx, ball_idx)
 
                 auc = safe_call(self.compute_auc, fly_idx, ball_idx)
-                binned_auc = safe_call(self.compute_binned_auc, fly_idx, ball_idx)
+                binned_auc = safe_call(self.compute_binned_auc, fly_idx, ball_idx, default=[])
                 binned_auc_dict = {f"binned_auc_{i}": val for i, val in enumerate(binned_auc or [])}
 
                 # Store metrics in the dictionary
@@ -213,12 +227,18 @@ class BallPushingMetrics:
                     "distance_ratio": safe_call(self.get_distance_ratio, fly_idx, ball_idx, subset=filtered_events),
                     "exit_time": self.tracking_data.exit_time,
                     "chamber_exit_time": self.tracking_data.chamber_exit_times[fly_idx],
-                    "number_of_pauses": safe_call(self.compute_pause_metrics, fly_idx, subset=filtered_events)[
-                        "number_of_pauses"
-                    ],
-                    "total_pause_duration": safe_call(self.compute_pause_metrics, fly_idx, subset=filtered_events)[
-                        "total_pause_duration"
-                    ],
+                    "number_of_pauses": safe_call(
+                        self.compute_pause_metrics,
+                        fly_idx,
+                        subset=filtered_events,
+                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
+                    )["number_of_pauses"],
+                    "total_pause_duration": safe_call(
+                        self.compute_pause_metrics,
+                        fly_idx,
+                        subset=filtered_events,
+                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
+                    )["total_pause_duration"],
                     # Learning and logistic slopes: use full data
                     "learning_slope": learning_slope["slope"],
                     "learning_slope_r2": learning_slope["r2"],
@@ -250,6 +270,11 @@ class BallPushingMetrics:
                     "fly_distance_moved": fly_distance_moved,
                     "time_chamber_beginning": time_chamber_beginning,
                     "median_freeze_duration": median_freeze_duration,
+                    "nb_freeze": nb_freeze,
+                    "fraction_not_facing_ball": fraction_not_facing_ball,
+                    "flailing": flailing,
+                    "head_pushing_ratio": head_pushing_ratio,
+                    "leg_visibility_ratio": leg_visibility_ratio,
                 }
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
@@ -910,12 +935,8 @@ class BallPushingMetrics:
         ]
 
         if major_event:
-            # Select the event right before the event at which the ball was moved more than the threshold
+
             major_event_instance, major_event_idx = major_event[0]
-            if major_event_idx > 0:
-                previous_event = self.tracking_data.interaction_events[fly_idx][ball_idx][major_event_idx - 1]
-                major_event_instance = previous_event
-                major_event_idx -= 1
 
             if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
                 first_major_event_time = major_event_instance[0] / self.fly.experiment.fps
@@ -1185,6 +1206,38 @@ class BallPushingMetrics:
             "number_of_pauses": number_of_pauses,
             "total_pause_duration": total_pause_duration,
         }
+
+    def compute_nb_freeze(self, fly_idx, freeze_threshold=2.0, threshold=5, window=5):
+        """
+        Compute the number of freeze events (pauses longer than freeze_threshold) for a given fly.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        freeze_threshold : float, optional
+            Minimum duration (in seconds) for a pause to be considered a freeze (default is 2.0).
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause (default is 5).
+        window : int, optional
+            Number of frames to use for calculating movement (default is 5).
+
+        Returns
+        -------
+        int
+            Number of freeze events (pauses longer than freeze_threshold).
+        """
+        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=0.0)
+
+        # Count pauses that are longer than the freeze threshold
+        freeze_events = [pause for pause in pauses if pause[2] >= freeze_threshold]
+
+        if self.fly.config.debugging:
+            print(
+                f"Freeze events for fly {fly_idx} (threshold={freeze_threshold}s): {len(freeze_events)} out of {len(pauses)} total pauses"
+            )
+
+        return len(freeze_events)
 
     def compute_interaction_persistence(self, fly_idx, ball_idx, subset=None):
         """
@@ -1567,37 +1620,66 @@ class BallPushingMetrics:
 
     def compute_auc(self, fly_idx, ball_idx):
         """
-        Compute the area under the y_centre vs. time curve for the ball.
+        Compute the area under the euclidean distance vs. time curve for the ball.
+        This represents the cumulative progress made by the fly in moving the ball
+        away from its initial position over time.
 
         Returns
         -------
-        float: The total AUC.
+        float: The total AUC based on distance from initial position.
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Get the median initial position of the ball
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, window=10, keypoint="centre"
+        )
+
+        # Calculate euclidean distance from initial position for each frame
+        euclidean_distances = Processing.calculate_euclidian_distance(
+            ball_data["x_centre"], ball_data["y_centre"], initial_x, initial_y
+        )
+
+        # Create time array
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
-        position = ball_data["y_centre"].values
-        auc = np.trapz(position, time)
+
+        # Compute AUC using euclidean distance (progress)
+        auc = np.trapz(euclidean_distances, time)
         return auc
 
     def compute_binned_auc(self, fly_idx, ball_idx, n_bins=12):
         """
-        Compute the AUC in each time bin.
+        Compute the AUC in each time bin using euclidean distance from initial position.
 
         Returns
         -------
         list of float: AUC for each bin.
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Get the median initial position of the ball
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, window=10, keypoint="centre"
+        )
+
+        # Calculate euclidean distance from initial position for each frame
+        euclidean_distances = Processing.calculate_euclidian_distance(
+            ball_data["x_centre"], ball_data["y_centre"], initial_x, initial_y
+        )
+
+        # Create time array
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
-        position = ball_data["y_centre"].values
+
+        # Create time bins
         bins = np.linspace(time[0], time[-1], n_bins + 1)
         aucs = []
+
         for i in range(n_bins):
             mask = (time >= bins[i]) & (time < bins[i + 1])
             t_bin = time[mask]
-            p_bin = position[mask]
+            distance_bin = euclidean_distances[mask]
             if len(t_bin) > 1:
-                aucs.append(np.trapz(p_bin, t_bin))
+                aucs.append(np.trapz(distance_bin, t_bin))
             else:
                 aucs.append(np.nan)
         return aucs
@@ -1760,3 +1842,899 @@ class BallPushingMetrics:
         median_duration = np.median(durations)
 
         return median_duration
+
+    def compute_fraction_not_facing_ball(self, fly_idx, ball_idx, angle_threshold=30):
+        """
+        Compute the fraction of time when the fly is not facing the ball direction
+        (end of corridor) while outside the chamber.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+        angle_threshold : float, optional
+            Angle threshold in degrees above which the fly is considered not facing the ball (default is 30).
+
+        Returns
+        -------
+        float
+            Fraction of time (0-1) when the fly is not facing the ball while outside the chamber.
+        """
+        # Get skeleton and fly tracking data
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Check that we have required keypoints (case-insensitive check)
+        required_keypoints = ["Head", "Thorax", "Abdomen"]  # Use proper case
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+
+        # Create a mapping for case-insensitive matching
+        keypoint_mapping = {}
+        for available in available_keypoints:
+            for required in required_keypoints:
+                if available.lower() == required.lower():
+                    keypoint_mapping[required] = available
+                    break
+
+        if len(keypoint_mapping) < len(required_keypoints):
+            if self.fly.config.debugging:
+                missing = [kp for kp in required_keypoints if kp not in keypoint_mapping]
+                print(f"Missing required keypoints: {missing}. Available: {available_keypoints}")
+            return 0.0  # Return 0.0 instead of np.nan - assume always facing if can't calculate
+
+        # Get fly start position for chamber detection (use thorax keypoint)
+        thorax_keypoint = keypoint_mapping["Thorax"]
+        start_x, start_y, _, _ = self._calculate_median_coordinates(
+            fly_data, start_idx=0, window=10, keypoint=thorax_keypoint.lower()
+        )
+
+        # Calculate distances from start position to determine when fly is outside chamber
+        distances = Processing.calculate_euclidian_distance(
+            fly_data[f"x_{thorax_keypoint.lower()}"], fly_data[f"y_{thorax_keypoint.lower()}"], start_x, start_y
+        )
+        outside_chamber = distances > self.fly.config.chamber_radius
+
+        # Get ball initial position to determine corridor direction
+        ball_initial_x, ball_initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, window=10, keypoint="centre"
+        )
+
+        # Check for None values or NaN from median calculation
+        if (
+            start_x is None
+            or start_y is None
+            or ball_initial_x is None
+            or ball_initial_y is None
+            or pd.isna(start_x)
+            or pd.isna(start_y)
+            or pd.isna(ball_initial_x)
+            or pd.isna(ball_initial_y)
+        ):
+            if self.fly.config.debugging:
+                print(
+                    f"Could not determine start or ball positions: start=({start_x}, {start_y}), ball=({ball_initial_x}, {ball_initial_y})"
+                )
+            return np.nan
+
+        # Determine corridor direction based on experimental setup
+        # If ball starts close to fly start position, corridor goes in negative y direction
+        # Otherwise, corridor direction is determined by ball position relative to start
+        if abs(ball_initial_x - start_x) < 100:
+            # Standard setup: corridor goes down (negative y)
+            corridor_direction = np.array([0, -1])
+        else:
+            # F1 setup or different orientation
+            corridor_direction = np.array([ball_initial_x - start_x, ball_initial_y - start_y])
+            corridor_direction = corridor_direction / np.linalg.norm(corridor_direction)
+
+        # Calculate fly body orientation for each frame
+        fly_orientations = []
+        for i in range(len(skeleton_data)):
+            try:
+                # Get body keypoints using the mapped names
+                head_x = skeleton_data[f"x_{keypoint_mapping['Head']}"].iloc[i]
+                head_y = skeleton_data[f"y_{keypoint_mapping['Head']}"].iloc[i]
+                thorax_x = skeleton_data[f"x_{keypoint_mapping['Thorax']}"].iloc[i]
+                thorax_y = skeleton_data[f"y_{keypoint_mapping['Thorax']}"].iloc[i]
+                abdomen_x = skeleton_data[f"x_{keypoint_mapping['Abdomen']}"].iloc[i]
+                abdomen_y = skeleton_data[f"y_{keypoint_mapping['Abdomen']}"].iloc[i]
+
+                # Skip if any coordinates are NaN
+                if any(np.isnan([head_x, head_y, thorax_x, thorax_y, abdomen_x, abdomen_y])):
+                    fly_orientations.append(np.nan)
+                    continue
+
+                # Calculate body axis vector (from abdomen to head)
+                body_vector = np.array([head_x - abdomen_x, head_y - abdomen_y])
+
+                # Normalize the body vector
+                body_norm = np.linalg.norm(body_vector)
+                if body_norm == 0:
+                    fly_orientations.append(np.nan)
+                    continue
+
+                body_vector = body_vector / body_norm
+
+                # Calculate angle between body direction and corridor direction
+                dot_product = np.dot(body_vector, corridor_direction)
+                # Clamp dot product to [-1, 1] to avoid numerical errors
+                dot_product = np.clip(dot_product, -1.0, 1.0)
+                angle_rad = np.arccos(dot_product)
+                angle_deg = np.degrees(angle_rad)
+
+                fly_orientations.append(angle_deg)
+
+            except Exception as e:
+                if self.fly.config.debugging:
+                    print(f"Error calculating orientation at frame {i}: {e}")
+                fly_orientations.append(np.nan)
+
+        fly_orientations = np.array(fly_orientations)
+
+        # Determine frames where fly is not facing the ball and is outside chamber
+        not_facing_ball = fly_orientations > angle_threshold
+        outside_and_not_facing = outside_chamber & not_facing_ball & ~np.isnan(fly_orientations)
+
+        # Calculate fraction of valid frames outside chamber where fly is not facing ball
+        valid_outside_frames = outside_chamber & ~np.isnan(fly_orientations)
+
+        if np.sum(valid_outside_frames) == 0:
+            # No valid frames outside chamber - assume always facing if we can't measure
+            return 0.0
+
+        fraction_not_facing = np.sum(outside_and_not_facing) / np.sum(valid_outside_frames)
+
+        if self.fly.config.debugging:
+            print(
+                f"Fly {fly_idx}: {np.sum(outside_and_not_facing)}/{np.sum(valid_outside_frames)} frames not facing ball ({fraction_not_facing:.3f})"
+            )
+
+        return fraction_not_facing
+
+    def compute_flailing(self, fly_idx, ball_idx):
+        """
+        Compute the average motion energy of left and right front legs during interaction events.
+
+        This metric measures how much the fly's front legs are moving during interactions,
+        which can indicate flailing behavior.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Average motion energy of front legs during interactions, or np.nan if no data.
+        """
+        # Get skeleton data
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+
+        # Use the leg keypoints from config
+        config_leg_names = [name for name in self.fly.config.contact_nodes if name not in ["Head"]]
+
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+        available_legs = [leg for leg in config_leg_names if leg in available_keypoints]
+
+        if self.fly.config.debugging:
+            print(f"Available keypoints: {available_keypoints}")
+            print(f"Found leg keypoints: {available_legs}")
+
+        # If no specific leg keypoints found, use a fallback approach with any available keypoints
+        if not available_legs:
+            # Use any available keypoints as a fallback (exclude head/thorax for leg-like movement)
+            exclude_keypoints = ["Head", "Thorax", "centre", "center"]
+            fallback_keypoints = [kp for kp in available_keypoints if kp not in exclude_keypoints]
+
+            if len(fallback_keypoints) >= 2:
+                available_legs = fallback_keypoints[:2]  # Take first 2 available
+                if self.fly.config.debugging:
+                    print(f"Using fallback keypoints for flailing: {available_legs}")
+            else:
+                if self.fly.config.debugging:
+                    print(f"No suitable keypoints found for flailing metric")
+                return 0.0  # Return 0.0 instead of NaN to indicate no flailing detected
+
+        # Get interaction events up to final event
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        # Get final event to filter interactions
+        final_event = self.get_final_event(fly_idx, ball_idx)
+        if final_event is not None:
+            final_event_idx, _, _ = final_event
+            if final_event_idx is not None and final_event_idx >= 0:
+                events = events[: final_event_idx + 1]
+
+        if not events:
+            if self.fly.config.debugging:
+                print(f"No interaction events found for flailing calculation")
+            return 0.0  # Return 0.0 instead of NaN when no events
+
+        # Calculate motion energy for each available leg during interactions
+        leg_motion_energies = []
+
+        for leg in available_legs:
+            x_col = f"x_{leg}"
+            y_col = f"y_{leg}"
+
+            # Calculate velocity (frame-to-frame displacement) for this leg
+            x_velocity = skeleton_data[x_col].diff().fillna(0)
+            y_velocity = skeleton_data[y_col].diff().fillna(0)
+
+            # Motion energy is the magnitude of velocity
+            motion_energy = np.sqrt(x_velocity**2 + y_velocity**2)
+
+            # Extract motion energy during interaction events
+            event_motion_energies = []
+            for event in events:
+                start_frame, end_frame = event[0], event[1]
+                event_motion = motion_energy.iloc[start_frame : end_frame + 1]
+
+                # Skip events with insufficient data
+                if len(event_motion) == 0:
+                    continue
+
+                # Calculate mean motion energy for this event
+                mean_event_motion = event_motion.mean()
+                if not np.isnan(mean_event_motion):
+                    event_motion_energies.append(mean_event_motion)
+
+            # Add this leg's average motion energy across all events
+            if event_motion_energies:
+                leg_motion_energies.append(np.mean(event_motion_energies))
+
+        # Return average motion energy across all available legs
+        if leg_motion_energies:
+            average_flailing = np.mean(leg_motion_energies)
+
+            if self.fly.config.debugging:
+                print(
+                    f"Fly {fly_idx}: Flailing computed from {len(available_legs)} legs, {len(events)} events: {average_flailing:.3f}"
+                )
+
+            return average_flailing
+        else:
+            # Return 0.0 instead of NaN to indicate no flailing detected
+            if self.fly.config.debugging:
+                print(f"Fly {fly_idx}: No leg motion detected during interactions")
+            return 0.0
+
+    def compute_head_pushing_ratio(self, fly_idx, ball_idx):
+        """
+        Compute the ratio of head pushing vs leg pushing based on contact events.
+
+        Uses frame-by-frame analysis within each contact to detect temporal patterns.
+        For each contact, analyzes individual frames to distinguish:
+        - Head pushing: Head consistently closer to ball throughout contact
+        - Leg pushing: Legs become visible and closer to ball, especially at contact end
+        - Mixed: Both head and leg pushing detected within same contact
+
+        The behavior when legs are not visible depends on config.exclude_hidden_legs:
+        - If exclude_hidden_legs=True: Exclude contacts where legs have <10% visibility
+        - If exclude_hidden_legs=False: Assume head pushing when legs are not visible
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Ratio of head pushing contacts (0-1), or np.nan if no contact data or
+            all contacts were excluded due to poor leg visibility.
+        """
+        # Import skeleton metrics to get contact events
+        try:
+            from .skeleton_metrics import SkeletonMetrics
+
+            skeleton_metrics = SkeletonMetrics(self.fly)
+            contact_events = skeleton_metrics.contacts
+        except ImportError:
+            if self.fly.config.debugging:
+                print("Could not import SkeletonMetrics for contact detection")
+            return np.nan
+        except Exception as e:
+            if self.fly.config.debugging:
+                print(f"Error creating SkeletonMetrics: {e}")
+            return np.nan
+
+        if not contact_events:
+            if self.fly.config.debugging:
+                print("No contact events found")
+            return np.nan
+
+        # Get skeleton and ball data
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+
+        # Use keypoints from config
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+
+        # Head is required
+        if "Head" not in available_keypoints:
+            if self.fly.config.debugging:
+                print("Head keypoint not found, cannot compute head pushing ratio")
+            return np.nan
+
+        # Get leg keypoints from config (exclude Head)
+        config_leg_names = [name for name in self.fly.config.contact_nodes if name != "Head"]
+        available_legs = [leg for leg in config_leg_names if leg in available_keypoints]
+
+        head_pushing_count = 0
+        leg_pushing_count = 0
+        mixed_pushing_count = 0  # Track contacts with both head and leg pushing
+        excluded_count = 0  # Track how many contacts were excluded due to hidden legs
+        min_contact_frames = 10  # Only consider contacts with at least 10 frames
+        total_contacts = len(contact_events)
+        filtered_contacts = 0
+
+        for contact_event in contact_events:
+            start_frame, end_frame = contact_event[0], contact_event[1]
+
+            # Get frame-by-frame analysis for this contact
+            contact_frames = list(range(start_frame, min(end_frame + 1, len(skeleton_data))))
+
+            if len(contact_frames) < min_contact_frames:
+                if self.fly.config.debugging:
+                    print(
+                        f"Skipping short contact {contact_event} with {len(contact_frames)} frames (min required: {min_contact_frames})"
+                    )
+                filtered_contacts += 1
+                continue
+
+            # Frame-by-frame analysis
+            head_pushing_frames = 0
+            leg_pushing_frames = 0
+            valid_comparison_frames = 0
+            legs_visible_frames = 0
+
+            for frame in contact_frames:
+                # Get head position for this frame
+                head_x = skeleton_data.loc[frame, "x_Head"]
+                head_y = skeleton_data.loc[frame, "y_Head"]
+
+                # Get ball position for this frame
+                ball_x = ball_data.loc[frame, "x_centre"]
+                ball_y = ball_data.loc[frame, "y_centre"]
+
+                # Skip frames with invalid head or ball data
+                if any(pd.isna([head_x, head_y, ball_x, ball_y])):
+                    continue
+
+                # Calculate head-to-ball distance
+                head_to_ball_distance = np.sqrt((head_x - ball_x) ** 2 + (head_y - ball_y) ** 2)
+
+                # Check leg positions for this frame
+                frame_leg_distances = []
+                frame_legs_visible = False
+
+                for leg in available_legs:
+                    leg_x = skeleton_data.loc[frame, f"x_{leg}"]
+                    leg_y = skeleton_data.loc[frame, f"y_{leg}"]
+
+                    # Check if leg is visible: coordinates must not be NaN
+                    if not pd.isna(leg_x) and not pd.isna(leg_y):
+                        frame_legs_visible = True
+                        leg_to_ball_distance = np.sqrt((leg_x - ball_x) ** 2 + (leg_y - ball_y) ** 2)
+                        frame_leg_distances.append(leg_to_ball_distance)
+
+                if frame_legs_visible:
+                    legs_visible_frames += 1
+
+                # Only make comparison if we have leg data for this frame
+                if len(frame_leg_distances) > 0:
+                    valid_comparison_frames += 1
+                    min_leg_distance = min(frame_leg_distances)
+
+                    if head_to_ball_distance <= min_leg_distance:
+                        head_pushing_frames += 1
+                    else:
+                        leg_pushing_frames += 1
+
+            # Calculate visibility ratio for this contact
+            leg_visibility_ratio = legs_visible_frames / len(contact_frames)
+
+            # Determine classification based on frame-by-frame analysis
+            if self.fly.config.exclude_hidden_legs:
+                # Exclude contacts with insufficient leg visibility
+                if leg_visibility_ratio < 0.1 or valid_comparison_frames == 0:
+                    excluded_count += 1
+                    if self.fly.config.debugging:
+                        print(
+                            f"Excluding contact {contact_event} - leg visibility: {leg_visibility_ratio:.2f}, "
+                            f"valid frames: {valid_comparison_frames}"
+                        )
+                    continue
+            else:
+                # If no leg visibility, default to head pushing (original behavior)
+                if valid_comparison_frames == 0:
+                    head_pushing_count += 1
+                    continue
+
+            # Classify contact based on frame-by-frame analysis
+            head_ratio = head_pushing_frames / max(valid_comparison_frames, 1)
+            leg_ratio = leg_pushing_frames / max(valid_comparison_frames, 1)
+
+            # Use majority voting with temporal pattern consideration
+            if head_ratio > self.fly.config.head_pushing_threshold:  # Predominantly head pushing
+                head_pushing_count += 1
+            elif leg_ratio > self.fly.config.head_pushing_threshold:  # Predominantly leg pushing
+                leg_pushing_count += 1
+            else:  # Mixed or ambiguous - check temporal patterns
+                # Look for leg pushing at the end of contact (configurable window)
+                contact_length = len(contact_frames)
+                window_start = int((1 - self.fly.config.late_contact_window) * contact_length)
+                late_frames = contact_frames[window_start:]
+
+                late_leg_pushing = 0
+                late_valid_frames = 0
+
+                for frame in late_frames:
+                    head_x = skeleton_data.loc[frame, "x_Head"]
+                    head_y = skeleton_data.loc[frame, "y_Head"]
+                    ball_x = ball_data.loc[frame, "x_centre"]
+                    ball_y = ball_data.loc[frame, "y_centre"]
+
+                    if any(pd.isna([head_x, head_y, ball_x, ball_y])):
+                        continue
+
+                    head_to_ball_distance = np.sqrt((head_x - ball_x) ** 2 + (head_y - ball_y) ** 2)
+
+                    frame_leg_distances = []
+                    for leg in available_legs:
+                        leg_x = skeleton_data.loc[frame, f"x_{leg}"]
+                        leg_y = skeleton_data.loc[frame, f"y_{leg}"]
+
+                        # Check if leg is visible: coordinates must not be NaN
+                        if not pd.isna(leg_x) and not pd.isna(leg_y):
+                            leg_to_ball_distance = np.sqrt((leg_x - ball_x) ** 2 + (leg_y - ball_y) ** 2)
+                            frame_leg_distances.append(leg_to_ball_distance)
+                            leg_to_ball_distance = np.sqrt((leg_x - ball_x) ** 2 + (leg_y - ball_y) ** 2)
+                            frame_leg_distances.append(leg_to_ball_distance)
+
+                    if len(frame_leg_distances) > 0:
+                        late_valid_frames += 1
+                        if min(frame_leg_distances) < head_to_ball_distance:
+                            late_leg_pushing += 1
+
+                # If significant leg pushing detected in final third, classify as leg pushing
+                if late_valid_frames > 0 and (late_leg_pushing / late_valid_frames) > 0.5:
+                    leg_pushing_count += 1
+                    if self.fly.config.debugging:
+                        print(
+                            f"Contact {contact_event} classified as leg pushing based on late-contact pattern "
+                            f"({late_leg_pushing}/{late_valid_frames} late frames)"
+                        )
+                else:
+                    # Default to head pushing for ambiguous cases
+                    head_pushing_count += 1
+
+        # Calculate ratio
+        total_contacts = head_pushing_count + leg_pushing_count
+
+        if total_contacts == 0:
+            if self.fly.config.debugging:
+                total_analyzed = len(contact_events)
+                print(
+                    f"Fly {fly_idx}: No valid contacts for head pushing analysis. "
+                    f"Total contacts: {total_analyzed}, Excluded: {excluded_count}, "
+                    f"exclude_hidden_legs: {self.fly.config.exclude_hidden_legs}"
+                )
+            return np.nan
+
+        head_pushing_ratio = head_pushing_count / total_contacts
+
+        if self.fly.config.debugging:
+            total_analyzed = len(contact_events)
+            used_contacts = total_contacts - filtered_contacts
+            print(
+                f"Fly {fly_idx}: {head_pushing_count} head, {leg_pushing_count} leg pushing contacts "
+                f"({head_pushing_ratio:.3f} ratio). "
+                f"Total contacts: {total_analyzed}, Used: {used_contacts}, Filtered short: {filtered_contacts}, Excluded hidden legs: {excluded_count}, "
+                f"exclude_hidden_legs: {self.fly.config.exclude_hidden_legs}"
+            )
+            print(f"  Frame-by-frame temporal analysis used for better leg vs head distinction")
+
+        return head_pushing_ratio
+
+    def compute_leg_visibility_ratio(self, fly_idx, ball_idx):
+        """
+        Compute the weighted ratio of front leg visibility during contact events.
+
+        This metric measures the weighted fraction of front leg visibility during contact events,
+        where each frame is scored based on the number of visible front legs (Lfront, Rfront):
+        - 0 legs visible = 0 points
+        - 1 leg visible = 1 point
+        - 2 legs visible = 2 points
+
+        The final ratio is: total_score / (total_frames * num_available_legs)
+
+        This provides more nuanced insight into leg visibility patterns during interactions
+        and helps distinguish between head pushing (low leg visibility) and leg pushing
+        (high leg visibility).
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Weighted ratio (0-1) where 1.0 means both legs are always visible,
+            0.5 means on average one leg is visible, and 0.0 means no legs are visible.
+            Returns np.nan if no contact data available.
+        """
+        # Import skeleton metrics to get contact events
+        try:
+            from .skeleton_metrics import SkeletonMetrics
+
+            skeleton_metrics = SkeletonMetrics(self.fly)
+            contact_events = skeleton_metrics.contacts
+        except ImportError:
+            if self.fly.config.debugging:
+                print("Could not import SkeletonMetrics for contact detection")
+            return np.nan
+        except Exception as e:
+            if self.fly.config.debugging:
+                print(f"Error creating SkeletonMetrics: {e}")
+            return np.nan
+
+        if not contact_events:
+            if self.fly.config.debugging:
+                print("No contact events found for leg visibility analysis")
+            return np.nan
+
+        # Get skeleton data
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+
+        # Specifically look for front leg keypoints
+        front_leg_names = ["Lfront", "Rfront"]
+        available_front_legs = [leg for leg in front_leg_names if leg in available_keypoints]
+
+        if not available_front_legs:
+            if self.fly.config.debugging:
+                print(f"No front leg keypoints found. Available: {available_keypoints}, Looking for: {front_leg_names}")
+            return np.nan
+
+        if self.fly.config.debugging:
+            print(f"Found front leg keypoints: {available_front_legs}")
+
+        # Get all left and right keypoints for sideways detection
+        left_keypoints = [kp for kp in available_keypoints if kp.startswith("L")]
+        right_keypoints = [kp for kp in available_keypoints if kp.startswith("R")]
+
+        if self.fly.config.debugging:
+            print(f"Left keypoints: {left_keypoints}")
+            print(f"Right keypoints: {right_keypoints}")
+
+        total_contact_frames = 0
+        total_visibility_score = 0  # Weighted visibility score
+        min_contact_frames = 10  # Only consider contacts with at least 10 frames
+        total_contacts = len(contact_events)
+        filtered_contacts = 0
+        sideways_contacts = 0  # Track contacts filtered due to sideways orientation
+
+        for contact_event in contact_events:
+            start_frame, end_frame = contact_event[0], contact_event[1]
+
+            # Get all frames for this contact
+            contact_frames = list(range(start_frame, min(end_frame + 1, len(skeleton_data))))
+
+            if len(contact_frames) < min_contact_frames:
+                if self.fly.config.debugging:
+                    print(
+                        f"Skipping short contact {contact_event} with {len(contact_frames)} frames (min required: {min_contact_frames})"
+                    )
+                filtered_contacts += 1
+                continue
+
+            # Check if animal is sideways during this contact
+            # Sample some frames to check orientation (check every 5th frame or so)
+            sample_frames = contact_frames[:: max(1, len(contact_frames) // 5)]  # Sample ~5 frames
+            sideways_frames = 0
+
+            for frame in sample_frames:
+                # Count visible left and right keypoints
+                visible_left = 0
+                visible_right = 0
+
+                for kp in left_keypoints:
+                    x_val = skeleton_data.loc[frame, f"x_{kp}"]
+                    y_val = skeleton_data.loc[frame, f"y_{kp}"]
+                    if not pd.isna(x_val) and not pd.isna(y_val):
+                        visible_left += 1
+
+                for kp in right_keypoints:
+                    x_val = skeleton_data.loc[frame, f"x_{kp}"]
+                    y_val = skeleton_data.loc[frame, f"y_{kp}"]
+                    if not pd.isna(x_val) and not pd.isna(y_val):
+                        visible_right += 1
+
+                # Animal is sideways if we see ≤2 keypoints on one side
+                if visible_left <= 2 or visible_right <= 2:
+                    sideways_frames += 1
+
+            # Skip contact if more than half the sampled frames show sideways orientation
+            sideways_ratio = sideways_frames / len(sample_frames)
+            if sideways_ratio > 0.5:
+                if self.fly.config.debugging:
+                    print(
+                        f"Skipping sideways contact {contact_event}: {sideways_frames}/{len(sample_frames)} frames sideways "
+                        f"(ratio: {sideways_ratio:.2f})"
+                    )
+                sideways_contacts += 1
+                continue
+
+            total_contact_frames += len(contact_frames)
+
+            # Check leg visibility for each frame in this contact with weighted scoring
+            for frame in contact_frames:
+                visible_legs_count = 0
+
+                for leg in available_front_legs:
+                    leg_x = skeleton_data.loc[frame, f"x_{leg}"]
+                    leg_y = skeleton_data.loc[frame, f"y_{leg}"]
+
+                    # Check if leg is visible: coordinates must not be NaN
+                    if not pd.isna(leg_x) and not pd.isna(leg_y):
+                        visible_legs_count += 1
+
+                # Add weighted score based on number of visible legs
+                # 0 legs visible = 0 points
+                # 1 leg visible = 1 point
+                # 2 legs visible = 2 points
+                total_visibility_score += visible_legs_count
+
+        # Calculate overall visibility ratio
+        if total_contact_frames == 0:
+            if self.fly.config.debugging:
+                print("No valid contact frames found for leg visibility analysis")
+            return np.nan
+
+        # Maximum possible score is 2 points per frame (both legs visible)
+        max_possible_score = total_contact_frames * len(available_front_legs)
+        visibility_ratio = total_visibility_score / max_possible_score
+
+        if self.fly.config.debugging:
+            used_contacts = total_contacts - filtered_contacts - sideways_contacts
+            avg_legs_visible = total_visibility_score / total_contact_frames if total_contact_frames > 0 else 0
+            print(
+                f"Fly {fly_idx}: Front leg visibility ratio: {total_visibility_score}/{max_possible_score} weighted score "
+                f"({visibility_ratio:.3f}, avg {avg_legs_visible:.2f} legs/frame) across {used_contacts}/{total_contacts} contact events "
+                f"(filtered {filtered_contacts} short contacts, {sideways_contacts} sideways contacts) using {available_front_legs}"
+            )
+
+        return visibility_ratio
+
+    def compute_median_head_ball_distance(self, fly_idx, ball_idx):
+        """
+        Compute the median distance between the fly's head and the ball during contact events.
+
+        This metric provides a simple and robust measure to distinguish head-pushing behavior:
+        - Lower values indicate flies that keep their head closer to the ball (head pushing)
+        - Higher values indicate flies that maintain greater head-ball distance (leg pushing)
+
+        Uses median instead of mean to be more robust against outliers and noise.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Median distance between head and ball during contact events in pixels,
+            or np.nan if no contact data available.
+        """
+        # Import skeleton metrics to get contact events
+        try:
+            from .skeleton_metrics import SkeletonMetrics
+
+            skeleton_metrics = SkeletonMetrics(self.fly)
+            contact_events = skeleton_metrics.contacts
+        except ImportError:
+            if self.fly.config.debugging:
+                print("Could not import SkeletonMetrics for contact detection")
+            return np.nan
+        except Exception as e:
+            if self.fly.config.debugging:
+                print(f"Error creating SkeletonMetrics: {e}")
+            return np.nan
+
+        if not contact_events:
+            if self.fly.config.debugging:
+                print("No contact events found for head-ball distance analysis")
+            return np.nan
+
+        # Get skeleton and ball data (use raw ball data for better accuracy)
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        ball_data = self.tracking_data.raw_balltrack.objects[ball_idx].dataset
+
+        # Check if Head keypoint is available
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+        if "Head" not in available_keypoints:
+            if self.fly.config.debugging:
+                print("Head keypoint not found, cannot compute head-ball distance")
+            return np.nan
+
+        all_head_ball_distances = []
+        min_contact_frames = 5  # Only consider contacts with at least 5 frames
+        total_contacts = len(contact_events)
+        filtered_contacts = 0
+
+        for contact_event in contact_events:
+            start_frame, end_frame = contact_event[0], contact_event[1]
+
+            # Get all frames for this contact
+            contact_frames = list(range(start_frame, min(end_frame + 1, len(skeleton_data))))
+
+            if len(contact_frames) < min_contact_frames:
+                if self.fly.config.debugging:
+                    print(
+                        f"Skipping short contact {contact_event} with {len(contact_frames)} frames (min required: {min_contact_frames})"
+                    )
+                filtered_contacts += 1
+                continue
+
+            # Calculate head-ball distance for each frame in this contact
+            contact_distances = []
+
+            for frame in contact_frames:
+                # Get head position for this frame
+                head_x = skeleton_data.loc[frame, "x_Head"]
+                head_y = skeleton_data.loc[frame, "y_Head"]
+
+                # Get ball position for this frame
+                ball_x = ball_data.loc[frame, "x_centre"]
+                ball_y = ball_data.loc[frame, "y_centre"]
+
+                # Skip frames with invalid head or ball data
+                if any(pd.isna([head_x, head_y, ball_x, ball_y])):
+                    continue
+
+                # Calculate Euclidean distance between head and ball
+                distance = np.sqrt((head_x - ball_x) ** 2 + (head_y - ball_y) ** 2)
+                contact_distances.append(distance)
+
+            # Add all distances from this contact to the overall list
+            all_head_ball_distances.extend(contact_distances)
+
+        # Calculate median distance across all contact events
+        if not all_head_ball_distances:
+            if self.fly.config.debugging:
+                print("No valid head-ball distance measurements found")
+            return np.nan
+
+        median_distance = np.median(all_head_ball_distances)
+
+        if self.fly.config.debugging:
+            used_contacts = total_contacts - filtered_contacts
+            print(
+                f"Fly {fly_idx}: Median head-ball distance: {median_distance:.2f} pixels "
+                f"from {len(all_head_ball_distances)} measurements across {used_contacts}/{total_contacts} contact events "
+                f"(filtered {filtered_contacts} short contacts)"
+            )
+
+        return median_distance
+
+    def compute_mean_head_ball_distance(self, fly_idx, ball_idx):
+        """
+        Compute the mean distance between the fly's head and the ball during contact events.
+
+        This complements the median distance metric and can provide additional insights:
+        - Mean is more sensitive to extreme values (very close or very far contacts)
+        - Useful for detecting flies that occasionally get very close to the ball
+        - Can be compared with median to understand the distribution shape
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Mean distance between head and ball during contact events in pixels,
+            or np.nan if no contact data available.
+        """
+        # Import skeleton metrics to get contact events
+        try:
+            from .skeleton_metrics import SkeletonMetrics
+
+            skeleton_metrics = SkeletonMetrics(self.fly)
+            contact_events = skeleton_metrics.contacts
+        except ImportError:
+            if self.fly.config.debugging:
+                print("Could not import SkeletonMetrics for contact detection")
+            return np.nan
+        except Exception as e:
+            if self.fly.config.debugging:
+                print(f"Error creating SkeletonMetrics: {e}")
+            return np.nan
+
+        if not contact_events:
+            if self.fly.config.debugging:
+                print("No contact events found for head-ball distance analysis")
+            return np.nan
+
+        # Get skeleton and ball data (use raw ball data for better accuracy)
+        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        ball_data = self.tracking_data.raw_balltrack.objects[ball_idx].dataset
+
+        # Check if Head keypoint is available
+        available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]
+        if "Head" not in available_keypoints:
+            if self.fly.config.debugging:
+                print("Head keypoint not found, cannot compute head-ball distance")
+            return np.nan
+
+        all_head_ball_distances = []
+        min_contact_frames = 5  # Only consider contacts with at least 5 frames
+        total_contacts = len(contact_events)
+        filtered_contacts = 0
+
+        for contact_event in contact_events:
+            start_frame, end_frame = contact_event[0], contact_event[1]
+
+            # Get all frames for this contact
+            contact_frames = list(range(start_frame, min(end_frame + 1, len(skeleton_data))))
+
+            if len(contact_frames) < min_contact_frames:
+                filtered_contacts += 1
+                continue
+
+            # Calculate head-ball distance for each frame in this contact
+            for frame in contact_frames:
+                # Get head position for this frame
+                head_x = skeleton_data.loc[frame, "x_Head"]
+                head_y = skeleton_data.loc[frame, "y_Head"]
+
+                # Get ball position for this frame
+                ball_x = ball_data.loc[frame, "x_centre"]
+                ball_y = ball_data.loc[frame, "y_centre"]
+
+                # Skip frames with invalid head or ball data
+                if any(pd.isna([head_x, head_y, ball_x, ball_y])):
+                    continue
+
+                # Calculate Euclidean distance between head and ball
+                distance = np.sqrt((head_x - ball_x) ** 2 + (head_y - ball_y) ** 2)
+                all_head_ball_distances.append(distance)
+
+        # Calculate mean distance across all contact events
+        if not all_head_ball_distances:
+            if self.fly.config.debugging:
+                print("No valid head-ball distance measurements found")
+            return np.nan
+
+        mean_distance = np.mean(all_head_ball_distances)
+
+        if self.fly.config.debugging:
+            used_contacts = total_contacts - filtered_contacts
+            median_distance = np.median(all_head_ball_distances)
+            std_distance = np.std(all_head_ball_distances)
+            print(
+                f"Fly {fly_idx}: Mean head-ball distance: {mean_distance:.2f} ± {std_distance:.2f} pixels "
+                f"(median: {median_distance:.2f}) from {len(all_head_ball_distances)} measurements "
+                f"across {used_contacts}/{total_contacts} contact events"
+            )
+
+        return mean_distance

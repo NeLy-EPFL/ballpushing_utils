@@ -319,7 +319,7 @@ if __name__ == "__main__":
         logging.info(f"Using optional output directory: {output_summary}")
     else:
         # Determine the output_summary_dir based on the provided arguments
-        today_date = datetime.now().strftime("%y%m%d")
+        today_date = datetime.now().strftime("%y%m%d_%H")
         dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
 
         if args.yaml:

@@ -103,6 +103,11 @@ class Config:
     gap_between_contacts: Optional[float] = None  # 1 / 4  # Set to None to allow disabling gap merging
     contact_min_length: Optional[float] = None  # 1 / 4  # Set to None to allow disabling min length filtering
 
+    # Head pushing detection configuration
+    exclude_hidden_legs: bool = True  # If True, exclude contacts where legs are not visible (NaN tracking data)
+    head_pushing_threshold: float = 0.6  # Fraction of frames required for clear head/leg pushing classification
+    late_contact_window: float = 0.3  # Fraction of contact duration to analyze for late leg extension (0.3 = last 30%)
+
     # Standardized events mode: "interaction_events" uses standardized interactions from tracking data,
     # "contact_events" uses skeleton-based contact detection for creating standardized events
     standardized_events_mode: str = "contact_events"  # Options: "interaction_events", "contact_events"

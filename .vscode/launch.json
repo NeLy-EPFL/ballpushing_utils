@@ -151,10 +151,30 @@
             "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
             "console": "integratedTerminal",
             "args": [
+                "--mode",
+                "fly",
                 "--metrics",
                 "all",
                 "--path",
                 "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing metrics test (Experiment)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--metrics",
+                "new_metrics",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked"
             ],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
@@ -216,6 +236,26 @@
                 "--output",
                 "${workspaceFolder}/outputs/contact_annotated_interaction_events_test.mp4"
             ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Test New Metrics Single Fly",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_single_fly_metrics.py",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Analyze Generated Dataset",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/analyze_dataset.py",
+            "console": "integratedTerminal",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
