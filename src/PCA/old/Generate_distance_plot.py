@@ -2,18 +2,27 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 from scipy.spatial import distance
-import Config
+import PCA.Config as Config
 
 # --- MFA ---
-from MFA_Stats_subsetcontrols import scores_with_meta as mfa_scores, selected_dims as mfa_dims, results_df as mfa_results
+from MFA_Stats_subsetcontrols import (
+    scores_with_meta as mfa_scores,
+    selected_dims as mfa_dims,
+    results_df as mfa_results,
+)
 
 # --- PCA Static ---
 from PCA_Static import pca_scores_with_meta as static_scores, selected_dims as static_dims, results_df as static_results
 
 # --- PCA Temporal ---
-from PCA_Temporal import fpca_scores_with_meta as temporal_scores, selected_dims as temporal_dims, results_df as temporal_results
+from PCA.old.PCA_Temporal import (
+    fpca_scores_with_meta as temporal_scores,
+    selected_dims as temporal_dims,
+    results_df as temporal_results,
+)
 
 control_nicknames_dict = Config.registries["control_nicknames_dict"]
+
 
 def compute_fly_distance(row, df, selected_dims, control_nicknames_dict):
     split = row["Split"]
@@ -30,6 +39,7 @@ def compute_fly_distance(row, df, selected_dims, control_nicknames_dict):
         return distance.mahalanobis(row[selected_dims].values, control_centroid, inv_cov)
     except Exception:
         return np.nan
+
 
 def plot_distance_boxplot(scores_with_meta, selected_dims, results_df, title, filename):
     scores_with_meta = scores_with_meta.copy()
@@ -67,7 +77,7 @@ def plot_distance_boxplot(scores_with_meta, selected_dims, results_df, title, fi
         ax=ax,
         jitter=True,
         linewidth=0.5,
-        edgecolor="gray"
+        edgecolor="gray",
     )
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
@@ -87,19 +97,26 @@ def plot_distance_boxplot(scores_with_meta, selected_dims, results_df, title, fi
     plt.savefig(filename + ".eps", bbox_inches="tight")
     plt.show()
 
+
 # --- Generate plots for each analysis ---
 plot_distance_boxplot(
-    mfa_scores, mfa_dims, mfa_results,
+    mfa_scores,
+    mfa_dims,
+    mfa_results,
     "Deviation from control per Nickname (MFA, colored by Brain region)",
-    "distance_to_control_horizontal_boxplot_MFA"
+    "distance_to_control_horizontal_boxplot_MFA",
 )
 plot_distance_boxplot(
-    static_scores, static_dims, static_results,
+    static_scores,
+    static_dims,
+    static_results,
     "Deviation from control per Nickname (PCA Static, colored by Brain region)",
-    "distance_to_control_horizontal_boxplot_PCA_Static"
+    "distance_to_control_horizontal_boxplot_PCA_Static",
 )
 plot_distance_boxplot(
-    temporal_scores, temporal_dims, temporal_results,
+    temporal_scores,
+    temporal_dims,
+    temporal_results,
     "Deviation from control per Nickname (PCA Temporal, colored by Brain region)",
-    "distance_to_control_horizontal_boxplot_PCA_Temporal"
+    "distance_to_control_horizontal_boxplot_PCA_Temporal",
 )

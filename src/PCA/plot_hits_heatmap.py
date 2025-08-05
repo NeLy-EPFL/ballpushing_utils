@@ -114,7 +114,7 @@ print(heatmap_df.head())
 
 # --- Print missing nicknames from registry before plotting ---
 try:
-    from Config import registries, SplitRegistry, color_dict
+    from PCA.Config import registries, SplitRegistry, color_dict
 
     registry_nicknames = set(registries["nicknames"])
     heatmap_nicknames = set(heatmap_df.index)

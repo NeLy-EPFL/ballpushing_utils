@@ -53,7 +53,7 @@ def create_loadings_heatmap():
     sns.heatmap(
         loadings_df,
         annot=True,
-        fmt=".3f",
+        fmt=".2f",  # Changed from .3f to .2f for fewer decimal places
         cmap="RdBu_r",  # Diverging colormap
         center=0,
         cbar_kws={"label": "Loading Value"},
@@ -111,7 +111,7 @@ def create_loadings_heatmap():
     for pc in loadings_df.index:
         pc_loadings = loadings_df.loc[pc].abs().sort_values(ascending=False)
         top_3 = pc_loadings.head(3)
-        print(f"{pc}: {', '.join([f'{metric}({val:.3f})' for metric, val in top_3.items()])}")
+        print(f"{pc}: {', '.join([f'{metric}({val:.2f})' for metric, val in top_3.items()])}")
 
     return fig
 

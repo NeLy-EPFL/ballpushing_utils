@@ -4,7 +4,7 @@ import scipy.stats as stats
 from scipy.spatial import distance
 
 from statsmodels.stats.multitest import multipletests
-import Config
+import PCA.Config as Config
 
 eig_df = pd.read_csv("mfa_eigenvalues.csv")
 cumulative_variance = np.cumsum(eig_df["percentage of variance"])
@@ -19,6 +19,7 @@ scores_with_meta = final_dataset[["Nickname", "Split", "Brain region"] + list(se
 
 results = []
 all_nicknames = scores_with_meta["Nickname"].unique()
+
 
 def permutation_test(group1, group2, n_permutations=1000, random_state=None):
     rng = np.random.default_rng(random_state)
@@ -36,6 +37,7 @@ def permutation_test(group1, group2, n_permutations=1000, random_state=None):
     pval = (count + 1) / (n_permutations + 1)
     return observed, pval
 
+
 def mahalanobis_distance(group1, group2):
     mean1 = group1.mean(axis=0)
     mean2 = group2.mean(axis=0)
@@ -44,6 +46,7 @@ def mahalanobis_distance(group1, group2):
     inv_cov = np.linalg.pinv(cov)
     dist = distance.mahalanobis(mean1, mean2, inv_cov)
     return dist
+
 
 def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_state=None):
     rng = np.random.default_rng(random_state)
@@ -60,6 +63,7 @@ def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_sta
             count += 1
     pval = (count + 1) / (n_permutations + 1)
     return observed, pval
+
 
 results = []
 for nickname in all_nicknames:
@@ -105,16 +109,18 @@ for nickname in all_nicknames:
     # 3. Mahalanobis + permutation
     maha_stat, maha_pval = mahalanobis_permutation_test(group_scores, control_scores)
 
-    results.append({
-        "Nickname": nickname,
-        "Control": control_name,
-        "MannWhitney_any_dim_significant": mannwhitney_any,
-        "MannWhitney_significant_dims": significant_dims,
-        "Permutation_stat": perm_stat,
-        "Permutation_pval": perm_pval,
-        "Mahalanobis_stat": maha_stat,
-        "Mahalanobis_pval": maha_pval
-    })
+    results.append(
+        {
+            "Nickname": nickname,
+            "Control": control_name,
+            "MannWhitney_any_dim_significant": mannwhitney_any,
+            "MannWhitney_significant_dims": significant_dims,
+            "Permutation_stat": perm_stat,
+            "Permutation_pval": perm_pval,
+            "Mahalanobis_stat": maha_stat,
+            "Mahalanobis_pval": maha_pval,
+        }
+    )
 
 results_df = pd.DataFrame(results)
 
@@ -125,7 +131,4 @@ for col in ["Permutation_pval", "Mahalanobis_pval"]:
 
 results_df.to_csv("mfa_stats_results_allmethods.csv", index=False)
 print("Significant hits for Mann whitney and permutation test:")
-print(results_df[
-    (results_df["MannWhitney_any_dim_significant"]) &
-    (results_df["Permutation_FDR_significant"])
-])
+print(results_df[(results_df["MannWhitney_any_dim_significant"]) & (results_df["Permutation_FDR_significant"])])

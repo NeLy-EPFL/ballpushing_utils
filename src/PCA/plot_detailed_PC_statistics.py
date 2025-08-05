@@ -16,7 +16,7 @@ import glob
 import os
 
 sys.path.append("/home/matthias/ballpushing_utils")
-import Config
+import PCA.Config as Config
 
 
 def detect_most_recent_pca_method():

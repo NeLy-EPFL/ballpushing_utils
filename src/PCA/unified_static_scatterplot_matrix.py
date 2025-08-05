@@ -19,18 +19,20 @@ from scipy.stats import chi2
 import matplotlib.patches as patches
 
 # Set up matplotlib and seaborn for publication quality
-plt.rcParams.update({
-    'figure.dpi': 300,
-    'savefig.dpi': 300,
-    'font.size': 12,
-    'axes.titlesize': 14,
-    'axes.labelsize': 12,
-    'xtick.labelsize': 10,
-    'ytick.labelsize': 10,
-    'legend.fontsize': 10,
-    'font.family': 'sans-serif',
-    'font.sans-serif': ['Arial', 'DejaVu Sans', 'Liberation Sans']
-})
+plt.rcParams.update(
+    {
+        "figure.dpi": 300,
+        "savefig.dpi": 300,
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
+        "font.family": "sans-serif",
+        "font.sans-serif": ["Arial", "DejaVu Sans", "Liberation Sans"],
+    }
+)
 
 # Add the parent directory to the path to import Config and plot_configurations
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,10 +41,17 @@ from PCA import Config
 # Import plot configurations
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-from plot_configurations import get_config, CONTROL_ELLIPSES, SIGNIFICANCE_MARKERS
+from plot_configurations import get_config, CONTROL_ELLIPSES, SIGNIFICANCE_MARKERS, get_dynamic_data_source
 
-def load_data(config):
+
+def load_data(config, pca_type="static"):
     """Load PCA data and statistical results based on configuration"""
+    # Get dynamic configuration that auto-detects Sparse vs regular PCA
+    dynamic_config = get_dynamic_data_source(pca_type, workspace_root=".")
+
+    # Update config with dynamic paths and column names
+    config.update(dynamic_config)
+
     # Load PCA score data
     pca_data = pd.read_feather(config["pca_data_file"])
     print(f"Loaded PCA data: {config['pca_data_file']} ({len(pca_data)} rows)")
@@ -64,6 +73,7 @@ def load_data(config):
         print(f"Temporal statistical results file not found: {config['temporal_results_file']}")
 
     return pca_data, static_results, temporal_results
+
 
 def get_significance_from_permutation(stats_results, significance_threshold=0.05):
     """Extract significance information from permutation test p-values"""
@@ -87,6 +97,7 @@ def get_significance_from_permutation(stats_results, significance_threshold=0.05
         }
 
     return genotype_significance
+
 
 def create_confidence_ellipse_data(data_x, data_y, confidence=0.95):
     """Create ellipse data points for plotting confidence intervals - exact match to interactive"""
@@ -122,6 +133,7 @@ def create_confidence_ellipse_data(data_x, data_y, confidence=0.95):
 
     return ellipse_points[:, 0], ellipse_points[:, 1]
 
+
 def create_control_ellipses(pca_data, pc_x, pc_y, ax, config, confidence=0.95):
     """Create confidence ellipses for each control line - exact match to interactive"""
     for control_name, color in CONTROL_ELLIPSES.items():
@@ -138,10 +150,14 @@ def create_control_ellipses(pca_data, pc_x, pc_y, ax, config, confidence=0.95):
             if ellipse_x is not None:
                 # Add ellipse to plot using config styling
                 ellipse_style = config["ellipse"]
-                ax.plot(ellipse_x, ellipse_y,
-                       color=color,
-                       alpha=ellipse_style["alpha"],
-                       linewidth=ellipse_style["linewidth"])
+                ax.plot(
+                    ellipse_x,
+                    ellipse_y,
+                    color=color,
+                    alpha=ellipse_style["alpha"],
+                    linewidth=ellipse_style["linewidth"],
+                )
+
 
 def prepare_plotting_data(pca_data, static_results, temporal_results, config):
     """Prepare data for plotting based on configuration"""
@@ -152,31 +168,29 @@ def prepare_plotting_data(pca_data, static_results, temporal_results, config):
     if config["significance_filter"] == "static":
         # Use only static significance
         significant_genotypes = [
-            genotype for genotype, sig_info in static_significance.items()
-            if sig_info["is_significant"]
+            genotype for genotype, sig_info in static_significance.items() if sig_info["is_significant"]
         ]
         print(f"Using static significance: {len(significant_genotypes)} genotypes")
 
     elif config["significance_filter"] == "temporal":
         # Use only temporal significance
         significant_genotypes = [
-            genotype for genotype, sig_info in temporal_significance.items()
-            if sig_info["is_significant"]
+            genotype for genotype, sig_info in temporal_significance.items() if sig_info["is_significant"]
         ]
         print(f"Using temporal significance: {len(significant_genotypes)} genotypes")
 
     elif config["significance_filter"] == "combined":
         # Use combined significance
         static_significant = [
-            genotype for genotype, sig_info in static_significance.items()
-            if sig_info["is_significant"]
+            genotype for genotype, sig_info in static_significance.items() if sig_info["is_significant"]
         ]
         temporal_significant = [
-            genotype for genotype, sig_info in temporal_significance.items()
-            if sig_info["is_significant"]
+            genotype for genotype, sig_info in temporal_significance.items() if sig_info["is_significant"]
         ]
         significant_genotypes = list(set(static_significant + temporal_significant))
-        print(f"Using combined significance: {len(static_significant)} static + {len(temporal_significant)} temporal = {len(significant_genotypes)} unique")
+        print(
+            f"Using combined significance: {len(static_significant)} static + {len(temporal_significant)} temporal = {len(significant_genotypes)} unique"
+        )
     else:
         raise ValueError(f"Unknown significance_filter: {config['significance_filter']}")
 
@@ -208,17 +222,9 @@ def prepare_plotting_data(pca_data, static_results, temporal_results, config):
 
     # Add significance markers - this is the key addition!
     def get_significance_type(nickname):
+        # Simplified: only check static significance since we're not using temporal
         in_static = nickname in [g for g, s in static_significance.items() if s["is_significant"]]
-        in_temporal = nickname in [g for g, s in temporal_significance.items() if s["is_significant"]]
-
-        if in_static and in_temporal:
-            return "both"
-        elif in_static:
-            return "static"
-        elif in_temporal:
-            return "temporal"
-        else:
-            return "static"  # fallback, shouldn't happen
+        return "significant" if in_static else "non_significant"
 
     def get_marker_style(nickname):
         sig_type = get_significance_type(nickname)
@@ -235,6 +241,7 @@ def prepare_plotting_data(pca_data, static_results, temporal_results, config):
 
     return plot_data
 
+
 def create_static_scatterplot_matrix(pca_data, static_results, temporal_results, config, n_components=6):
     """Create static scatterplot matrix using seaborn and matplotlib"""
 
@@ -243,7 +250,7 @@ def create_static_scatterplot_matrix(pca_data, static_results, temporal_results,
 
     # Select PCA components
     available_pca_cols = [col for col in config["pca_columns"][:n_components] if col in plot_data.columns]
-    available_pc_labels = config["pc_labels"][:len(available_pca_cols)]
+    available_pc_labels = config["pc_labels"][: len(available_pca_cols)]
     print(f"Using PCA components: {available_pca_cols} (displayed as {available_pc_labels})")
 
     # Get brain region colors
@@ -277,19 +284,22 @@ def create_static_scatterplot_matrix(pca_data, static_results, temporal_results,
                         hist_style = config["histogram"]
 
                         # Use the same bins for consistent histogram appearance
-                        ax.hist(region_data[pc_x_col], bins=bin_edges,
-                               alpha=hist_style["alpha"],
-                               color=color,
-                               density=hist_style["density"],
-                               edgecolor=color,
-                               linewidth=hist_style["linewidth"])
+                        ax.hist(
+                            region_data[pc_x_col],
+                            bins=bin_edges,
+                            alpha=hist_style["alpha"],
+                            color=color,
+                            density=hist_style["density"],
+                            edgecolor=color,
+                            linewidth=hist_style["linewidth"],
+                        )
 
                 # Add reference line at zero
                 ref_style = config["reference_lines"]["diagonal_axvline"]
                 ax.axvline(x=0, **ref_style)
 
                 ax.set_xlabel(pc_x_label)
-                ax.set_ylabel('Density')
+                ax.set_ylabel("Density")
 
             else:
                 # Off-diagonal: scatter plot by brain region with significance markers
@@ -307,13 +317,16 @@ def create_static_scatterplot_matrix(pca_data, static_results, temporal_results,
                             if len(marker_data) > 0:
                                 # Use the marker-specific size
                                 marker_sizes = marker_data["marker_size"].values
-                                ax.scatter(marker_data[pc_x_col], marker_data[pc_y_col],
-                                         color=color,
-                                         s=marker_sizes,
-                                         alpha=scatter_style["alpha"],
-                                         edgecolors=scatter_style["edgecolors"],
-                                         linewidth=scatter_style["linewidth"],
-                                         marker=marker_style)
+                                ax.scatter(
+                                    marker_data[pc_x_col],
+                                    marker_data[pc_y_col],
+                                    color=color,
+                                    s=marker_sizes,
+                                    alpha=scatter_style["alpha"],
+                                    edgecolors=scatter_style["edgecolors"],
+                                    linewidth=scatter_style["linewidth"],
+                                    marker=marker_style,
+                                )
 
                 # Create control ellipses (based on all data, not just significant flies)
                 create_control_ellipses(pca_data, pc_x_col, pc_y_col, ax, config)
@@ -337,19 +350,20 @@ def create_static_scatterplot_matrix(pca_data, static_results, temporal_results,
     plt.tight_layout()
     return fig
 
+
 def save_plots_multiple_formats(fig, base_filename):
     """Save plots in multiple publication-ready formats in organized directories"""
     saved_files = []
-    formats = ['png', 'svg', 'pdf', 'eps']
+    formats = ["png", "svg", "pdf", "eps"]
 
     # Ensure the organized directory structure exists
     for fmt in formats:
-        os.makedirs(f"pca_matrices/{fmt}", exist_ok=True)
+        os.makedirs(f"outputs/pca_matrices/{fmt}", exist_ok=True)
 
     for fmt in formats:
         try:
-            filename = f"pca_matrices/{fmt}/{base_filename}.{fmt}"
-            fig.savefig(filename, format=fmt, bbox_inches='tight', dpi=300)
+            filename = f"outputs/pca_matrices/{fmt}/{base_filename}.{fmt}"
+            fig.savefig(filename, format=fmt, bbox_inches="tight", dpi=300)
             saved_files.append(filename)
             print(f"Saved: {filename}")
         except Exception as e:
@@ -357,16 +371,17 @@ def save_plots_multiple_formats(fig, base_filename):
 
     return saved_files
 
+
 def main():
     """Main function with command line interface"""
     parser = argparse.ArgumentParser(description="Generate unified static PCA scatterplot matrices")
-    parser.add_argument("plot_type",
-                       choices=["individual_static", "genotype_static", "individual_temporal", "genotype_temporal"],
-                       help="Type of plot to generate")
-    parser.add_argument("--n-components", type=int, default=6,
-                       help="Number of PCA components to include (default: 6)")
-    parser.add_argument("--verbose", "-v", action="store_true",
-                       help="Enable verbose output")
+    parser.add_argument(
+        "plot_type",
+        choices=["individual_static", "genotype_static", "individual_temporal", "genotype_temporal"],
+        help="Type of plot to generate",
+    )
+    parser.add_argument("--n-components", type=int, default=6, help="Number of PCA components to include (default: 6)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
 
     args = parser.parse_args()
 
@@ -380,7 +395,7 @@ def main():
         print(f"Significance filter: {config['significance_filter']}")
 
     # Load data
-    pca_data, static_results, temporal_results = load_data(config)
+    pca_data, static_results, temporal_results = load_data(config, pca_type=config["data_source"])
 
     # Create the plot
     fig = create_static_scatterplot_matrix(pca_data, static_results, temporal_results, config, args.n_components)
@@ -394,11 +409,16 @@ def main():
     for file in saved_files:
         if os.path.exists(file):
             file_size = os.path.getsize(file)
-            file_type = "raster" if file.endswith('.png') else "vector - for Illustrator" if file.endswith('.svg') else "vector - for publications"
+            file_type = (
+                "raster"
+                if file.endswith(".png")
+                else "vector - for Illustrator" if file.endswith(".svg") else "vector - for publications"
+            )
             print(f"- {file} ({file_type})")
 
     if not args.verbose:
         plt.show()
+
 
 if __name__ == "__main__":
     main()

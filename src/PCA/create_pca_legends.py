@@ -134,20 +134,20 @@ def create_combined_legend():
     plt.suptitle("PCA Scatterplot Matrix Legend", fontsize=16, fontweight="bold")
     plt.tight_layout()
 
-    # Ensure pca_matrices directory exists
-    os.makedirs("pca_matrices", exist_ok=True)
+    # Ensure outputs/pca_matrices directory exists
+    os.makedirs("outputs/pca_matrices", exist_ok=True)
 
-    # Save legend to pca_matrices directory
-    plt.savefig("pca_matrices/pca_legend_combined.png", dpi=300, bbox_inches="tight")
+    # Save legend to outputs/pca_matrices directory (same as other plots)
+    plt.savefig("outputs/pca_matrices/pca_legend_combined.png", dpi=300, bbox_inches="tight")
     plt.close()
-    print("Combined legend saved as 'pca_matrices/pca_legend_combined.png'")
+    print("Combined legend saved as 'outputs/pca_matrices/pca_legend_combined.png'")
 
 
 def main():
     """Create combined legend figure only"""
 
-    # Change to PCA directory
-    os.chdir("/home/matthias/ballpushing_utils/src/PCA")
+    # No need to change directory - work from current working directory
+    # The master script will run this from workspace root
 
     print("Creating PCA combined legend figure...")
 
@@ -155,7 +155,7 @@ def main():
     create_combined_legend()
 
     print("\nLegend file created:")
-    print("- pca_matrices/pca_legend_combined.png")
+    print("- outputs/pca_matrices/pca_legend_combined.png")
 
 
 if __name__ == "__main__":

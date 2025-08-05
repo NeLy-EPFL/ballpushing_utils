@@ -7,7 +7,7 @@ from sklearn.preprocessing import RobustScaler
 from scipy.spatial import distance
 
 import matplotlib.pyplot as plt
-import Config
+import PCA.Config as Config
 
 from statsmodels.stats.multitest import multipletests
 import scipy.stats as stats
@@ -63,7 +63,7 @@ def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_sta
 
 # Load and preprocess data
 dataset = pd.read_feather(
-    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250520_summary_TNT_screen_Data/summary/pooled_summary.feather"
+    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250804_17_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
 dataset = Config.cleanup_data(dataset)
 exclude_nicknames = [
@@ -87,32 +87,41 @@ for col in dataset.columns:
         dataset[col] = dataset[col].astype(int)
 
 # Define metric columns (same as in PCA_Temporal.py)
+# Final metrics list from correlation analysis (excluding highly correlated ones)
 metric_names = [
-    "nb_events",
-    "max_event",
-    "max_event_time",
-    "max_distance",
-    "final_event",
-    "final_event_time",
-    "nb_significant_events",
-    "significant_ratio",
-    "first_major_event",
-    "first_major_event_time",
-    "pulled",
-    "pulling_ratio",
-    "interaction_persistence",
+    "chamber_exit_time",
+    "chamber_ratio",
+    "chamber_time",
     "distance_moved",
     "distance_ratio",
-    "chamber_exit_time",
-    # "normalized_velocity",
-    "auc",
-    "overall_slope",
-    "overall_interaction_rate",
+    "final_event",
+    "first_major_event",
+    "first_major_event_time",
+    "flailing",
+    "fraction_not_facing_ball",
+    "has_finished",
+    "head_pushing_ratio",
+    "interaction_persistence",
+    "max_event",
+    "max_event_time",
+    "nb_events",
+    "nb_freeze",
+    "normalized_velocity",
+    "persistence_at_end",
+    "pulled",  # Kept for biological significance despite correlation
+    "pulling_ratio",
+    "significant_ratio",
+    "time_chamber_beginning",
+    "total_pause_duration",
+    "velocity_during_interactions",
+    "velocity_trend",
 ]
-binned_slope_cols = [col for col in dataset.columns if col.startswith("binned_slope_")]
-interaction_rate_cols = [col for col in dataset.columns if col.startswith("interaction_rate_bin_")]
-binned_auc_cols = [col for col in dataset.columns if col.startswith("binned_auc_")]
-metric_names += binned_slope_cols + interaction_rate_cols + binned_auc_cols
+
+# No longer adding binned metrics as they were excluded from correlation analysis
+# binned_slope_cols = [col for col in dataset.columns if col.startswith("binned_slope_")]
+# interaction_rate_cols = [col for col in dataset.columns if col.startswith("interaction_rate_bin_")]
+# binned_auc_cols = [col for col in dataset.columns if col.startswith("binned_auc_")]
+# metric_names += binned_slope_cols + interaction_rate_cols + binned_auc_cols
 
 # Harmonize missing value handling: convert -1 in final_event to NaN and corresponding final_event_time to NaN
 print("Harmonizing missing values...")
@@ -143,15 +152,67 @@ print(f"Saved harmonized dataset to: {harmonized_path}")
 # dataset["final_event_time"] = dataset["final_event_time"].fillna(-1)
 
 
+# Handle missing values with two-step filtering approach
+print("Analyzing missing values...")
+
+# Step 1: Check missing values for each metric
 na_metrics = dataset[metric_names].isna().sum()
+total_rows = len(dataset)
+missing_percentages = (na_metrics / total_rows) * 100
 
-print("Metrics with missing values:")
-for metric, count in na_metrics[na_metrics > 0].items():
-    print(f"{metric}: {count} missing values. Replacing with -1 for static metrics.")
-    # dataset[metric] = dataset[metric].fillna(-1)
+print(f"Total rows in dataset: {total_rows}")
+print("\nMissing values per metric:")
+for metric, count in na_metrics.items():
+    percentage = missing_percentages.loc[metric]
+    status = "❌ EXCLUDE" if percentage > 5.0 else "✓ KEEP"
+    print(f"{metric:<30}: {count:4d} missing ({percentage:5.1f}%) | {status}")
 
-valid_metric_names = [col for col in metric_names if col not in na_metrics[na_metrics > 0].index]
-metrics_data = dataset[valid_metric_names]
+# Step 2: Filter out metrics with >5% missing values
+valid_metric_names = [col for col in metric_names if missing_percentages.loc[col] <= 5.0]
+excluded_metrics = [col for col in metric_names if missing_percentages.loc[col] > 5.0]
+
+print(f"\n📊 METRICS FILTERING SUMMARY:")
+print(f"   • Original metrics: {len(metric_names)}")
+print(f"   • Metrics with ≤5% missing: {len(valid_metric_names)}")
+print(f"   • Excluded metrics (>5% missing): {len(excluded_metrics)}")
+
+if excluded_metrics:
+    print(f"\n❌ EXCLUDED METRICS (>5% missing):")
+    for metric in excluded_metrics:
+        percentage = missing_percentages.loc[metric]
+        print(f"   • {metric} ({percentage:.1f}% missing)")
+
+# Step 3: Remove rows (flies) that have ANY missing values in remaining valid metrics
+print(f"\n🔍 FILTERING ROWS WITH MISSING VALUES...")
+print(f"Dataset shape before row filtering: {dataset.shape}")
+
+# Create subset with only valid metrics
+valid_metrics_data = dataset[valid_metric_names].copy()
+
+# Identify rows with any missing values in valid metrics
+rows_with_missing = valid_metrics_data.isnull().any(axis=1)
+rows_to_keep = ~rows_with_missing
+
+print(f"Rows with missing values in valid metrics: {rows_with_missing.sum()}")
+print(f"Rows to keep (complete data): {rows_to_keep.sum()}")
+
+# Filter the entire dataset to keep only complete rows
+dataset_filtered = dataset[rows_to_keep].copy()
+print(f"Dataset shape after row filtering: {dataset_filtered.shape}")
+
+# Update dataset reference for downstream processing
+dataset = dataset_filtered
+
+# Final check - should have no missing values now
+final_missing = dataset[valid_metric_names].isnull().sum().sum()
+print(f"\n✅ Final missing values in selected metrics: {final_missing}")
+
+# Use the filtered metrics for further processing
+metric_names = valid_metric_names
+print(f"✅ Proceeding with {len(metric_names)} metrics and {len(dataset)} complete observations")
+
+# This replaces the old na_metrics section
+metrics_data = dataset[metric_names]
 
 # Identify static metrics
 temporal_metrics = [

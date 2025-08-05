@@ -6,7 +6,7 @@ from sklearn.preprocessing import RobustScaler  # Better for biological data
 from prince import MFA  # Multiblock analysis
 import numpy as np
 import pandas as pd
-import Config
+import PCA.Config as Config
 import subprocess
 import os
 

@@ -1,7 +1,7 @@
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
-import Config
+import PCA.Config as Config
 
 from skbio.stats.distance import permanova, DistanceMatrix
 from scipy.spatial.distance import pdist, squareform

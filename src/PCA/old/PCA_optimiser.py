@@ -3,7 +3,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import numpy as np
-import Config
+import PCA.Config as Config
 
 # Load and preprocess the dataset
 dataset = pd.read_feather(
