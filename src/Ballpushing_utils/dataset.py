@@ -77,7 +77,7 @@ class Dataset:
                 "Invalid source format: source must be a (list of) Experiment objects or a list of Fly objects"
             )
 
-        self.flies = [fly for fly in self.flies if fly._tracking_data.valid_data]
+        self.flies = [fly for fly in self.flies if fly.tracking_data is not None and fly.tracking_data.valid_data]
 
         self.brain_regions_path = brain_regions_path
         self.regions_map = pd.read_csv(self.brain_regions_path)

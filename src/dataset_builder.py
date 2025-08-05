@@ -65,7 +65,7 @@ CONFIG = {
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
-            "summary",
+            "standardized_contacts",
         ],  # Metrics to process (add/remove as needed)
     },
 }

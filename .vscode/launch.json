@@ -316,6 +316,51 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: Debug Missing Flies (Auto)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/debug_missing_flies.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "auto",
+                "--detailed"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Debug Missing Flies (Manual)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/debug_missing_flies.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "manual",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena1/corridor1",
+                "--detailed"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Test Dataset Missing Flies",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_missing_flies.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--detailed"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }
