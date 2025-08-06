@@ -43,6 +43,12 @@ from Ballpushing_utils import utilities, config
 #
 # Process experiments with filter (no YAML):
 # python dataset_builder.py --mode experiment
+#
+# Verify existing datasets and create missing pooled datasets:
+# python dataset_builder.py --verify /path/to/existing/dataset/directory
+#
+# Verify with completeness checking against YAML:
+# python dataset_builder.py --verify /path/to/existing/dataset/directory --yaml folders.yaml --mode experiment
 
 # ==================================================================
 # CONFIGURATION SECTION - EDIT THESE VALUES TO MODIFY BEHAVIOR
@@ -57,7 +63,7 @@ from Ballpushing_utils import utilities, config
 CONFIG = {
     "PATHS": {
         "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets"),
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -65,7 +71,8 @@ CONFIG = {
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
-            "standardized_contacts",
+            "coordinates",  # Full coordinates of ball and fly positions over time
+            "summary",
         ],  # Metrics to process (add/remove as needed)
     },
 }
@@ -280,6 +287,212 @@ def extract_experiment_folders_from_fly_dirs(fly_dirs):
     return list(experiment_folders)
 
 
+def verify_and_complete_datasets(verify_path, yaml_path=None, mode="experiment"):
+    """
+    Verify existing datasets and create missing pooled datasets.
+
+    Parameters
+    ----------
+    verify_path : str or Path
+        Path to the dataset directory to verify (should contain metric subdirectories).
+    yaml_path : str or Path, optional
+        Path to YAML file containing expected directories for completeness checking.
+    mode : str
+        Processing mode ("experiment" or "flies") to determine how to interpret YAML entries.
+    """
+    verify_path = Path(verify_path)
+
+    if not verify_path.exists():
+        logging.error(f"Verification path does not exist: {verify_path}")
+        return
+
+    logging.info(f"Verifying datasets in: {verify_path}")
+
+    # Load expected items from YAML if provided
+    expected_items = []
+    if yaml_path:
+        yaml_dirs = load_yaml_config(yaml_path)
+        if mode == "experiment":
+            expected_items = [d.name for d in yaml_dirs]
+        elif mode == "flies":
+            # For flies mode, create expected fly names from directory paths
+            expected_items = [f"{d.parent.parent.name}_{d.parent.name}_{d.name}" for d in yaml_dirs]
+        logging.info(f"Loaded {len(expected_items)} expected items from YAML file for completeness checking")
+
+    # Find all metric subdirectories
+    metric_dirs = [d for d in verify_path.iterdir() if d.is_dir()]
+
+    if not metric_dirs:
+        logging.warning(f"No metric subdirectories found in {verify_path}")
+        return
+
+    logging.info(f"Found metric directories: {[d.name for d in metric_dirs]}")
+
+    for metric_dir in metric_dirs:
+        metric_name = metric_dir.name
+        logging.info(f"Checking metric: {metric_name}")
+
+        # Find all individual dataset files (exclude pooled files)
+        individual_files = [f for f in metric_dir.glob("*.feather") if not f.name.startswith("pooled_")]
+        pooled_file = metric_dir / f"pooled_{metric_name}.feather"
+
+        logging.info(f"  Found {len(individual_files)} individual files")
+
+        # Check completeness if YAML provided
+        if expected_items:
+            # Extract item names from existing files
+            existing_items = set()
+            for f in individual_files:
+                # Remove the metric suffix to get the item name
+                # e.g., "experiment_name_summary.feather" -> "experiment_name"
+                item_name = f.stem.replace(f"_{metric_name}", "")
+                existing_items.add(item_name)
+
+            missing_items = set(expected_items) - existing_items
+            extra_items = existing_items - set(expected_items)
+
+            logging.info(f"  Expected {len(expected_items)} items, found {len(existing_items)} items")
+
+            if missing_items:
+                logging.warning(f"  ⚠ Missing {len(missing_items)} expected items:")
+                for item in sorted(missing_items):
+                    logging.warning(f"    - {item}")
+
+            if extra_items:
+                logging.info(f"  ℹ Found {len(extra_items)} extra items not in YAML:")
+                for item in sorted(extra_items):
+                    logging.info(f"    + {item}")
+
+            if not missing_items:
+                logging.info(f"  ✓ All expected items are present for metric {metric_name}")
+
+        if individual_files:
+            # Check if pooled dataset exists
+            if pooled_file.exists():
+                logging.info(f"  ✓ Pooled dataset already exists: {pooled_file.name}")
+
+                # Optionally check if pooled dataset is up-to-date
+                pooled_mtime = pooled_file.stat().st_mtime
+                newest_individual_mtime = max(f.stat().st_mtime for f in individual_files)
+
+                if newest_individual_mtime > pooled_mtime:
+                    logging.warning(f"  ⚠ Pooled dataset is older than some individual files")
+                    create_pooled_dataset(metric_dir, metric_name, individual_files, force=True)
+                else:
+                    logging.info(f"  ✓ Pooled dataset is up-to-date")
+            else:
+                logging.info(f"  ❌ Missing pooled dataset: {pooled_file.name}")
+                create_pooled_dataset(metric_dir, metric_name, individual_files)
+        else:
+            logging.warning(f"  ⚠ No individual files found for metric {metric_name}")
+
+    # Summary
+    if yaml_path:
+        logging.info("\n" + "=" * 60)
+        logging.info("VERIFICATION SUMMARY")
+        logging.info("=" * 60)
+        for metric_dir in metric_dirs:
+            metric_name = metric_dir.name
+            individual_files = [f for f in metric_dir.glob("*.feather") if not f.name.startswith("pooled_")]
+            pooled_file = metric_dir / f"pooled_{metric_name}.feather"
+
+            existing_items = set()
+            for f in individual_files:
+                item_name = f.stem.replace(f"_{metric_name}", "")
+                existing_items.add(item_name)
+
+            missing_count = len(set(expected_items) - existing_items)
+            pooled_status = "✓" if pooled_file.exists() else "❌"
+
+            logging.info(
+                f"{metric_name}: {len(existing_items)}/{len(expected_items)} items, "
+                f"{missing_count} missing, pooled: {pooled_status}"
+            )
+
+
+def create_pooled_dataset(metric_dir, metric_name, individual_files, force=False):
+    """
+    Create a pooled dataset from individual files.
+
+    Parameters
+    ----------
+    metric_dir : Path
+        Directory containing the metric files.
+    metric_name : str
+        Name of the metric.
+    individual_files : list
+        List of individual dataset files to pool.
+    force : bool
+        Whether to overwrite existing pooled dataset.
+    """
+    pooled_path = metric_dir / f"pooled_{metric_name}.feather"
+
+    if pooled_path.exists() and not force:
+        logging.info(f"Pooled dataset already exists: {pooled_path.name}")
+        return
+
+    try:
+        if force and pooled_path.exists():
+            logging.info(f"Overwriting existing pooled dataset: {pooled_path.name}")
+
+        # Use chunking for pooling to avoid loading all files at once
+        chunk_size = 5  # Adjust based on file sizes
+        total_chunks = (len(individual_files) + chunk_size - 1) // chunk_size
+
+        logging.info(f"Creating pooled dataset for '{metric_name}' from {len(individual_files)} files")
+
+        first_chunk = True
+        for chunk_idx in range(total_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min((chunk_idx + 1) * chunk_size, len(individual_files))
+            chunk_files = individual_files[start_idx:end_idx]
+
+            logging.info(f"  Processing chunk {chunk_idx + 1}/{total_chunks}")
+
+            try:
+                chunk_dfs = []
+                for f in chunk_files:
+                    try:
+                        df = pd.read_feather(f)
+                        chunk_dfs.append(df)
+                    except Exception as e:
+                        logging.warning(f"  Failed to read {f.name}: {str(e)}")
+
+                if not chunk_dfs:
+                    logging.warning(f"  No valid data in chunk {chunk_idx + 1}")
+                    continue
+
+                chunk_df = pd.concat(chunk_dfs, ignore_index=True)
+
+                if first_chunk:
+                    # First chunk: create the file
+                    chunk_df.to_feather(pooled_path)
+                    first_chunk = False
+                    total_rows = len(chunk_df)
+                else:
+                    # Subsequent chunks: append to existing
+                    existing_df = pd.read_feather(pooled_path)
+                    combined_df = pd.concat([existing_df, chunk_df], ignore_index=True)
+                    combined_df.to_feather(pooled_path)
+                    total_rows = len(combined_df)
+                    del existing_df, combined_df
+
+                del chunk_df, chunk_dfs
+                gc.collect()
+
+            except Exception as e:
+                logging.error(f"  Error processing chunk {chunk_idx + 1}: {str(e)}")
+
+        if pooled_path.exists():
+            final_df = pd.read_feather(pooled_path)
+            logging.info(f"  ✓ Created pooled dataset: {pooled_path.name} ({len(final_df)} total rows)")
+        else:
+            logging.error(f"  ❌ Failed to create pooled dataset: {pooled_path.name}")
+
+    except Exception as e:
+        logging.error(f"Error creating pooled dataset for {metric_name}: {str(e)}")
+
+
 # ==================================================================
 # MAIN PROCESSING SCRIPT
 # ==================================================================
@@ -297,6 +510,12 @@ if __name__ == "__main__":
         help="Processing mode: 'experiment' for experiment folders, 'flies' for individual fly directories (default: experiment)",
     )
     parser.add_argument(
+        "--verify",
+        type=str,
+        help="Verification mode: path to existing dataset directory to check completeness and create missing pooled datasets",
+        default=None,
+    )
+    parser.add_argument(
         "--threads",
         type=int,
         default=4,
@@ -312,6 +531,15 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     logging.basicConfig(level=getattr(logging, args.log_level))
+
+    # Handle verification mode
+    if args.verify:
+        logging.info("Running in verification mode")
+        verify_and_complete_datasets(args.verify, yaml_path=args.yaml, mode=args.mode)
+        end_time = time.time()
+        runtime = end_time - start_time
+        logging.info(f"Verification completed in {runtime:.2f} seconds")
+        exit(0)
 
     if CONFIG["PATHS"]["output_summary_dir"]:
         # Use the output directory if provided

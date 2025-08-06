@@ -196,6 +196,16 @@ These metrics describe the spatial aspects of ball manipulation:
 **Units**: pixels/second²
 **Interpretation**: Positive = accelerating, negative = decelerating over session
 
+#### `fly_distance_moved`
+
+**Description**: Total distance traveled by fly throughout experiment
+
+**Calculation**: Sum of frame-to-frame Euclidean distances for fly position
+
+**Units**: millimeters
+
+**Interpretation**: Overall locomotor activity and exploration behavior
+
 ### Spatial Distribution
 
 #### `chamber_time` / `chamber_ratio`
@@ -204,11 +214,43 @@ These metrics describe the spatial aspects of ball manipulation:
 **Units**: seconds / ratio (0.0-1.0)
 **Interpretation**: Higher values indicate more conservative exploration
 
+#### `time_chamber_beginning`
+
+**Description**: Time spent in starting chamber during first 25% of experiment
+
+**Calculation**: Duration within chamber radius during first quarter of video
+
+**Units**: seconds
+
+**Interpretation**: Early chamber attachment behavior; higher values suggest reluctance to explore
+
+#### `persistence_at_end`
+
+**Description**: Fraction of time spent at corridor end (goal area)
+
+**Calculation**: Proportion of frames where fly is at or beyond corridor end threshold distance
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Goal-directed persistence; higher values indicate staying near task completion area
+
 #### `interaction_proportion`
 **Description**: Fraction of time spent interacting with ball
 **Calculation**: Total interaction duration / experiment duration
 **Range**: 0.0 to 1.0
 **Interpretation**: Task engagement level
+
+### Freeze and Pause Behavior
+
+#### `median_freeze_duration`
+
+**Description**: Median duration of locomotor pause events
+
+**Calculation**: Median of all detected pause episode durations
+
+**Units**: seconds
+
+**Interpretation**: Typical duration of behavioral arrest periods; longer values may indicate decision-making or fatigue
 
 ## Learning and Strategy Metrics
 
@@ -271,6 +313,90 @@ These metrics describe the spatial aspects of ball manipulation:
 **Units**: count / seconds
 **Interpretation**: Behavioral arrest episodes, potentially indicating decision-making
 
+## Behavioral Strategy Metrics
+
+These metrics analyze specific behavioral patterns and strategies used by flies during ball manipulation:
+
+### Body Orientation
+
+#### `fraction_not_facing_ball`
+
+**Description**: Fraction of time when fly is not facing the ball direction while outside chamber
+
+**Calculation**: Proportion of frames where fly's body orientation deviates more than 30° from corridor direction (toward ball) when outside starting chamber
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Higher values indicate distraction or lack of directional focus; lower values suggest goal-directed behavior
+
+### Motor Behavior Patterns
+
+#### `flailing`
+
+**Description**: Average motion energy of front legs during interaction events
+
+**Calculation**: Motion energy computed as sum of squared velocity differences for leg keypoints during ball interactions
+
+**Units**: dimensionless motion energy
+
+**Interpretation**: Higher values indicate more energetic leg movement during interactions, potentially reflecting struggle or inefficient manipulation
+
+#### `head_pushing_ratio`
+
+**Description**: Proportion of contacts where head is used for pushing rather than legs
+
+**Calculation**: Frame-by-frame analysis during contact events to determine whether head or legs are closer to ball
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: 1.0 = pure head pushing strategy, 0.0 = pure leg pushing strategy, 0.5 = mixed strategy
+
+### Contact Analysis
+
+#### `median_head_ball_distance`
+
+**Description**: Median distance between fly head and ball during contact events
+
+**Calculation**: Median Euclidean distance across all contact frames
+
+**Units**: pixels
+
+**Interpretation**: Lower values indicate head-pushing behavior; higher values suggest leg-pushing with head maintained at distance
+
+#### `mean_head_ball_distance`
+
+**Description**: Mean distance between fly head and ball during contact events
+
+**Calculation**: Average Euclidean distance across all contact frames
+
+**Units**: pixels
+
+**Interpretation**: Complements median distance; comparison reveals distribution shape of head-ball distances
+
+#### `leg_visibility_ratio`
+
+**Description**: Weighted ratio of front leg visibility during contact events
+
+**Calculation**: Weighted score based on number of visible front legs per frame during contacts (0-2 legs visible)
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Higher values indicate better leg tracking quality and potentially more leg-based manipulation
+
+## Task Completion Metrics
+
+### Achievement Status
+
+#### `has_finished`
+
+**Description**: Binary indicator of task completion
+
+**Calculation**: 1 if final event exists (ball moved to completion threshold), 0 otherwise
+
+**Values**: 0 or 1
+
+**Interpretation**: Simple binary measure of whether fly successfully completed the ball-pushing task
+
 ## Experimental Context Metrics
 
 ### Timing References
@@ -291,11 +417,12 @@ These metrics describe the spatial aspects of ball manipulation:
 
 The following table summarizes all thresholds used in the metrics:
 
-| Threshold Type | Pixels | Millimeters | Used For |
-|---|---|---|---|
-| **Interaction proximity** | ≤ 45 | ≤ 2.7 mm | Detecting when fly is close enough to ball for interaction events |
-| **Significant event** | > 5 | > 0.3 mm | Significant ball displacement; used for significant events, push/pull classification |
-| **Major event** | ≥ 20 | ≥ 1.2 mm | First major breakthrough ("aha moment") |
-| **Success direction** | ≥ 25 | ≥ 1.5 mm | Determining successful manipulation direction (push/pull/both) |
-| **Final event (standard)** | 170 | 10.2 mm | Task completion threshold for standard experiments |
-| **Final event (F1)** | 100 | 6.0 mm | Task completion threshold for F1 experiments |
+| Threshold Type | Pixels | Millimeters | Degrees | Used For |
+|---|---|---|---|---|
+| **Interaction proximity** | ≤ 45 | ≤ 2.7 mm | - | Detecting when fly is close enough to ball for interaction events |
+| **Significant event** | > 5 | > 0.3 mm | - | Significant ball displacement; used for significant events, push/pull classification |
+| **Major event** | ≥ 20 | ≥ 1.2 mm | - | First major breakthrough ("aha moment") |
+| **Success direction** | ≥ 25 | ≥ 1.5 mm | - | Determining successful manipulation direction (push/pull/both) |
+| **Final event (standard)** | 170 | 10.2 mm | - | Task completion threshold for standard experiments |
+| **Final event (F1)** | 100 | 6.0 mm | - | Task completion threshold for F1 experiments (second part) |
+| **Body orientation** | - | - | 30° | Angle deviation from corridor direction for `fraction_not_facing_ball` |
