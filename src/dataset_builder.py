@@ -71,8 +71,8 @@ CONFIG = {
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
-            "coordinates",  # Full coordinates of ball and fly positions over time
-            "summary",
+            "standardized_contacts",
+            # "summary",
         ],  # Metrics to process (add/remove as needed)
     },
 }
@@ -189,6 +189,18 @@ def process_experiment(folder, metrics, output_data):
             else:
                 logging.warning(f"No data available for {folder.name} with metric {metric}")
 
+            # Clear caches between experiments to prevent memory accumulation
+            # For experiment-level processing, we need to clear caches for each fly
+            if experiment is not None and hasattr(experiment, "flies"):
+                for fly in experiment.flies:
+                    # Clear all caches on the Fly object (includes BallPushingMetrics, FlyTrackingData, etc.)
+                    if hasattr(fly, "clear_caches"):
+                        fly.clear_caches()
+                        print(f"Cleared all caches for fly: {fly.metadata.name}")
+
+            # Force garbage collection
+            gc.collect()
+
     except Exception as e:
         logging.error(f"Error processing experiment {folder.name}: {str(e)}")
 
@@ -257,6 +269,18 @@ def process_fly_directory(fly_dir, metrics, output_data):
                 logging.info(f"Saved {metric} dataset for {fly_name} to {dataset_path} ({len(dataset.data)} rows)")
             else:
                 logging.warning(f"No data available for {fly_name} with metric {metric}")
+
+        # Clear caches and force garbage collection after processing each fly
+        if hasattr(fly, "clear_caches"):
+            fly.clear_caches()
+            print(f"Cleared all caches for fly: {fly.metadata.name}")
+
+        # Clear the fly object
+        del fly
+
+        # Force garbage collection
+        gc.collect()
+        logging.debug(f"Cleared caches and performed garbage collection after processing {fly_name}")
 
     except Exception as e:
         logging.error(f"Error processing fly directory {fly_dir}: {str(e)}")

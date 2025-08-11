@@ -4,6 +4,7 @@ from typing import Any
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
 from utils_behavior import Processing
+from functools import lru_cache
 
 
 class BallPushingMetrics:
@@ -11,6 +12,15 @@ class BallPushingMetrics:
 
         self.tracking_data = tracking_data
         self.fly = tracking_data.fly
+
+        # Cache for expensive computations
+        self._cached_computations = {}
+
+        # Cache for skeleton-related data to avoid repeated loading
+        self._skeleton_metrics = None
+        self._skeleton_data_cache = {}
+        self._ball_data_cache = {}
+
         # Iterate over the indices of the flytrack objects list
         # self.chamber_exit_times = {
         #     fly_idx: self.get_chamber_exit_time(fly_idx, 0)
@@ -24,6 +34,164 @@ class BallPushingMetrics:
         self.metrics = {}
         if compute_metrics_on_init:
             self.compute_metrics()
+
+    def is_metric_enabled(self, metric_name):
+        """
+        Check if a metric should be computed based on the enabled_metrics configuration.
+
+        Parameters
+        ----------
+        metric_name : str
+            Name of the metric to check.
+
+        Returns
+        -------
+        bool
+            True if the metric should be computed, False otherwise.
+        """
+        enabled_metrics = self.fly.config.enabled_metrics
+
+        # If enabled_metrics is None, compute all metrics
+        if enabled_metrics is None:
+            return True
+
+        # Check if the metric is in the enabled list
+        return metric_name in enabled_metrics
+
+    def clear_caches(self):
+        """
+        Clear all caches to free up memory. This should be called between processing different experiments.
+        """
+        # Clear instance-level caches
+        self._cached_computations.clear()
+        self._skeleton_data_cache.clear()
+        self._ball_data_cache.clear()
+
+        # Clear median coordinates cache if it exists
+        if hasattr(self, "_median_coords_cache"):
+            self._median_coords_cache.clear()
+
+        # Reset skeleton metrics to None so it gets recreated for new experiment
+        self._skeleton_metrics = None
+
+        # Clear LRU caches for all methods that use them
+        lru_cached_methods = [
+            "get_max_event",
+            "get_significant_events",
+            "get_major_event",
+            "compute_learning_slope",
+            "compute_logistic_features",
+        ]
+
+        for method_name in lru_cached_methods:
+            if hasattr(self, method_name):
+                method = getattr(self, method_name)
+                if hasattr(method, "cache_clear"):
+                    method.cache_clear()
+
+        # Force garbage collection to free memory
+        import gc
+
+        gc.collect()
+
+    def _get_skeleton_metrics(self):
+        """
+        Get or create SkeletonMetrics object with caching.
+        Only creates the object when skeleton-based metrics are needed.
+        """
+        if self._skeleton_metrics is None:
+            try:
+                from .skeleton_metrics import SkeletonMetrics
+
+                self._skeleton_metrics = SkeletonMetrics(self.fly)
+            except ImportError:
+                if self.fly.config.debugging:
+                    print("Could not import SkeletonMetrics")
+                return None
+            except Exception as e:
+                if self.fly.config.debugging:
+                    print(f"Error creating SkeletonMetrics: {e}")
+                return None
+        return self._skeleton_metrics
+
+    def _get_skeleton_data(self, fly_idx):
+        """Get skeleton data with caching."""
+        if fly_idx not in self._skeleton_data_cache:
+            self._skeleton_data_cache[fly_idx] = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        return self._skeleton_data_cache[fly_idx]
+
+    def _get_ball_data(self, ball_idx):
+        """Get ball data with caching and pre-computed rolling medians."""
+        if ball_idx not in self._ball_data_cache:
+            data = self.tracking_data.balltrack.objects[ball_idx].dataset.copy()
+            # Pre-compute common rolling medians to speed up coordinate calculations
+            for keypoint in ["centre"]:
+                data[f"x_{keypoint}_rolling_median"] = data[f"x_{keypoint}"].rolling(window=10, center=True).median()
+                data[f"y_{keypoint}_rolling_median"] = data[f"y_{keypoint}"].rolling(window=10, center=True).median()
+            self._ball_data_cache[ball_idx] = data
+        return self._ball_data_cache[ball_idx]
+
+    def _needs_skeleton_metrics(self):
+        """Check if any skeleton-based metrics are enabled."""
+        skeleton_metrics = [
+            "head_pushing_ratio",
+            "leg_visibility_ratio",
+            "flailing",
+            "fraction_not_facing_ball",
+            "median_head_ball_distance",
+            "mean_head_ball_distance",
+        ]
+        return any(self.is_metric_enabled(metric) for metric in skeleton_metrics)
+
+    def _compute_skeleton_metrics_batch(self, fly_idx, ball_idx):
+        """
+        Compute all skeleton-based metrics in a batch to optimize data loading.
+        This loads skeleton data and skeleton metrics objects once and computes all needed metrics.
+        """
+        results = {}
+
+        def safe_call(method, *args, default=None, **kwargs):
+            """Local safe_call helper for batch processing."""
+            try:
+                return method(*args, **kwargs)
+            except Exception as e:
+                if self.fly.config.debugging:
+                    print(f"Error in {method.__name__}: {e}")
+                return default
+
+        # Pre-load skeleton data once
+        skeleton_data = self._get_skeleton_data(fly_idx)
+        ball_data = self._get_ball_data(ball_idx)
+
+        # Get skeleton metrics once
+        skeleton_metrics = self._get_skeleton_metrics()
+
+        # Compute individual metrics only if enabled
+        if self.is_metric_enabled("fraction_not_facing_ball"):
+            results["fraction_not_facing_ball"] = safe_call(
+                self.compute_fraction_not_facing_ball, fly_idx, ball_idx, default=0.0
+            )
+        else:
+            results["fraction_not_facing_ball"] = 0.0
+
+        if self.is_metric_enabled("flailing"):
+            results["flailing"] = safe_call(self.compute_flailing, fly_idx, ball_idx, default=0.0)
+        else:
+            results["flailing"] = 0.0
+
+        if self.is_metric_enabled("head_pushing_ratio"):
+            results["head_pushing_ratio"] = safe_call(self.compute_head_pushing_ratio, fly_idx, ball_idx, default=0.5)
+        else:
+            results["head_pushing_ratio"] = 0.5
+
+        if self.is_metric_enabled("leg_visibility_ratio"):
+            results["leg_visibility_ratio"] = safe_call(
+                self.compute_leg_visibility_ratio, fly_idx, ball_idx, default=0.0
+            )
+        else:
+            results["leg_visibility_ratio"] = 0.0
+
+        return results
 
     def compute_metrics(self):
         """
@@ -99,183 +267,399 @@ class BallPushingMetrics:
                     ),
                 }
 
-                # Compute metrics
-                nb_events = metrics["nb_events"]()
-                max_event = metrics["max_event"]()
-                # Handle final event
-                final_event = metrics["final_event"]()
-                if final_event is None:
-                    final_event_idx = -1
-                    final_event_time = self.tracking_data.duration
-                else:
-                    final_event_idx, final_event_time, _ = final_event
+                # Compute basic metrics only if needed
+                nb_events = None
+                if self.is_metric_enabled("nb_events") or self.is_metric_enabled("significant_ratio"):
+                    nb_events = metrics["nb_events"]()
 
-                significant_events = metrics["significant_events"]()
+                max_event = None
+                if self.is_metric_enabled("max_event") or self.is_metric_enabled("max_event_time"):
+                    max_event = metrics["max_event"]()
+
+                # Handle final event - only compute if needed
+                final_event = None
+                final_event_idx = -1
+                final_event_time = self.tracking_data.duration
+                if (
+                    self.is_metric_enabled("final_event")
+                    or self.is_metric_enabled("final_event_time")
+                    or self.is_metric_enabled("cumulated_breaks_duration")
+                    or self.is_metric_enabled("chamber_time")
+                    or self.is_metric_enabled("chamber_ratio")
+                    or self.is_metric_enabled("distance_moved")
+                    or self.is_metric_enabled("distance_ratio")
+                    or self.is_metric_enabled("interaction_proportion")
+                    or self.is_metric_enabled("interaction_persistence")
+                    or self.is_metric_enabled("number_of_pauses")
+                    or self.is_metric_enabled("total_pause_duration")
+                ):
+                    final_event = metrics["final_event"]()
+                    if final_event is None:
+                        final_event_idx = -1
+                        final_event_time = self.tracking_data.duration
+                    else:
+                        final_event_idx, final_event_time, _ = final_event
+
+                significant_events = None
+                if (
+                    self.is_metric_enabled("significant_events")
+                    or self.is_metric_enabled("nb_significant_events")
+                    or self.is_metric_enabled("significant_ratio")
+                    or self.is_metric_enabled("first_significant_event")
+                    or self.is_metric_enabled("first_significant_event_time")
+                    or self.is_metric_enabled("pushed")
+                    or self.is_metric_enabled("pulled")
+                    or self.is_metric_enabled("pulling_ratio")
+                ):
+                    significant_events = metrics["significant_events"]()
 
                 # Filter events and significant events up to and including the final event
+                filtered_events = events
+                filtered_significant_events = significant_events if significant_events is not None else []
+
                 if final_event_idx >= 0:
                     filtered_events = events[: final_event_idx + 1]
-                    filtered_significant_events = [e for e in significant_events if e[1] <= final_event_idx]
-                else:
-                    filtered_events = events  # If no final event, keep all
-                    filtered_significant_events = significant_events
+                    if significant_events is not None:
+                        filtered_significant_events = [e for e in significant_events if e[1] <= final_event_idx]
 
-                # Filtered event directions for pulling/pushing ratio
-                filtered_events_direction = self.find_events_direction(fly_idx, ball_idx)
-                filtered_pushed = [
-                    e for e in filtered_events_direction[0] if e in [ev[0] for ev in filtered_significant_events]
-                ]
-                filtered_pulled = [
-                    e for e in filtered_events_direction[1] if e in [ev[0] for ev in filtered_significant_events]
-                ]
+                # Filtered event directions for pulling/pushing ratio - only compute if needed
+                filtered_pushed = []
+                filtered_pulled = []
+                if (
+                    self.is_metric_enabled("pushed")
+                    or self.is_metric_enabled("pulled")
+                    or self.is_metric_enabled("pulling_ratio")
+                ):
+                    filtered_events_direction = self.find_events_direction(fly_idx, ball_idx)
+                    filtered_pushed = [
+                        e for e in filtered_events_direction[0] if e in [ev[0] for ev in filtered_significant_events]
+                    ]
+                    filtered_pulled = [
+                        e for e in filtered_events_direction[1] if e in [ev[0] for ev in filtered_significant_events]
+                    ]
 
-                major_event = metrics["first_major_event"]()
-                events_direction = metrics["events_direction"]()
-                insight_effect = metrics["insight_effect"]()
-                pause_metrics = safe_call(
-                    self.compute_pause_metrics, fly_idx, default={"number_of_pauses": 0, "total_pause_duration": 0.0}
-                )
-                interaction_persistence = safe_call(self.compute_interaction_persistence, fly_idx, ball_idx)
-                learning_slope = safe_call(
-                    self.compute_learning_slope, fly_idx, ball_idx, default={"slope": np.nan, "r2": np.nan}
-                )
-                logistic_features = safe_call(
-                    self.compute_logistic_features,
-                    fly_idx,
-                    ball_idx,
-                    default={"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan},
-                )
-                event_influence = safe_call(self.compute_event_influence, fly_idx, ball_idx)
-                normalized_velocity = safe_call(self.compute_normalized_velocity, fly_idx, ball_idx)
-                velocity_during_interactions = safe_call(self.compute_velocity_during_interactions, fly_idx, ball_idx)
-                velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
+                # Conditional computation of expensive metrics
+                major_event = None
+                if (
+                    self.is_metric_enabled("first_major_event")
+                    or self.is_metric_enabled("first_major_event_time")
+                    or self.is_metric_enabled("major_event_first")
+                ):
+                    major_event = metrics["first_major_event"]()
 
-                # New metrics
-                has_finished = safe_call(self.get_has_finished, fly_idx, ball_idx, default=0)
-                persistence_at_end = safe_call(self.compute_persistence_at_end, fly_idx, default=np.nan)
-                fly_distance_moved = safe_call(self.compute_fly_distance_moved, fly_idx, default=np.nan)
-                time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
-                median_freeze_duration = safe_call(self.compute_median_freeze_duration, fly_idx, default=np.nan)
-                nb_freeze = safe_call(self.compute_nb_freeze, fly_idx, default=0)
-                fraction_not_facing_ball = safe_call(
-                    self.compute_fraction_not_facing_ball, fly_idx, ball_idx, default=0.0
-                )
-                flailing = safe_call(self.compute_flailing, fly_idx, ball_idx, default=0.0)
-                head_pushing_ratio = safe_call(self.compute_head_pushing_ratio, fly_idx, ball_idx, default=0.5)
-                leg_visibility_ratio = safe_call(self.compute_leg_visibility_ratio, fly_idx, ball_idx, default=0.0)
+                events_direction = ([], [])
+                if (
+                    self.is_metric_enabled("pushed")
+                    or self.is_metric_enabled("pulled")
+                    or self.is_metric_enabled("pulling_ratio")
+                ):
+                    events_direction = metrics["events_direction"]()
 
-                binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx, default=[])
-                interaction_rate_by_bin = safe_call(self.compute_interaction_rate_by_bin, fly_idx, ball_idx, default=[])
-
-                binned_slope_dict = {f"binned_slope_{i}": val for i, val in enumerate(binned_slope or [])}
-                interaction_rate_by_bin_dict = {
-                    f"interaction_rate_bin_{i}": val for i, val in enumerate(interaction_rate_by_bin or [])
+                insight_effect = {
+                    "raw_effect": np.nan,
+                    "log_effect": np.nan,
+                    "classification": "none",
+                    "first_event": False,
+                    "post_aha_count": 0,
                 }
-                overall_slope = safe_call(self.compute_overall_slope, fly_idx, ball_idx)
-                overall_interaction_rate = safe_call(self.compute_overall_interaction_rate, fly_idx, ball_idx)
+                if self.is_metric_enabled("major_event_first"):
+                    insight_effect = metrics["insight_effect"]()
 
-                auc = safe_call(self.compute_auc, fly_idx, ball_idx)
-                binned_auc = safe_call(self.compute_binned_auc, fly_idx, ball_idx, default=[])
-                binned_auc_dict = {f"binned_auc_{i}": val for i, val in enumerate(binned_auc or [])}
+                pause_metrics = {"number_of_pauses": 0, "total_pause_duration": 0.0}
+                if self.is_metric_enabled("number_of_pauses") or self.is_metric_enabled("total_pause_duration"):
+                    pause_metrics = safe_call(
+                        self.compute_pause_metrics,
+                        fly_idx,
+                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
+                    )
 
-                # Store metrics in the dictionary
-                self.metrics[key] = {
-                    "nb_events": nb_events,
-                    "max_event": max_event[0],
-                    "max_event_time": max_event[1],
-                    "max_distance": metrics["max_distance"](),
-                    "final_event": final_event_idx,
-                    "final_event_time": final_event_time,
-                    "nb_significant_events": len(filtered_significant_events),
-                    "significant_ratio": (
+                interaction_persistence = np.nan
+                if self.is_metric_enabled("interaction_persistence"):
+                    interaction_persistence = safe_call(self.compute_interaction_persistence, fly_idx, ball_idx)
+
+                # Expensive computations - only compute if needed
+                learning_slope = {"slope": np.nan, "r2": np.nan}
+                if self.is_metric_enabled("learning_slope") or self.is_metric_enabled("learning_slope_r2"):
+                    learning_slope = safe_call(
+                        self.compute_learning_slope, fly_idx, ball_idx, default={"slope": np.nan, "r2": np.nan}
+                    )
+
+                logistic_features = {"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan}
+                if (
+                    self.is_metric_enabled("logistic_L")
+                    or self.is_metric_enabled("logistic_k")
+                    or self.is_metric_enabled("logistic_t0")
+                    or self.is_metric_enabled("logistic_r2")
+                ):
+                    logistic_features = safe_call(
+                        self.compute_logistic_features,
+                        fly_idx,
+                        ball_idx,
+                        default={"L": np.nan, "k": np.nan, "t0": np.nan, "r2": np.nan},
+                    )
+
+                event_influence = np.nan
+                if self.is_metric_enabled("event_influence"):
+                    event_influence = safe_call(self.compute_event_influence, fly_idx, ball_idx)
+
+                # Velocity metrics - conditional computation
+                normalized_velocity = np.nan
+                if self.is_metric_enabled("normalized_velocity"):
+                    normalized_velocity = safe_call(self.compute_normalized_velocity, fly_idx, ball_idx)
+
+                velocity_during_interactions = np.nan
+                if self.is_metric_enabled("velocity_during_interactions"):
+                    velocity_during_interactions = safe_call(
+                        self.compute_velocity_during_interactions, fly_idx, ball_idx
+                    )
+
+                velocity_trend = np.nan
+                if self.is_metric_enabled("velocity_trend"):
+                    velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
+
+                # New metrics - conditional computation
+                has_finished = 0
+                if self.is_metric_enabled("has_finished"):
+                    has_finished = safe_call(self.get_has_finished, fly_idx, ball_idx, default=0)
+
+                persistence_at_end = np.nan
+                if self.is_metric_enabled("persistence_at_end"):
+                    persistence_at_end = safe_call(self.compute_persistence_at_end, fly_idx, default=np.nan)
+
+                fly_distance_moved = np.nan
+                if self.is_metric_enabled("fly_distance_moved"):
+                    fly_distance_moved = safe_call(self.compute_fly_distance_moved, fly_idx, default=np.nan)
+
+                time_chamber_beginning = np.nan
+                if self.is_metric_enabled("time_chamber_beginning"):
+                    time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
+
+                median_freeze_duration = np.nan
+                if self.is_metric_enabled("median_freeze_duration"):
+                    median_freeze_duration = safe_call(self.compute_median_freeze_duration, fly_idx, default=np.nan)
+
+                nb_freeze = 0
+                if self.is_metric_enabled("nb_freeze"):
+                    nb_freeze = safe_call(self.compute_nb_freeze, fly_idx, default=0)
+
+                # Skeleton metrics - batch computation optimization
+                skeleton_metrics_results = {}
+                if self._needs_skeleton_metrics():
+                    skeleton_metrics_results = self._compute_skeleton_metrics_batch(fly_idx, ball_idx)
+
+                fraction_not_facing_ball = skeleton_metrics_results.get("fraction_not_facing_ball", 0.0)
+                flailing = skeleton_metrics_results.get("flailing", 0.0)
+                head_pushing_ratio = skeleton_metrics_results.get("head_pushing_ratio", 0.5)
+                leg_visibility_ratio = skeleton_metrics_results.get("leg_visibility_ratio", 0.0)
+
+                # Binned metrics - expensive, only compute if any binned metric is enabled
+                binned_slope = []
+                binned_slope_dict = {}
+                if any(self.is_metric_enabled(f"binned_slope_{i}") for i in range(12)):
+                    binned_slope = safe_call(self.compute_binned_slope, fly_idx, ball_idx, default=[])
+                    binned_slope_dict = {f"binned_slope_{i}": val for i, val in enumerate(binned_slope or [])}
+
+                interaction_rate_by_bin = []
+                interaction_rate_by_bin_dict = {}
+                if any(self.is_metric_enabled(f"interaction_rate_bin_{i}") for i in range(12)):
+                    interaction_rate_by_bin = safe_call(
+                        self.compute_interaction_rate_by_bin, fly_idx, ball_idx, default=[]
+                    )
+                    interaction_rate_by_bin_dict = {
+                        f"interaction_rate_bin_{i}": val for i, val in enumerate(interaction_rate_by_bin or [])
+                    }
+
+                overall_slope = np.nan
+                if self.is_metric_enabled("overall_slope"):
+                    overall_slope = safe_call(self.compute_overall_slope, fly_idx, ball_idx)
+
+                overall_interaction_rate = np.nan
+                if self.is_metric_enabled("overall_interaction_rate"):
+                    overall_interaction_rate = safe_call(self.compute_overall_interaction_rate, fly_idx, ball_idx)
+
+                auc = np.nan
+                if self.is_metric_enabled("auc"):
+                    auc = safe_call(self.compute_auc, fly_idx, ball_idx)
+
+                binned_auc = []
+                binned_auc_dict = {}
+                if any(self.is_metric_enabled(f"binned_auc_{i}") for i in range(12)):
+                    binned_auc = safe_call(self.compute_binned_auc, fly_idx, ball_idx, default=[])
+                    binned_auc_dict = {f"binned_auc_{i}": val for i, val in enumerate(binned_auc or [])}
+
+                # Store metrics in the dictionary - only compute enabled metrics
+                metrics_dict = {}
+
+                # Basic event metrics
+                if self.is_metric_enabled("nb_events"):
+                    metrics_dict["nb_events"] = nb_events
+                if self.is_metric_enabled("max_event") and max_event is not None:
+                    metrics_dict["max_event"] = max_event[0]
+                if self.is_metric_enabled("max_event_time") and max_event is not None:
+                    metrics_dict["max_event_time"] = max_event[1]
+                if self.is_metric_enabled("max_distance"):
+                    metrics_dict["max_distance"] = metrics["max_distance"]()
+                if self.is_metric_enabled("final_event"):
+                    metrics_dict["final_event"] = final_event_idx
+                if self.is_metric_enabled("final_event_time"):
+                    metrics_dict["final_event_time"] = final_event_time
+                if self.is_metric_enabled("nb_significant_events"):
+                    metrics_dict["nb_significant_events"] = len(filtered_significant_events)
+                if self.is_metric_enabled("significant_ratio"):
+                    metrics_dict["significant_ratio"] = (
                         len(filtered_significant_events) / len(filtered_events) if len(filtered_events) > 0 else np.nan
-                    ),
-                    "first_significant_event": metrics["first_significant_event"]()[0],
-                    "first_significant_event_time": metrics["first_significant_event"]()[1],
-                    "first_major_event": major_event[0],
-                    "first_major_event_time": major_event[1],
-                    "major_event_first": insight_effect["first_event"],
-                    # "insight_effect": safe_call(self.get_insight_effect, fly_idx, ball_idx, subset=filtered_events)[
-                    #     "raw_effect"
-                    # ],
-                    # "insight_effect_log": safe_call(self.get_insight_effect, fly_idx, ball_idx, subset=filtered_events)[
-                    #     "log_effect"
-                    # ],
-                    "cumulated_breaks_duration": safe_call(
+                    )
+
+                first_significant_event_result = None
+                if self.is_metric_enabled("first_significant_event") or self.is_metric_enabled(
+                    "first_significant_event_time"
+                ):
+                    first_significant_event_result = metrics["first_significant_event"]()
+
+                if self.is_metric_enabled("first_significant_event") and first_significant_event_result is not None:
+                    metrics_dict["first_significant_event"] = first_significant_event_result[0]
+                if (
+                    self.is_metric_enabled("first_significant_event_time")
+                    and first_significant_event_result is not None
+                ):
+                    metrics_dict["first_significant_event_time"] = first_significant_event_result[1]
+                if self.is_metric_enabled("first_major_event"):
+                    metrics_dict["first_major_event"] = major_event[0] if major_event else -1
+                if self.is_metric_enabled("first_major_event_time"):
+                    metrics_dict["first_major_event_time"] = major_event[1] if major_event else np.nan
+                if self.is_metric_enabled("major_event_first"):
+                    metrics_dict["major_event_first"] = insight_effect["first_event"]
+
+                # Movement and interaction metrics
+                if self.is_metric_enabled("cumulated_breaks_duration"):
+                    metrics_dict["cumulated_breaks_duration"] = safe_call(
                         self.get_cumulated_breaks_duration, fly_idx, ball_idx, subset=filtered_events
-                    ),
-                    "chamber_time": safe_call(self.get_chamber_time, fly_idx, end_time=final_event_time),
-                    "chamber_ratio": safe_call(self.chamber_ratio, fly_idx, end_time=final_event_time),
-                    "pushed": len(filtered_pushed),
-                    "pulled": len(filtered_pulled),
-                    "pulling_ratio": (
+                    )
+                if self.is_metric_enabled("chamber_time"):
+                    metrics_dict["chamber_time"] = safe_call(self.get_chamber_time, fly_idx, end_time=final_event_time)
+                if self.is_metric_enabled("chamber_ratio"):
+                    metrics_dict["chamber_ratio"] = safe_call(self.chamber_ratio, fly_idx, end_time=final_event_time)
+                if self.is_metric_enabled("pushed"):
+                    metrics_dict["pushed"] = len(filtered_pushed)
+                if self.is_metric_enabled("pulled"):
+                    metrics_dict["pulled"] = len(filtered_pulled)
+                if self.is_metric_enabled("pulling_ratio"):
+                    metrics_dict["pulling_ratio"] = (
                         len(filtered_pulled) / (len(filtered_pushed) + len(filtered_pulled))
                         if (len(filtered_pushed) + len(filtered_pulled)) > 0
                         else -1
-                    ),
-                    "success_direction": metrics["success_direction"](),
-                    "interaction_proportion": (
+                    )
+                if self.is_metric_enabled("success_direction"):
+                    metrics_dict["success_direction"] = metrics["success_direction"]()
+                if self.is_metric_enabled("interaction_proportion"):
+                    metrics_dict["interaction_proportion"] = (
                         sum([event[2] for event in filtered_events])
                         / (final_event_time if final_event_time is not None else self.tracking_data.duration)
                         if (final_event_time if final_event_time is not None else self.tracking_data.duration) > 0
                         else np.nan
-                    ),
-                    "interaction_persistence": safe_call(
+                    )
+                if self.is_metric_enabled("interaction_persistence"):
+                    metrics_dict["interaction_persistence"] = safe_call(
                         self.compute_interaction_persistence, fly_idx, ball_idx, subset=filtered_events
-                    ),
-                    "distance_moved": safe_call(self.get_distance_moved, fly_idx, ball_idx, subset=filtered_events),
-                    "distance_ratio": safe_call(self.get_distance_ratio, fly_idx, ball_idx, subset=filtered_events),
-                    "exit_time": self.tracking_data.exit_time,
-                    "chamber_exit_time": self.tracking_data.chamber_exit_times[fly_idx],
-                    "number_of_pauses": safe_call(
+                    )
+                if self.is_metric_enabled("distance_moved"):
+                    metrics_dict["distance_moved"] = safe_call(
+                        self.get_distance_moved, fly_idx, ball_idx, subset=filtered_events
+                    )
+                if self.is_metric_enabled("distance_ratio"):
+                    metrics_dict["distance_ratio"] = safe_call(
+                        self.get_distance_ratio, fly_idx, ball_idx, subset=filtered_events
+                    )
+                if self.is_metric_enabled("exit_time"):
+                    metrics_dict["exit_time"] = self.tracking_data.exit_time
+                if self.is_metric_enabled("chamber_exit_time"):
+                    metrics_dict["chamber_exit_time"] = self.tracking_data.chamber_exit_times[fly_idx]
+
+                # Pause metrics
+                if self.is_metric_enabled("number_of_pauses"):
+                    metrics_dict["number_of_pauses"] = safe_call(
                         self.compute_pause_metrics,
                         fly_idx,
                         subset=filtered_events,
                         default={"number_of_pauses": 0, "total_pause_duration": 0.0},
-                    )["number_of_pauses"],
-                    "total_pause_duration": safe_call(
+                    )["number_of_pauses"]
+                if self.is_metric_enabled("total_pause_duration"):
+                    metrics_dict["total_pause_duration"] = safe_call(
                         self.compute_pause_metrics,
                         fly_idx,
                         subset=filtered_events,
                         default={"number_of_pauses": 0, "total_pause_duration": 0.0},
-                    )["total_pause_duration"],
-                    # Learning and logistic slopes: use full data
-                    "learning_slope": learning_slope["slope"],
-                    "learning_slope_r2": learning_slope["r2"],
-                    "logistic_L": logistic_features["L"],
-                    "logistic_k": logistic_features["k"],
-                    "logistic_t0": logistic_features["t0"],
-                    "logistic_r2": logistic_features["r2"],
-                    # "avg_displacement_after_success": safe_call(
-                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
-                    # )["avg_displacement_after_success"],
-                    # "avg_displacement_after_failure": safe_call(
-                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
-                    # )["avg_displacement_after_failure"],
-                    # "influence_ratio": safe_call(
-                    #     self.compute_event_influence, fly_idx, ball_idx, subset=filtered_events
-                    # )["influence_ratio"],
-                    "normalized_velocity": normalized_velocity,
-                    "velocity_during_interactions": velocity_during_interactions,
-                    "velocity_trend": velocity_trend,
-                    "overall_slope": overall_slope,
-                    "overall_interaction_rate": overall_interaction_rate,
-                    **binned_slope_dict,
-                    **interaction_rate_by_bin_dict,
-                    "auc": auc,
-                    **binned_auc_dict,
-                    # New metrics
-                    "has_finished": has_finished,
-                    "persistence_at_end": persistence_at_end,
-                    "fly_distance_moved": fly_distance_moved,
-                    "time_chamber_beginning": time_chamber_beginning,
-                    "median_freeze_duration": median_freeze_duration,
-                    "nb_freeze": nb_freeze,
-                    "fraction_not_facing_ball": fraction_not_facing_ball,
-                    "flailing": flailing,
-                    "head_pushing_ratio": head_pushing_ratio,
-                    "leg_visibility_ratio": leg_visibility_ratio,
-                }
+                    )["total_pause_duration"]
+
+                # Learning and logistic metrics (expensive)
+                if self.is_metric_enabled("learning_slope"):
+                    metrics_dict["learning_slope"] = learning_slope["slope"]
+                if self.is_metric_enabled("learning_slope_r2"):
+                    metrics_dict["learning_slope_r2"] = learning_slope["r2"]
+                if self.is_metric_enabled("logistic_L"):
+                    metrics_dict["logistic_L"] = logistic_features["L"]
+                if self.is_metric_enabled("logistic_k"):
+                    metrics_dict["logistic_k"] = logistic_features["k"]
+                if self.is_metric_enabled("logistic_t0"):
+                    metrics_dict["logistic_t0"] = logistic_features["t0"]
+                if self.is_metric_enabled("logistic_r2"):
+                    metrics_dict["logistic_r2"] = logistic_features["r2"]
+
+                # Velocity metrics
+                if self.is_metric_enabled("normalized_velocity"):
+                    metrics_dict["normalized_velocity"] = normalized_velocity
+                if self.is_metric_enabled("velocity_during_interactions"):
+                    metrics_dict["velocity_during_interactions"] = velocity_during_interactions
+                if self.is_metric_enabled("velocity_trend"):
+                    metrics_dict["velocity_trend"] = velocity_trend
+                if self.is_metric_enabled("overall_slope"):
+                    metrics_dict["overall_slope"] = overall_slope
+                if self.is_metric_enabled("overall_interaction_rate"):
+                    metrics_dict["overall_interaction_rate"] = overall_interaction_rate
+
+                # Binned metrics (expensive)
+                for i, val in enumerate(binned_slope_dict or {}):
+                    metric_name = f"binned_slope_{i}"
+                    if self.is_metric_enabled(metric_name):
+                        metrics_dict[metric_name] = binned_slope_dict[metric_name]
+
+                for i, val in enumerate(interaction_rate_by_bin_dict or {}):
+                    metric_name = f"interaction_rate_bin_{i}"
+                    if self.is_metric_enabled(metric_name):
+                        metrics_dict[metric_name] = interaction_rate_by_bin_dict[metric_name]
+
+                # AUC metrics
+                if self.is_metric_enabled("auc"):
+                    metrics_dict["auc"] = auc
+
+                for i, val in enumerate(binned_auc_dict or {}):
+                    metric_name = f"binned_auc_{i}"
+                    if self.is_metric_enabled(metric_name):
+                        metrics_dict[metric_name] = binned_auc_dict[metric_name]
+
+                # Additional metrics
+                if self.is_metric_enabled("has_finished"):
+                    metrics_dict["has_finished"] = has_finished
+                if self.is_metric_enabled("persistence_at_end"):
+                    metrics_dict["persistence_at_end"] = persistence_at_end
+                if self.is_metric_enabled("fly_distance_moved"):
+                    metrics_dict["fly_distance_moved"] = fly_distance_moved
+                if self.is_metric_enabled("time_chamber_beginning"):
+                    metrics_dict["time_chamber_beginning"] = time_chamber_beginning
+                if self.is_metric_enabled("median_freeze_duration"):
+                    metrics_dict["median_freeze_duration"] = median_freeze_duration
+                if self.is_metric_enabled("nb_freeze"):
+                    metrics_dict["nb_freeze"] = nb_freeze
+                if self.is_metric_enabled("fraction_not_facing_ball"):
+                    metrics_dict["fraction_not_facing_ball"] = fraction_not_facing_ball
+                if self.is_metric_enabled("flailing"):
+                    metrics_dict["flailing"] = flailing
+                if self.is_metric_enabled("head_pushing_ratio"):
+                    metrics_dict["head_pushing_ratio"] = head_pushing_ratio
+                if self.is_metric_enabled("leg_visibility_ratio"):
+                    metrics_dict["leg_visibility_ratio"] = leg_visibility_ratio
+
+                self.metrics[key] = metrics_dict
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
         """
@@ -346,6 +730,7 @@ class BallPushingMetrics:
     def _calculate_median_coordinates(self, data, start_idx=None, end_idx=None, window=10, keypoint="centre"):
         """
         Calculate the median coordinates for the start and/or end of a given range.
+        Optimized with internal result caching for frequently called combinations.
 
         Parameters
         ----------
@@ -367,6 +752,16 @@ class BallPushingMetrics:
             Median coordinates for the start and/or end of the range. If `start_idx` or `end_idx`
             is None, the corresponding value in the tuple will be None.
         """
+        # Create cache key for this specific calculation
+        cache_key = (id(data), start_idx, end_idx, window, keypoint)
+
+        # Check if we have this calculation cached
+        if not hasattr(self, "_median_coords_cache"):
+            self._median_coords_cache = {}
+
+        if cache_key in self._median_coords_cache:
+            return self._median_coords_cache[cache_key]
+
         x_col = f"x_{keypoint}"
         y_col = f"y_{keypoint}"
 
@@ -382,7 +777,13 @@ class BallPushingMetrics:
             end_x = data[x_col].iloc[end_idx - window : end_idx].median()
             end_y = data[y_col].iloc[end_idx - window : end_idx].median()
 
-        return start_x, start_y, end_x, end_y
+        result = (start_x, start_y, end_x, end_y)
+
+        # Cache the result (limit cache size to prevent memory issues)
+        if len(self._median_coords_cache) < 1000:
+            self._median_coords_cache[cache_key] = result
+
+        return result
 
     def find_event_by_distance(self, fly_idx, ball_idx, threshold, distance_type="max"):
         """
@@ -476,6 +877,7 @@ class BallPushingMetrics:
 
         return exit_time
 
+    @lru_cache(maxsize=128)
     def get_max_event(self, fly_idx, ball_idx, threshold=None):
         """
         Get the event at which the ball was moved at its maximum distance for a given fly and ball.
@@ -625,6 +1027,7 @@ class BallPushingMetrics:
 
         return final_event_idx, final_event_time, final_event_end
 
+    @lru_cache(maxsize=128)
     def get_significant_events(self, fly_idx, ball_idx, distance=5):
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
@@ -905,6 +1308,7 @@ class BallPushingMetrics:
 
         return distance_ratio
 
+    @lru_cache(maxsize=128)
     def get_major_event(self, fly_idx, ball_idx, distance=None):
         """
         Identify the aha moment for a given fly and ball.
@@ -1269,6 +1673,7 @@ class BallPushingMetrics:
 
         return average_duration
 
+    @lru_cache(maxsize=128)
     def compute_learning_slope(self, fly_idx, ball_idx):
         """
         Compute the learning slope and R² for a given fly and ball based on ball position over time.
@@ -1308,6 +1713,7 @@ class BallPushingMetrics:
         # Return the slope and R²
         return {"slope": model.coef_[0], "r2": r2}
 
+    @lru_cache(maxsize=128)
     def compute_logistic_features(self, fly_idx, ball_idx):
         """
         Compute logistic features and R² for a given fly and ball based on ball position over time.
@@ -2013,8 +2419,8 @@ class BallPushingMetrics:
         float
             Average motion energy of front legs during interactions, or np.nan if no data.
         """
-        # Get skeleton data
-        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        # Get skeleton data using cached method
+        skeleton_data = self._get_skeleton_data(fly_idx)
 
         # Use the leg keypoints from config
         config_leg_names = [name for name in self.fly.config.contact_nodes if name not in ["Head"]]
@@ -2132,29 +2538,20 @@ class BallPushingMetrics:
             Ratio of head pushing contacts (0-1), or np.nan if no contact data or
             all contacts were excluded due to poor leg visibility.
         """
-        # Import skeleton metrics to get contact events
-        try:
-            from .skeleton_metrics import SkeletonMetrics
-
-            skeleton_metrics = SkeletonMetrics(self.fly)
-            contact_events = skeleton_metrics.contacts
-        except ImportError:
-            if self.fly.config.debugging:
-                print("Could not import SkeletonMetrics for contact detection")
-            return np.nan
-        except Exception as e:
-            if self.fly.config.debugging:
-                print(f"Error creating SkeletonMetrics: {e}")
+        # Use cached skeleton metrics instead of creating new ones
+        skeleton_metrics = self._get_skeleton_metrics()
+        if skeleton_metrics is None:
             return np.nan
 
+        contact_events = skeleton_metrics.contacts
         if not contact_events:
             if self.fly.config.debugging:
                 print("No contact events found")
             return np.nan
 
-        # Get skeleton and ball data
-        skeleton_data = self.tracking_data.skeletontrack.objects[fly_idx].dataset
-        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        # Get skeleton and ball data using cached methods
+        skeleton_data = self._get_skeleton_data(fly_idx)
+        ball_data = self._get_ball_data(ball_idx)
 
         # Use keypoints from config
         available_keypoints = [col.split("_")[1] for col in skeleton_data.columns if col.startswith("x_")]

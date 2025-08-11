@@ -5,6 +5,8 @@ import datetime
 import numpy as np
 import pygame
 import os
+import gc
+from functools import lru_cache
 from moviepy.editor import VideoFileClip, VideoClip
 from moviepy.video.fx.speedx import speedx
 
@@ -181,7 +183,10 @@ class Fly:
     def event_summaries(self):
         if self._event_summaries is None:
             # print("Computing events metrics...")
-            self._event_summaries = BallPushingMetrics(self.tracking_data).metrics
+            # Cache the entire BallPushingMetrics object to reuse computations
+            if not hasattr(self, "_ballpushing_metrics_obj"):
+                self._ballpushing_metrics_obj = BallPushingMetrics(self.tracking_data)
+            self._event_summaries = self._ballpushing_metrics_obj.metrics
         return self._event_summaries
 
     @property
@@ -198,6 +203,10 @@ class Fly:
 
     @property
     def skeleton_metrics(self):
+        # Check if we have a cached result first to avoid recomputation
+        if hasattr(self, "_skeleton_metrics_cached"):
+            return self._skeleton_metrics_cached
+
         if self.tracking_data is None:
             if self.config.debugging:
                 print("No tracking data available.")
@@ -211,7 +220,9 @@ class Fly:
         if self._skeleton_metrics is None:
             self._skeleton_metrics = SkeletonMetrics(self)
 
-        return self._skeleton_metrics
+        # Cache the result to prevent expensive recomputation
+        self._skeleton_metrics_cached = self._skeleton_metrics
+        return self._skeleton_metrics_cached
 
     @property
     def trajectory_metrics(self):
@@ -246,6 +257,45 @@ class Fly:
 
     def __repr__(self):
         return f"Fly({self.directory})"
+
+    def clear_caches(self):
+        """
+        Clear all caches to free up memory. This should be called between processing different flies.
+        """
+        # Clear cached metrics objects
+        self._event_summaries = None
+        self._f1_metrics = None
+        self._learning_metrics = None
+        self._skeleton_metrics = None
+        self._trajectory_metrics = None
+
+        # Clear cached skeleton metrics (specific cache)
+        if hasattr(self, "_skeleton_metrics_cached"):
+            delattr(self, "_skeleton_metrics_cached")
+
+        # Clear BallPushingMetrics object cache if it exists
+        if hasattr(self, "_ballpushing_metrics_obj"):
+            self._ballpushing_metrics_obj.clear_caches()
+            delattr(self, "_ballpushing_metrics_obj")
+
+        # Clear tracking data caches if tracking data exists
+        if self._tracking_data is not None:
+            # Clear FlyTrackingData internal caches
+            for attr in [
+                "_interaction_events",
+                "_interactions_onsets",
+                "_interactions_offsets",
+                "_std_interactions",
+                "_random_events",
+                "_random_events_onsets",
+                "_random_events_offsets",
+                "_std_random_events",
+            ]:
+                if hasattr(self._tracking_data, attr):
+                    delattr(self._tracking_data, attr)
+
+        # Force garbage collection
+        gc.collect()
 
     def generate_clip(self, event, outpath=None, fps=None, width=None, height=None, tracks=False):
         """

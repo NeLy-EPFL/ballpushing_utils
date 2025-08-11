@@ -1,10 +1,65 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from utils_behavior import Utils
 from typing import Optional
 
 # Pixel size: 30 mm = 500 pixels, 4 mm = 70 pixels, 1.5 mm = 25 pixels
 # Conversion factor: 500 pixels = 30 mm, so 1 mm = 16.67 pixels
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def _default_enabled_metrics():
+    """Default list of enabled metrics, excluding expensive patterns."""
+    return [
+        # Basic event metrics
+        "nb_events",
+        "max_event",
+        "max_event_time",
+        "max_distance",
+        "final_event",
+        "final_event_time",
+        "nb_significant_events",
+        "significant_ratio",
+        "first_significant_event",
+        "first_significant_event_time",
+        "first_major_event",
+        "first_major_event_time",
+        "major_event_first",
+        "pushed",
+        "pulled",
+        "pulling_ratio",
+        "success_direction",
+        "interaction_proportion",
+        "distance_moved",
+        "distance_ratio",
+        "exit_time",
+        "chamber_exit_time",
+        "has_finished",
+        # Movement and interaction metrics
+        "cumulated_breaks_duration",
+        "chamber_time",
+        "chamber_ratio",
+        "interaction_persistence",
+        "normalized_velocity",
+        "velocity_during_interactions",
+        "velocity_trend",
+        "overall_interaction_rate",
+        "auc",
+        "persistence_at_end",
+        "fly_distance_moved",
+        "time_chamber_beginning",
+        "flailing",
+        # Pause metrics (keeping basic ones)
+        "number_of_pauses",
+        "total_pause_duration",
+        "median_freeze_duration",
+        "nb_freeze",
+        # Skeleton metrics (keeping essential ones)
+        "fraction_not_facing_ball",
+        "head_pushing_ratio",
+        "leg_visibility_ratio",
+        # Excluded patterns: binned_, r2, slope, logistic_
+        # To include all metrics, set: enabled_metrics = None
+    ]
 
 
 @dataclass
@@ -25,6 +80,7 @@ class Config:
     final_event_threshold: int: The threshold value (in pixels) for an event to be considered a final event. Defaults to 170.
     final_event_F1_threshold: int: The threshold value (in pixels) for an event to be considered a final event in the F1 condition. Defaults to 100.
     max_event_threshold: int: The threshold value (in pixels) for an event to be considered a maximum event. Defaults to 10.
+    enabled_metrics: list: List of metric names to compute in BallPushingMetrics. If None (default), all metrics are computed. Use this to skip expensive metrics for better performance.
 
     """
 
@@ -39,6 +95,11 @@ class Config:
     tracks_smoothing: bool = False
     chamber_radius: int = 50
     rolling_window: int = 10
+
+    # Metrics configuration - which metrics to compute in BallPushingMetrics
+    # Set to None to compute all metrics (default), or provide a list of metric names
+    # Default list excludes expensive and redundant metrics (binned, r2, slope, logistic patterns)
+    enabled_metrics: Optional[list] = field(default_factory=_default_enabled_metrics)
 
     # Pixel to mm conversion factor (500 pixels = 30 mm)
     pixels_per_mm: float = 500 / 30  # 16.67 pixels per mm

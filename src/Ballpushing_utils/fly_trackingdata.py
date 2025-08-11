@@ -1,3 +1,4 @@
+from functools import lru_cache
 from utils_behavior import Sleap_utils
 from Ballpushing_utils import utilities
 from utils_behavior import Processing
@@ -98,21 +99,113 @@ class FlyTrackingData:
         object_type,
         smoothing=None,
     ):
-        """Load a tracking file for the fly."""
+        """Load a tracking file for the fly with arena/corridor validation."""
 
         if smoothing is None:
             smoothing = self.fly.config.tracks_smoothing
 
         try:
             tracking_file = list(self.fly.directory.glob(pattern))[0]
-            return Sleap_utils.Sleap_Tracks(
+
+            # Load the tracking data
+            sleap_tracks = Sleap_utils.Sleap_Tracks(
                 tracking_file,
                 object_type=object_type,
                 smoothed_tracks=smoothing,
                 debug=False,
             )
+
+            # Validate that the H5 file's video path matches the current fly's arena/corridor
+            if not self._validate_tracking_file_consistency(tracking_file, sleap_tracks):
+                print(
+                    f"⚠️  WARNING: Tracking file {tracking_file.name} has mismatched arena/corridor for {self.fly.metadata.name}"
+                )
+                print(f"   This file may be corrupted or misplaced. Consider moving it to /invalid directory.")
+                print(f"   Skipping this tracking file to prevent corrupted analysis.")
+                return None  # Skip mismatched files
+
+            return sleap_tracks
+
         except IndexError:
             return None
+
+    def _validate_tracking_file_consistency(self, tracking_file, sleap_tracks):
+        """
+        Validate that the tracking file's video path matches the current fly's arena/corridor.
+
+        Parameters
+        ----------
+        tracking_file : Path
+            Path to the H5 tracking file
+        sleap_tracks : Sleap_Tracks
+            Loaded SLEAP tracking data
+
+        Returns
+        -------
+        bool
+            True if validation passes, False if there's a mismatch
+        """
+        try:
+            # Get the video path from the H5 file
+            video_path = sleap_tracks.video
+
+            # Extract arena/corridor from H5 file path
+            h5_arena_corridor = self._parse_arena_corridor_from_path(str(tracking_file))
+
+            # Extract arena/corridor from video path
+            video_arena_corridor = self._parse_arena_corridor_from_path(str(video_path))
+
+            # Get expected arena/corridor from current fly
+            expected_arena = self.fly.metadata.arena  # e.g., "arena2"
+            expected_corridor = self.fly.metadata.corridor  # e.g., "corridor5"
+
+            # Parse expected values to integers
+            expected_arena_num = (
+                int(expected_arena.replace("arena", "")) if expected_arena.startswith("arena") else None
+            )
+            expected_corridor_num = (
+                int(expected_corridor.replace("corridor", "")) if expected_corridor.startswith("corridor") else None
+            )
+            expected_arena_corridor = (expected_arena_num, expected_corridor_num)
+
+            # Check if video path matches expected arena/corridor
+            if video_arena_corridor and expected_arena_corridor:
+                if video_arena_corridor != expected_arena_corridor:
+                    print(f"   H5 file: {tracking_file}")
+                    print(f"   Expected arena/corridor: {expected_arena_corridor}")
+                    print(f"   Video points to: {video_arena_corridor}")
+                    return False
+
+            return True
+
+        except Exception as e:
+            print(f"   Error during validation: {e}")
+            return True  # Continue processing if validation fails
+
+    def _parse_arena_corridor_from_path(self, path_str):
+        """
+        Extract arena and corridor numbers from a path string.
+
+        Parameters
+        ----------
+        path_str : str
+            Path string to parse
+
+        Returns
+        -------
+        tuple or None
+            Tuple of (arena_number, corridor_number) or None if not found
+        """
+        import re
+
+        # Look for patterns like "arena6/corridor2" or "arena6\corridor2"
+        arena_match = re.search(r"arena(\d+)", path_str, re.IGNORECASE)
+        corridor_match = re.search(r"corridor(\d+)", path_str, re.IGNORECASE)
+
+        if arena_match and corridor_match:
+            return (int(arena_match.group(1)), int(corridor_match.group(1)))
+
+        return None
 
     def get_chamber_exit_time(self, fly_idx, ball_idx):
         """
@@ -978,3 +1071,28 @@ class FlyTrackingData:
                 if "x_centre" in df.columns and "y_centre" in df.columns:
                     df["rel_x_ball"] = np.abs(df["x_centre"] - self.start_x)
                     df["rel_y_ball"] = np.abs(df["y_centre"] - self.start_y)
+
+    def clear_caches(self):
+        """
+        Clear all cached calculations to free up memory. This should be called between processing different experiments.
+        """
+        # Clear all cached interaction-related attributes
+        cached_attributes = [
+            "_interaction_events",
+            "_interactions_onsets",
+            "_interactions_offsets",
+            "_std_interactions",
+            "_random_events",
+            "_random_events_onsets",
+            "_random_events_offsets",
+            "_std_random_events",
+        ]
+
+        for attr in cached_attributes:
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+        # Force garbage collection
+        import gc
+
+        gc.collect()

@@ -119,10 +119,12 @@ class SkeletonMetrics:
         # Check which coordinate columns are available and use the appropriate ones
         # Priority: raw coordinates first, then fallback to regular coordinates
         if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
-            print(f"Using raw ball coordinates: x_centre_raw, y_centre_raw")
+            if self.fly.config.debugging:
+                print(f"Using raw ball coordinates: x_centre_raw, y_centre_raw")
             ball_coords = [(x, y) for x, y in zip(ball_data["x_centre_raw"], ball_data["y_centre_raw"])]
         elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
-            print(f"Using regular ball coordinates: x_centre, y_centre")
+            if self.fly.config.debugging:
+                print(f"Using regular ball coordinates: x_centre, y_centre")
             ball_coords = [(x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])]
         else:
             available_cols = [col for col in ball_data.columns if "centre" in col.lower()]
@@ -315,7 +317,8 @@ class SkeletonMetrics:
                         events.append(random_data)
 
         else:
-            print("No standardized random events found")
+            if self.fly.config.debugging:
+                print("No standardized random events found")
 
         return pd.concat(events).reset_index(drop=True) if events else pd.DataFrame()
 
@@ -375,7 +378,8 @@ class SkeletonMetrics:
 
             events.append(event_data)
 
-        print(f"Generated {len(events)} standardized contact events")
+        if self.fly.config.debugging:
+            print(f"Generated {len(events)} standardized contact events")
         return events
 
     def _find_contact_periods(self, annotated_df):
@@ -409,7 +413,8 @@ class SkeletonMetrics:
 
             contact_periods.append((start, end))
 
-        print(f"Found {len(contact_periods)} contact periods")
+        if self.fly.config.debugging:
+            print(f"Found {len(contact_periods)} contact periods")
         return contact_periods
 
     def get_final_contact(self, threshold=None, init=False):
@@ -466,15 +471,18 @@ class SkeletonMetrics:
             # Check which raw coordinate columns are available
             ball_data = self.ball.objects[0].dataset
             if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
-                print("Adding x_centre_raw and y_centre_raw to tracking data")
+                if self.fly.config.debugging:
+                    print("Adding x_centre_raw and y_centre_raw to tracking data")
                 tracking_data["x_centre_raw"] = ball_data["x_centre_raw"]
                 tracking_data["y_centre_raw"] = ball_data["y_centre_raw"]
             elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
-                print("Adding x_centre and y_centre as raw coordinates to tracking data")
+                if self.fly.config.debugging:
+                    print("Adding x_centre and y_centre as raw coordinates to tracking data")
                 tracking_data["x_centre_raw"] = ball_data["x_centre"]
                 tracking_data["y_centre_raw"] = ball_data["y_centre"]
             else:
-                print("Warning: No valid raw ball coordinates found for fly_centered_tracks")
+                if self.fly.config.debugging:
+                    print("Warning: No valid raw ball coordinates found for fly_centered_tracks")
 
         # Get reference points
         thorax_x = tracking_data["x_Thorax"].values

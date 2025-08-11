@@ -17,20 +17,30 @@ class Experiment:
         directory,
         metadata_only=False,
         custom_config=None,
+        multiprocess=False,
+        num_processes=None,
     ):
         """
         Parameters
         ----------
         directory : Path
             The path to the experiment directory.
+        metadata_only : bool
+            If True, only load metadata without loading flies.
+        custom_config : object
+            Custom configuration for fly loading.
+        multiprocess : bool
+            Whether to use multiprocessing for loading flies.
+        num_processes : int
+            Number of processes to use for multiprocessing. If None, uses os.cpu_count().
 
         Attributes
         ----------
         directory : Path
             The path to the experiment directory.
-            metadata : dict
+        metadata : dict
             A dictionary containing the metadata for the experiment.
-            fps : str
+        fps : str
             The frame rate of the videos.
         """
 
@@ -39,11 +49,11 @@ class Experiment:
         self.metadata = self.load_metadata()
         self.fps = self.load_fps()
 
-        # self.experiment_type = experiment_type
-
         # If metadata_only is True, don't load the flies
         if not metadata_only:
-            self.flies = self.load_flies(custom_config)
+            self.flies = self.load_flies(
+                custom_config=custom_config, multiprocess=multiprocess, num_processes=num_processes
+            )
 
     def __str__(self):
         # Generate a list of unique genotypes from the flies in the experiment
@@ -100,10 +110,16 @@ class Experiment:
     def load_flies(
         self,
         custom_config,
-        multithreading=False,
+        multiprocess=False,
+        num_processes=None,
     ):
         """
         Loads all flies in the experiment directory. Find subdirectories containing at least one .mp4 file, then find all .mp4 files that are named the same as their parent directory. Create a Fly object for each found folder.
+
+        Parameters:
+            custom_config: Custom configuration for fly loading
+            multiprocess (bool): Whether to use multiprocessing for loading flies
+            num_processes (int): Number of processes to use. If None, uses os.cpu_count()
 
         Returns:
             list: A list of Fly objects.
@@ -132,31 +148,41 @@ class Experiment:
                 # print(f"Found video {mp4_file.name} for {dir.name}")
                 mp4_files.append(mp4_file)
 
-        # Create a Fly object for each .mp4 file using multiprocessing
+        # Create a Fly object for each .mp4 file
         flies = []
-        if multithreading:
-            with Pool(processes=os.cpu_count()) as pool:
+        if multiprocess:
+            # Use multiprocessing for parallel loading
+            if num_processes is None:
+                num_processes = os.cpu_count()
+
+            # Create a serializable experiment data dict for workers
+            experiment_data = {"directory": self.directory, "metadata": self.metadata, "fps": self.fps}
+
+            with Pool(processes=num_processes) as pool:
                 results = [
                     pool.apply_async(
-                        load_fly,
+                        load_fly_worker,
                         args=(
                             mp4_file,
-                            self,
-                            # self.experiment_type,
+                            experiment_data,
+                            custom_config,
                         ),
                     )
                     for mp4_file in mp4_files
                 ]
                 for result in results:
-                    fly = result.get()
-                    if fly is not None:
-                        flies.append(fly)
+                    try:
+                        fly = result.get(timeout=60)  # 60 second timeout per fly
+                        if fly is not None:
+                            flies.append(fly)
+                    except Exception as e:
+                        print(f"Error loading fly in multiprocessing: {e}")
         else:
+            # Sequential loading
             for mp4_file in mp4_files:
                 fly = load_fly(
                     mp4_file,
                     self,
-                    # experiment_type=self.experiment_type,
                     custom_config,
                 )
                 if fly is not None:
@@ -246,4 +272,54 @@ def load_fly(
         return None
     except TypeError as e:
         print(f"Error while loading fly from {mp4_file.parent}: {e}")
+    return None
+
+
+def load_fly_worker(mp4_file, experiment_data, custom_config):
+    """
+    Worker function for multiprocessing fly loading.
+
+    Parameters:
+        mp4_file: Path to the MP4 file
+        experiment_data: Serializable dictionary containing experiment information
+        custom_config: Custom configuration for fly loading
+
+    Returns:
+        Fly object if successful, None otherwise
+    """
+    from Ballpushing_utils import Fly
+
+    print(f"Loading fly from {mp4_file.parent} (worker)")
+    try:
+        # Create a minimal experiment object for the fly
+        class MockExperiment:
+            def __init__(self, data, custom_config):
+                self.directory = data["directory"]
+                self.metadata = data["metadata"]
+                self.fps = data["fps"]
+                # Add the config attribute that Fly expects
+                try:
+                    from .config import Config
+
+                    self.config = Config()
+                except:
+                    # Fallback if config import fails
+                    self.config = None
+
+        mock_experiment = MockExperiment(experiment_data, custom_config)
+
+        fly = Fly(
+            mp4_file.parent,
+            experiment=mock_experiment,
+            custom_config=custom_config,
+        )
+
+        try:
+            if fly.tracking_data and fly.tracking_data.valid_data:
+                return fly
+        except Exception as e:
+            print(f"Worker error validating tracking data for {mp4_file.parent}: {e}")
+        return None
+    except Exception as e:
+        print(f"Worker error loading fly from {mp4_file.parent}: {e}")
     return None
