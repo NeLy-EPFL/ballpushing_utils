@@ -14,15 +14,24 @@ from matplotlib.patches import Patch
 import sys
 import glob
 import os
+import sys
 
 sys.path.append("/home/matthias/ballpushing_utils")
-import PCA.Config as Config
+import Config
+
+# Get output directory from command line argument
+if len(sys.argv) > 1:
+    OUTPUT_DIR = sys.argv[1]
+    print(f"🎯 Using output directory: {OUTPUT_DIR}")
+else:
+    OUTPUT_DIR = "."
+    print("⚠️  No output directory specified, using current directory")
 
 
 def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
-    pca_files = glob.glob("static_pca_stats_results_allmethods*tailored*.csv")
-    sparsepca_files = glob.glob("static_sparsepca_stats_results_allmethods*tailored*.csv")
+    pca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_pca_stats_results_allmethods*tailored*.csv"))
+    sparsepca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_sparsepca_stats_results_allmethods*tailored*.csv"))
 
     all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
 
@@ -354,8 +363,8 @@ def create_hits_heatmap(results_df):
     plt.tight_layout()
 
     # Save with method-specific naming
-    png_file = f"static_{pca_method}_hits_detailed_heatmap.png"
-    pdf_file = f"static_{pca_method}_hits_detailed_heatmap.pdf"
+    png_file = os.path.join(OUTPUT_DIR, f"static_{pca_method}_hits_detailed_heatmap.png")
+    pdf_file = os.path.join(OUTPUT_DIR, f"static_{pca_method}_hits_detailed_heatmap.pdf")
     plt.savefig(png_file, dpi=300, bbox_inches="tight")
     plt.savefig(pdf_file, bbox_inches="tight")
     print(f"Detailed hits heatmap saved: {png_file} and {pdf_file}")

@@ -12,7 +12,7 @@ import os
 
 # Add the parent directory to the path to import Config
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from PCA import Config
+import Config
 
 
 def create_brain_region_legend():

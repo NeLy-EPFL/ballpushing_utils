@@ -8,14 +8,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+import sys
+import os
+
+# Get output directory from command line argument
+if len(sys.argv) > 1:
+    OUTPUT_DIR = sys.argv[1]
+    print(f"🎯 Using output directory: {OUTPUT_DIR}")
+else:
+    OUTPUT_DIR = "."
+    print("⚠️  No output directory specified, using current directory")
 
 
 def create_loadings_heatmap():
     """Create a heatmap of PCA loadings for the simplified analysis"""
 
     # Auto-detect which method was used by checking available files
-    pca_file = "static_pca_loadings.csv"
-    sparsepca_file = "static_sparsepca_loadings.csv"
+    pca_file = os.path.join(OUTPUT_DIR, "static_pca_loadings.csv")
+    sparsepca_file = os.path.join(OUTPUT_DIR, "static_sparsepca_loadings.csv")
 
     if Path(sparsepca_file).exists() and Path(pca_file).exists():
         # Both files exist, check which is more recent
@@ -34,7 +44,7 @@ def create_loadings_heatmap():
         loadings_file = pca_file
         method_name = "Regular PCA"
     else:
-        raise FileNotFoundError("Neither static_pca_loadings.csv nor static_sparsepca_loadings.csv found!")
+        raise FileNotFoundError(f"Neither {pca_file} nor {sparsepca_file} found!")
 
     print(f"Using {method_name} loadings from: {loadings_file}")
 
@@ -102,9 +112,11 @@ def create_loadings_heatmap():
     method_suffix = "sparsepca" if "sparse" in method_name.lower() else "pca"
 
     plt.tight_layout()
-    plt.savefig(f"static_{method_suffix}_loadings_simplified_heatmap.png", dpi=300, bbox_inches="tight")
-    plt.savefig(f"static_{method_suffix}_loadings_simplified_heatmap.pdf", bbox_inches="tight")
-    print(f"Loadings heatmap saved: static_{method_suffix}_loadings_simplified_heatmap.png/pdf")
+    png_path = os.path.join(OUTPUT_DIR, f"static_{method_suffix}_loadings_simplified_heatmap.png")
+    pdf_path = os.path.join(OUTPUT_DIR, f"static_{method_suffix}_loadings_simplified_heatmap.pdf")
+    plt.savefig(png_path, dpi=300, bbox_inches="tight")
+    plt.savefig(pdf_path, bbox_inches="tight")
+    print(f"Loadings heatmap saved: {png_path} and {pdf_path}")
 
     # Print summary of highest loadings
     print(f"\nHighest absolute loadings by component:")

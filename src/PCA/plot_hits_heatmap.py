@@ -10,6 +10,14 @@ from matplotlib.colors import Normalize
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../Ballpushing_utils")))
 from utilities import brain_regions_path
 
+# Get output directory from command line argument
+if len(sys.argv) > 1:
+    OUTPUT_DIR = sys.argv[1]
+    print(f"🎯 Using output directory: {OUTPUT_DIR}")
+else:
+    OUTPUT_DIR = "."
+    print("⚠️  No output directory specified, using current directory")
+
 # Configuration: Choose which analysis types to include
 # Options: "both", "static", "temporal"
 ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
@@ -17,8 +25,8 @@ ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
 
 def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
-    pca_files = glob.glob("static_pca_stats_results_allmethods*tailored*.csv")
-    sparsepca_files = glob.glob("static_sparsepca_stats_results_allmethods*tailored*.csv")
+    pca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_pca_stats_results_allmethods*tailored*.csv"))
+    sparsepca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_sparsepca_stats_results_allmethods*tailored*.csv"))
 
     all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
 
@@ -43,9 +51,9 @@ pca_method, method_files = detect_most_recent_pca_method()
 
 # Find tailored CSVs for static and temporal based on detected method
 if pca_method == "sparsepca":
-    pattern = "*_sparsepca_*allmethods*tailored*.csv"
+    pattern = os.path.join(OUTPUT_DIR, "*_sparsepca_*allmethods*tailored*.csv")
 else:
-    pattern = "*_pca_*allmethods*tailored*.csv"
+    pattern = os.path.join(OUTPUT_DIR, "*_pca_*allmethods*tailored*.csv")
 
 tailored_csvs = glob.glob(pattern)
 print(f"Found CSV files matching pattern '{pattern}': {tailored_csvs}")
@@ -114,7 +122,7 @@ print(heatmap_df.head())
 
 # --- Print missing nicknames from registry before plotting ---
 try:
-    from PCA.Config import registries, SplitRegistry, color_dict
+    from Config import registries, SplitRegistry, color_dict
 
     registry_nicknames = set(registries["nicknames"])
     heatmap_nicknames = set(heatmap_df.index)
@@ -293,8 +301,10 @@ for ax in axes1:
 
 # Generate output filename based on analysis type
 filename_suffix = ANALYSIS_TYPE if ANALYSIS_TYPE != "both" else "static_temporal"
-fig1.savefig(f"mannwhitney_{filename_suffix}_tailored_split.png", dpi=200)
-fig1.savefig(f"mannwhitney_{filename_suffix}_tailored_split.pdf", dpi=200)
+png_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split.png")
+pdf_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split.pdf")
+fig1.savefig(png_path, dpi=200)
+fig1.savefig(pdf_path, dpi=200)
 plt.close(fig1)
 
 # --- Log scale plot ---
@@ -376,6 +386,8 @@ cbar2.set_ticklabels(log_ticklabels)
 fig2.text(0.5, 0.01, "PCA Type", ha="center", va="bottom", fontsize=12)
 for ax in axes2:
     ax.set_yticklabels(ax.get_yticklabels(), fontsize=7)
-fig2.savefig(f"mannwhitney_{filename_suffix}_tailored_split_log.png", dpi=200)
-fig2.savefig(f"mannwhitney_{filename_suffix}_tailored_split_log.pdf", dpi=200)
+png_log_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.png")
+pdf_log_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.pdf")
+fig2.savefig(png_log_path, dpi=200)
+fig2.savefig(pdf_log_path, dpi=200)
 plt.close(fig2)

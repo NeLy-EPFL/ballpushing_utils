@@ -47,8 +47,17 @@ def run_script_with_logging(script_name, description, results_dir):
 
     try:
         # Run the script and capture output
+        # Set working directory to src/ so PCA module imports work correctly
+        src_dir = os.path.join(os.path.dirname(os.getcwd()), ".") if "PCA" in os.getcwd() else os.getcwd()
+        if "PCA" in os.getcwd():
+            src_dir = os.path.dirname(os.getcwd())
+            script_path = os.path.join("PCA", script_name)
+        else:
+            src_dir = os.getcwd()
+            script_path = script_name
+
         result = subprocess.run(
-            [sys.executable, script_name], check=True, capture_output=True, text=True, cwd=os.getcwd()
+            [sys.executable, script_path, results_dir], check=True, capture_output=True, text=True, cwd=src_dir
         )
 
         # Save output to log file
@@ -94,12 +103,12 @@ def run_script_with_logging(script_name, description, results_dir):
 
 
 def organize_outputs(results_dir):
-    """Move and organize all generated files into the results directory"""
+    """Organize all generated files that are already in the results directory"""
     print(f"\n{'='*80}")
     print("📦 ORGANIZING OUTPUTS")
     print(f"{'='*80}")
 
-    # Define file patterns and their destinations
+    # Define file patterns and their destinations within the results directory
     file_patterns = {
         "data_files": [
             "static_*pca_scores.csv",
@@ -122,19 +131,25 @@ def organize_outputs(results_dir):
 
     moved_files = {"data_files": [], "plots": [], "statistics": []}
 
-    # Move files based on patterns
+    # Move files from results_dir root to organized subdirectories
     for category, patterns in file_patterns.items():
+        category_dir = f"{results_dir}/{category}"
         for pattern in patterns:
-            matching_files = list(Path(".").glob(pattern))
+            # Look for files in the results directory
+            matching_files = list(Path(results_dir).glob(pattern))
             for file_path in matching_files:
-                if file_path.exists():
-                    dest_path = f"{results_dir}/{category}/{file_path.name}"
+                if file_path.exists() and file_path.parent == Path(results_dir):
+                    dest_path = f"{category_dir}/{file_path.name}"
                     try:
                         shutil.move(str(file_path), dest_path)
                         moved_files[category].append(file_path.name)
                         print(f"   📄 {file_path.name} → {category}/")
                     except Exception as e:
                         print(f"   ⚠️  Could not move {file_path.name}: {e}")
+                elif file_path.exists():
+                    # File is already in the right subdirectory, just count it
+                    moved_files[category].append(file_path.name)
+                    print(f"   ✓ {file_path.name} (already organized)")
 
     # Generate summary
     print(f"\n📊 FILES ORGANIZED:")
@@ -250,6 +265,8 @@ def main():
 
     # Create results directory
     results_dir = create_results_directory()
+    print(f"📂 All outputs will be saved to: {results_dir}")
+    print("=" * 80)
 
     # Define the pipeline steps
     pipeline_steps = [

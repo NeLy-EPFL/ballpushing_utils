@@ -5,9 +5,11 @@ import pandas as pd
 from sklearn.decomposition import PCA, SparsePCA
 from sklearn.preprocessing import RobustScaler
 from scipy.spatial import distance
+import sys
+import os
 
 import matplotlib.pyplot as plt
-import PCA.Config as Config
+import Config
 
 from statsmodels.stats.multitest import multipletests
 import scipy.stats as stats
@@ -15,6 +17,17 @@ import scipy.stats as stats
 # === CONFIGURATION ===
 USE_SPARSE_PCA = True  # Set to True to use Sparse PCA instead of regular PCA
 # ====================
+
+# Get output directory from command line argument
+if len(sys.argv) > 1:
+    OUTPUT_DIR = sys.argv[1]
+    print(f"🎯 Using output directory: {OUTPUT_DIR}")
+else:
+    OUTPUT_DIR = "."
+    print("⚠️  No output directory specified, using current directory")
+
+# Ensure output directory exists
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def permutation_test(group1, group2, n_permutations=1000, random_state=None):
@@ -60,11 +73,18 @@ def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_sta
     pval = (count + 1) / (n_permutations + 1)
     return observed, pval
 
+    # Load and preprocess data
 
-# Load and preprocess data
+
 dataset = pd.read_feather(
-    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250804_17_summary_TNT_screen_Data/summary/pooled_summary.feather"
+    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/summary/pooled_summary.feather"
 )
+
+
+# dataset = pd.read_feather(
+#     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250804_17_summary_TNT_screen_Data/summary/pooled_summary.feather"
+# )
+
 dataset = Config.cleanup_data(dataset)
 exclude_nicknames = [
     "Ple-Gal4.F a.k.a TH-Gal4",
@@ -136,7 +156,7 @@ print(f"After harmonization - Count of final_event NaN: {final_event_nan_count}"
 print(f"After harmonization - Count of final_event_time NaN: {final_event_time_nan_count}")
 
 # Save harmonized dataset
-harmonized_path = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250520_summary_TNT_screen_Data/summary/pooled_summary_harmonized.feather"
+harmonized_path = os.path.join(OUTPUT_DIR, "pooled_summary_harmonized.feather")
 dataset.to_feather(harmonized_path)
 print(f"Saved harmonized dataset to: {harmonized_path}")
 
@@ -258,11 +278,11 @@ plt.show()
 
 # Save PCA scores and loadings with method-specific naming
 pca_scores_df = pd.DataFrame(pca_scores, columns=[f"{method_name}{i+1}" for i in range(pca_scores.shape[1])])
-pca_scores_df.to_csv(f"static_{method_name.lower()}_scores.csv", index=False)
+pca_scores_df.to_csv(os.path.join(OUTPUT_DIR, f"static_{method_name.lower()}_scores.csv"), index=False)
 pca_loadings_df = pd.DataFrame(
     pca.components_, columns=static_metrics, index=[f"{method_name}{i+1}" for i in range(pca.components_.shape[0])]
 )
-pca_loadings_df.to_csv(f"static_{method_name.lower()}_loadings.csv")
+pca_loadings_df.to_csv(os.path.join(OUTPUT_DIR, f"static_{method_name.lower()}_loadings.csv"))
 
 # Optionally, set force_control here (None or "Empty-Split")
 force_control = None  # or "Empty-Split" to force control group
@@ -276,7 +296,7 @@ pca_scores_with_meta = pd.concat([metadata_data.reset_index(drop=True), pca_scor
 suffix = "_emptysplit" if force_control == "Empty-Split" else "_tailoredctrls"
 
 # Save as feather for downstream use (ID card)
-pca_scores_with_meta.to_feather(f"static_{method_name.lower()}_with_metadata{suffix}.feather")
+pca_scores_with_meta.to_feather(os.path.join(OUTPUT_DIR, f"static_{method_name.lower()}_with_metadata{suffix}.feather"))
 
 # Select PCA components up to % variance or all components
 Explained_variance = None  # Set to a percentage (e.g., 95) or None to use all components
@@ -367,7 +387,9 @@ for col in ["Permutation_pval", "Mahalanobis_pval"]:
     results_df[col.replace("_pval", "_FDR_pval")] = pvals_corrected
 
 # Save results CSV with appropriate suffix
-results_df.to_csv(f"static_{method_name.lower()}_stats_results_allmethods{suffix}.csv", index=False)
+results_df.to_csv(
+    os.path.join(OUTPUT_DIR, f"static_{method_name.lower()}_stats_results_allmethods{suffix}.csv"), index=False
+)
 print("Significant hits for all methods:")
 print(
     results_df[

@@ -36,7 +36,7 @@ plt.rcParams.update(
 
 # Add the parent directory to the path to import Config and plot_configurations
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from PCA import Config
+import Config
 
 # Import plot configurations
 current_dir = os.path.dirname(os.path.abspath(__file__))
