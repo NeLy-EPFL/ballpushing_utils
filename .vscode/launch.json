@@ -97,6 +97,71 @@
             }
         },
         {
+            "name": "Compare Annotation Methods",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/compare_annotation_methods.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+            },
+            "stopOnEntry": false,
+            "showReturnValue": true,
+            "justMyCode": false
+        },
+        {
+            "name": "Check SLEAP Video Paths",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+            },
+            "args": [
+                "--test-case"
+            ],
+            "stopOnEntry": false,
+            "showReturnValue": true,
+            "justMyCode": false
+        },
+        {
+            "name": "Check SLEAP Video Paths (Custom Directory)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+            },
+            "args": [
+                "--directory",
+                "${input:sleapDirectory}",
+                "--recursive"
+            ],
+            "stopOnEntry": false,
+            "showReturnValue": true,
+            "justMyCode": false
+        },
+        {
+            "name": "Compare Annotation Methods (Debug Mode)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/compare_annotation_methods.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src:${env:PYTHONPATH}"
+            },
+            "stopOnEntry": true,
+            "showReturnValue": true,
+            "justMyCode": false,
+            "args": []
+        },
+        {
             "name": "Python: Transposed dataset Experiment",
             "type": "debugpy",
             "request": "launch",
@@ -361,6 +426,434 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: Thorax Discrepancy Test (Single Fly)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/thorax_discrepancy_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "single",
+                "--fly-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_1_Videos_Tracked/arena6/corridor2",
+                "--threshold",
+                "10.0",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Thorax Discrepancy Test (Known Cases)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/thorax_discrepancy_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "batch",
+                "--test-known-cases",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Thorax Discrepancy Test (Detailed Analysis)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/thorax_discrepancy_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "analysis",
+                "--fly-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_1_Videos_Tracked/arena6/corridor2",
+                "--contact-id",
+                "10",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Full Thorax Discrepancy Analysis",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/full_thorax_discrepancy_analysis.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--fly-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231201_TNT_Fine_3_Videos_Tracked/arena6/corridor2",
+                "--threshold",
+                "10.0",
+                "--min-consecutive",
+                "3",
+                "--visualize-top",
+                "5",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/full_analysis"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Full Thorax Discrepancy Analysis (No Viz)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/full_thorax_discrepancy_analysis.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--fly-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231201_TNT_Fine_3_Videos_Tracked/arena6/corridor2",
+                "--threshold",
+                "5.0",
+                "--min-consecutive",
+                "2",
+                "--no-plots",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/full_analysis_quick"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Full Thorax Discrepancy Analysis (Custom)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/full_thorax_discrepancy_analysis.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--fly-path",
+                "${input:flyPath}",
+                "--threshold",
+                "${input:threshold}",
+                "--min-consecutive",
+                "${input:minConsecutive}",
+                "--visualize-top",
+                "${input:visualizeTop}",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/custom_analysis"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Inspect Problematic Events",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/inspect_problematic_events.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/problematic_events"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Inspect Single Problematic Event",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/inspect_problematic_events.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/single_event",
+                "--event-index",
+                "${input:eventIndex}"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Check SLEAP Video Paths YAML",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths_yaml.py",
+            "console": "integratedTerminal",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Check SLEAP Video Paths YAML - Specific Directory",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths_yaml.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--specific-directory",
+                "${input:directoryPath}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Check SLEAP Video Paths YAML - Custom YAML",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths_yaml.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--yaml-file",
+                "${input:yamlFilePath}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Check SLEAP Video Paths YAML - Test Cases",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/check_sleap_video_paths_yaml.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--test-cases"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Analyze TNT Screen Results",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/analyze_tnt_screen_results.py",
+            "console": "integratedTerminal",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Analyze TNT Screen Results (Custom Dir)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/analyze_tnt_screen_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--output-dir",
+                "${input:outputDirectory}"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Analyze TNT Screen Results (No Plot)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/analyze_tnt_screen_results.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--no-plot"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Fix SLEAP Mismatches (Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/fix_sleap_mismatches.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--dry-run",
+                "--file-type",
+                "full_body"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Fix SLEAP Mismatches (Execute)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/fix_sleap_mismatches.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file-type",
+                "full_body"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Fix SLEAP Mismatches (Custom)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/fix_sleap_mismatches.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--csv-dir",
+                "${input:outputDirectory}",
+                "--file-type",
+                "${input:fileType}",
+                "--dry-run"
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Cleanup Duplicate H5 Files (Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/cleanup_duplicate_h5_files.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file-type",
+                "${input:fileType}",
+                "--yaml-file",
+                "${input:yamlFilePath}",
+                "--dry-run"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Cleanup Duplicate H5 Files (Execute)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/cleanup_duplicate_h5_files.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file-type",
+                "${input:fileType}",
+                "--yaml-file",
+                "${input:yamlFilePath}"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Cleanup Duplicate H5 Files (Specific Directory - Dry Run)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/cleanup_duplicate_h5_files.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file-type",
+                "${input:fileType}",
+                "--specific-directory",
+                "${input:directoryPath}",
+                "--dry-run"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Cleanup Duplicate H5 Files (Specific Directory - Execute)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/cleanup_duplicate_h5_files.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--file-type",
+                "${input:fileType}",
+                "--specific-directory",
+                "${input:directoryPath}"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "flyPath",
+            "description": "Path to fly data directory",
+            "default": "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231201_TNT_Fine_3_Videos_Tracked/arena6/corridor2",
+            "type": "promptString"
+        },
+        {
+            "id": "threshold",
+            "description": "Discrepancy threshold in pixels",
+            "default": "10.0",
+            "type": "promptString"
+        },
+        {
+            "id": "minConsecutive",
+            "description": "Minimum consecutive frames for problematic sequence",
+            "default": "3",
+            "type": "promptString"
+        },
+        {
+            "id": "visualizeTop",
+            "description": "Number of top discrepancy frames to visualize",
+            "default": "5",
+            "type": "promptString"
+        },
+        {
+            "id": "eventIndex",
+            "description": "Event index to inspect (0=first, 1=second, 2=third)",
+            "default": "2",
+            "type": "promptString"
+        },
+        {
+            "id": "sleapDirectory",
+            "description": "Directory to check for SLEAP files",
+            "default": "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_1_Videos_Tracked",
+            "type": "promptString"
+        },
+        {
+            "id": "directoryPath",
+            "description": "Directory to check for SLEAP video path consistency",
+            "default": "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231129_TNT_Fine_1_Videos_Tracked",
+            "type": "promptString"
+        },
+        {
+            "id": "yamlFilePath",
+            "description": "Path to YAML file with directory list",
+            "default": "${workspaceFolder}/experiments_yaml/TNT_screen.yaml",
+            "type": "promptString"
+        },
+        {
+            "id": "outputDirectory",
+            "description": "Output directory containing analysis results",
+            "default": "${workspaceFolder}/outputs/tnt_screen_analysis",
+            "type": "promptString"
+        },
+        {
+            "id": "fileType",
+            "description": "Type of H5 files to process",
+            "default": "full_body",
+            "type": "pickString",
+            "options": [
+                "full_body",
+                "ball",
+                "fly"
+            ]
         }
     ]
 }

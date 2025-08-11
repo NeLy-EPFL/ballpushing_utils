@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import numpy as np
 import pandas as pd
+import time
 from Ballpushing_utils import Fly, Experiment, BallPushingMetrics
 from utils_behavior import Utils
 import inspect
@@ -27,6 +28,50 @@ def convert_to_serializable(obj):
 def get_predefined_metric_sets():
     """Get predefined sets of metrics for easy testing."""
     return {
+        # Test conditional processing functionality
+        "basic_fast": [
+            "nb_events",
+            "max_event",
+            "max_event_time",
+            "final_event",
+            "final_event_time",
+            "chamber_time",
+            "chamber_ratio",
+        ],
+        "core_analysis": [
+            "nb_events",
+            "max_event",
+            "max_event_time",
+            "max_distance",
+            "final_event",
+            "final_event_time",
+            "nb_significant_events",
+            "significant_ratio",
+            "first_significant_event",
+            "first_significant_event_time",
+            "distance_moved",
+            "distance_ratio",
+            "chamber_time",
+            "chamber_ratio",
+            "pushed",
+            "pulled",
+            "pulling_ratio",
+        ],
+        "expensive_only": [
+            "learning_slope",
+            "learning_slope_r2",
+            "logistic_L",
+            "logistic_k",
+            "logistic_t0",
+            "logistic_r2",
+            "binned_slope_0",
+            "binned_slope_1",
+            "binned_slope_2",
+            "interaction_rate_bin_0",
+            "interaction_rate_bin_1",
+            "binned_auc_0",
+            "binned_auc_1",
+        ],
         "new_metrics": [
             "compute_fraction_not_facing_ball",
             "compute_flailing",
@@ -92,17 +137,314 @@ def get_predefined_metric_sets():
     }
 
 
+def test_conditional_processing_performance(fly_path):
+    """Test the performance difference between conditional and full processing."""
+    print(f"\n{'='*80}")
+    print("🚀 CONDITIONAL PROCESSING PERFORMANCE TEST")
+    print(f"{'='*80}")
+
+    # Test different metric configurations
+    test_configs = [
+        {
+            "name": "All Metrics (None)",
+            "enabled_metrics": None,
+            "description": "Default behavior - compute all metrics",
+        },
+        {
+            "name": "Basic Fast",
+            "enabled_metrics": get_predefined_metric_sets()["basic_fast"],
+            "description": "Only basic, fast metrics",
+        },
+        {
+            "name": "Core Analysis",
+            "enabled_metrics": get_predefined_metric_sets()["core_analysis"],
+            "description": "Core metrics without expensive computations",
+        },
+        {
+            "name": "Expensive Only",
+            "enabled_metrics": get_predefined_metric_sets()["expensive_only"],
+            "description": "Only expensive learning/binned metrics",
+        },
+        {"name": "Empty List", "enabled_metrics": [], "description": "No metrics enabled (testing edge case)"},
+    ]
+
+    performance_results = {}
+
+    for config in test_configs:
+        print(f"\n📊 Testing: {config['name']}")
+        print(f"   Description: {config['description']}")
+
+        if config["enabled_metrics"] is not None:
+            print(f"   Metrics count: {len(config['enabled_metrics'])}")
+            if len(config["enabled_metrics"]) <= 10:
+                print(f"   Metrics: {config['enabled_metrics']}")
+            else:
+                print(f"   Metrics: {config['enabled_metrics'][:3]}... (+{len(config['enabled_metrics'])-3} more)")
+        else:
+            print(f"   Metrics count: ALL")
+
+        try:
+            # Load fly with specific configuration
+            test_fly = Fly(fly_path, as_individual=True)
+
+            # Set the enabled_metrics configuration
+            test_fly.config.enabled_metrics = config["enabled_metrics"]
+
+            # Time the metrics computation
+            start_time = time.time()
+            metrics = BallPushingMetrics(test_fly.tracking_data, compute_metrics_on_init=True)
+            end_time = time.time()
+
+            computation_time = end_time - start_time
+            metrics_computed = sum(len(metrics_dict) for metrics_dict in metrics.metrics.values())
+
+            performance_results[config["name"]] = {
+                "time": computation_time,
+                "metrics_computed": metrics_computed,
+                "config_size": len(config["enabled_metrics"]) if config["enabled_metrics"] is not None else "ALL",
+                "success": True,
+            }
+
+            print(f"   ⏱️  Time: {computation_time:.4f}s")
+            print(f"   📈 Metrics computed: {metrics_computed}")
+            print(f"   ✅ Success: True")
+
+        except Exception as e:
+            print(f"   ❌ Error: {str(e)}")
+            performance_results[config["name"]] = {
+                "time": float("inf"),
+                "metrics_computed": 0,
+                "config_size": len(config["enabled_metrics"]) if config["enabled_metrics"] is not None else "ALL",
+                "success": False,
+                "error": str(e),
+            }
+
+    # Analyze and report performance gains
+    print(f"\n📈 PERFORMANCE ANALYSIS:")
+    print("-" * 60)
+
+    if "All Metrics (None)" in performance_results and performance_results["All Metrics (None)"]["success"]:
+        baseline_time = performance_results["All Metrics (None)"]["time"]
+        baseline_metrics = performance_results["All Metrics (None)"]["metrics_computed"]
+
+        print(f"Baseline (All Metrics): {baseline_time:.4f}s, {baseline_metrics} metrics")
+        print()
+
+        for name, result in performance_results.items():
+            if name != "All Metrics (None)" and result["success"]:
+                speedup = baseline_time / result["time"] if result["time"] > 0 else float("inf")
+                metrics_reduction = (
+                    (baseline_metrics - result["metrics_computed"]) / baseline_metrics * 100
+                    if baseline_metrics > 0
+                    else 0
+                )
+
+                print(
+                    f"{name:20} | "
+                    f"Time: {result['time']:6.4f}s | "
+                    f"Speedup: {speedup:5.1f}x | "
+                    f"Metrics: {result['metrics_computed']:3d} | "
+                    f"Reduction: {metrics_reduction:5.1f}%"
+                )
+
+    return performance_results
+
+
+def test_enabled_metrics_functionality(fly_path):
+    """Test the is_metric_enabled functionality with different configurations."""
+    print(f"\n{'='*80}")
+    print("🧪 ENABLED METRICS FUNCTIONALITY TEST")
+    print(f"{'='*80}")
+
+    # Load a test fly
+    test_fly = Fly(fly_path, as_individual=True)
+
+    # Test different configurations
+    test_cases = [
+        {
+            "name": "All Enabled (None)",
+            "config": None,
+            "test_metrics": ["nb_events", "learning_slope", "binned_slope_0", "nonexistent_metric"],
+            "expected": [True, True, True, True],
+        },
+        {
+            "name": "Basic Only",
+            "config": ["nb_events", "max_event", "chamber_time"],
+            "test_metrics": ["nb_events", "max_event", "chamber_time", "learning_slope", "binned_slope_0"],
+            "expected": [True, True, True, False, False],
+        },
+        {
+            "name": "Empty List",
+            "config": [],
+            "test_metrics": ["nb_events", "max_event", "learning_slope"],
+            "expected": [False, False, False],
+        },
+        {
+            "name": "Expensive Only",
+            "config": ["learning_slope", "logistic_L", "binned_slope_0"],
+            "test_metrics": ["nb_events", "learning_slope", "logistic_L", "binned_slope_0"],
+            "expected": [False, True, True, True],
+        },
+    ]
+
+    for test_case in test_cases:
+        print(f"\n🔍 Testing: {test_case['name']}")
+        print(f"   Config: {test_case['config']}")
+
+        # Set the configuration
+        test_fly.config.enabled_metrics = test_case["config"]
+
+        # Create metrics object (without computing metrics)
+        metrics = BallPushingMetrics(test_fly.tracking_data, compute_metrics_on_init=False)
+
+        # Test is_metric_enabled for each metric
+        all_passed = True
+        for metric, expected in zip(test_case["test_metrics"], test_case["expected"]):
+            actual = metrics.is_metric_enabled(metric)
+            passed = actual == expected
+            all_passed = all_passed and passed
+
+            status = "✅" if passed else "❌"
+            print(f"     {status} {metric:25} | Expected: {expected:5} | Actual: {actual:5}")
+
+        overall_status = "✅ PASSED" if all_passed else "❌ FAILED"
+        print(f"   {overall_status}")
+
+    return True
+
+
+def test_metrics_computation_selectivity(fly_path):
+    """Test that only enabled metrics are actually computed and stored."""
+    print(f"\n{'='*80}")
+    print("🎯 METRICS COMPUTATION SELECTIVITY TEST")
+    print(f"{'='*80}")
+
+    # Test with a small set of enabled metrics
+    test_fly = Fly(fly_path, as_individual=True)
+    test_fly.config.enabled_metrics = ["nb_events", "max_event", "chamber_time"]
+
+    print(f"Enabled metrics: {test_fly.config.enabled_metrics}")
+
+    # Compute metrics
+    metrics = BallPushingMetrics(test_fly.tracking_data, compute_metrics_on_init=True)
+
+    # Check what metrics were actually computed
+    all_computed_metrics = set()
+    for key, metrics_dict in metrics.metrics.items():
+        all_computed_metrics.update(metrics_dict.keys())
+
+    print(f"\nActually computed metrics: {sorted(all_computed_metrics)}")
+    print(f"Total computed: {len(all_computed_metrics)}")
+
+    # Check if expensive metrics were skipped
+    expensive_metrics = {
+        "learning_slope",
+        "learning_slope_r2",
+        "logistic_L",
+        "logistic_k",
+        "logistic_t0",
+        "logistic_r2",
+        "binned_slope_0",
+        "binned_slope_1",
+        "interaction_rate_bin_0",
+        "binned_auc_0",
+    }
+
+    skipped_expensive = expensive_metrics - all_computed_metrics
+    computed_expensive = expensive_metrics & all_computed_metrics
+
+    print(f"\n💰 Expensive metrics analysis:")
+    print(f"   Skipped expensive metrics: {sorted(skipped_expensive)} ({len(skipped_expensive)})")
+    print(f"   Computed expensive metrics: {sorted(computed_expensive)} ({len(computed_expensive)})")
+
+    # Test with expensive metrics enabled
+    print(f"\n🔄 Testing with expensive metrics enabled...")
+    test_fly.config.enabled_metrics = ["learning_slope", "logistic_L", "binned_slope_0"]
+
+    metrics_expensive = BallPushingMetrics(test_fly.tracking_data, compute_metrics_on_init=True)
+
+    all_computed_expensive = set()
+    for key, metrics_dict in metrics_expensive.metrics.items():
+        all_computed_expensive.update(metrics_dict.keys())
+
+    print(f"Computed with expensive config: {sorted(all_computed_expensive)}")
+
+    # Verify that expensive metrics are now computed
+    expensive_now_computed = expensive_metrics & all_computed_expensive
+    basic_now_skipped = {"nb_events", "max_event", "chamber_time"} - all_computed_expensive
+
+    print(f"   Expensive metrics now computed: {sorted(expensive_now_computed)} ({len(expensive_now_computed)})")
+    print(f"   Basic metrics now skipped: {sorted(basic_now_skipped)} ({len(basic_now_skipped)})")
+
+    return {
+        "basic_config_computed": len(all_computed_metrics),
+        "expensive_config_computed": len(all_computed_expensive),
+        "expensive_skipped_in_basic": len(skipped_expensive),
+        "expensive_computed_in_expensive": len(expensive_now_computed),
+    }
+
+
 def process_fly(fly_path, metrics_to_test):
-    # Load an example fly
-    ExampleFly = Fly(fly_path, as_individual=True)
+    """Process a single fly with comprehensive conditional processing tests."""
 
-    # Initialize the BallPushingMetrics object
-    metrics = BallPushingMetrics(ExampleFly.tracking_data)
+    # First run the conditional processing tests if requested
+    if "conditional_test" in metrics_to_test or "performance_test" in metrics_to_test:
+        print(f"\n{'='*80}")
+        print("🧪 COMPREHENSIVE CONDITIONAL PROCESSING TESTS")
+        print(f"{'='*80}")
+        print(f"Fly path: {fly_path}")
 
-    test_metrics(metrics, metrics_to_test, ExampleFly.metadata.name)
+        # Run all conditional processing tests
+        print("\n1️⃣ Testing enabled metrics functionality...")
+        test_enabled_metrics_functionality(fly_path)
+
+        print("\n2️⃣ Testing performance differences...")
+        performance_results = test_conditional_processing_performance(fly_path)
+
+        print("\n3️⃣ Testing metrics computation selectivity...")
+        selectivity_results = test_metrics_computation_selectivity(fly_path)
+
+        # Save comprehensive test results
+        output_dir = Path(__file__).parent / "outputs"
+        output_dir.mkdir(exist_ok=True)
+
+        fly_name = Path(fly_path).stem
+        test_results = {
+            "fly_path": str(fly_path),
+            "performance_results": performance_results,
+            "selectivity_results": selectivity_results,
+            "test_timestamp": time.time(),
+        }
+
+        results_file = output_dir / f"conditional_processing_test_{fly_name}.json"
+        with open(results_file, "w") as f:
+            json.dump(convert_to_serializable(test_results), f, indent=2)
+
+        print(f"\n💾 Conditional processing test results saved to: {results_file}")
+
+        # If only testing conditional processing, return here
+        if metrics_to_test == ["conditional_test"] or metrics_to_test == ["performance_test"]:
+            return
+
+    # Continue with standard metric testing if other metrics are specified
+    standard_metrics = [m for m in metrics_to_test if m not in ["conditional_test", "performance_test"]]
+    if standard_metrics:
+        print(f"\n{'='*60}")
+        print("📊 STANDARD METRICS TESTING")
+        print(f"{'='*60}")
+
+        # Load an example fly
+        ExampleFly = Fly(fly_path, as_individual=True)
+
+        # Initialize the BallPushingMetrics object
+        metrics = BallPushingMetrics(ExampleFly.tracking_data)
+
+        test_metrics(metrics, standard_metrics, ExampleFly.metadata.name)
 
 
 def process_experiment(experiment_path, metrics_to_test):
+    """Process an experiment with optional conditional processing tests."""
+
     # Load the experiment
     ExampleExperiment = Experiment(experiment_path)
 
@@ -113,25 +455,96 @@ def process_experiment(experiment_path, metrics_to_test):
     print(f"Testing metrics on experiment with {len(ExampleExperiment.flies)} flies")
     print(f"Experiment path: {experiment_path}")
 
-    # Test on ALL flies in the experiment
-    flies_to_test = ExampleExperiment.flies
-    all_results = {}
-    summary_stats = {}
+    # Handle conditional processing tests for experiments
+    if "conditional_test" in metrics_to_test or "performance_test" in metrics_to_test:
+        print(f"\n{'='*80}")
+        print("🧪 EXPERIMENT-WIDE CONDITIONAL PROCESSING TESTS")
+        print(f"{'='*80}")
 
-    for i, fly in enumerate(flies_to_test):
+        # Test conditional processing on a subset of flies (first 3 or all if less than 3)
+        test_flies = ExampleExperiment.flies[: min(3, len(ExampleExperiment.flies))]
+
+        experiment_performance_results = {}
+
+        for i, fly in enumerate(test_flies):
+            print(f"\n🐛 Testing conditional processing on fly {i+1}/{len(test_flies)}: {fly.metadata.name}")
+
+            # Test performance with different configurations
+            configs_to_test = [
+                ("All Metrics", None),
+                ("Basic Fast", get_predefined_metric_sets()["basic_fast"]),
+                ("Core Analysis", get_predefined_metric_sets()["core_analysis"]),
+            ]
+
+            fly_results = {}
+            for config_name, enabled_metrics in configs_to_test:
+                try:
+                    fly.config.enabled_metrics = enabled_metrics
+
+                    start_time = time.time()
+                    metrics = BallPushingMetrics(fly.tracking_data, compute_metrics_on_init=True)
+                    end_time = time.time()
+
+                    computation_time = end_time - start_time
+                    metrics_computed = sum(len(metrics_dict) for metrics_dict in metrics.metrics.values())
+
+                    fly_results[config_name] = {
+                        "time": computation_time,
+                        "metrics_computed": metrics_computed,
+                        "success": True,
+                    }
+
+                    print(f"     {config_name:15} | Time: {computation_time:.3f}s | Metrics: {metrics_computed}")
+
+                except Exception as e:
+                    fly_results[config_name] = {"success": False, "error": str(e)}
+                    print(f"     {config_name:15} | Error: {str(e)}")
+
+            experiment_performance_results[fly.metadata.name] = fly_results
+
+        # Save experiment performance results
+        output_dir = Path(__file__).parent / "outputs"
+        output_dir.mkdir(exist_ok=True)
+
+        exp_name = Path(experiment_path).name
+        safe_exp_name = "".join(c for c in exp_name if c.isalnum() or c in ("-", "_")).rstrip()
+
+        perf_file = output_dir / f"experiment_conditional_performance_{safe_exp_name}.json"
+        with open(perf_file, "w") as f:
+            json.dump(convert_to_serializable(experiment_performance_results), f, indent=2)
+
+        print(f"\n💾 Experiment conditional processing results saved to: {perf_file}")
+
+        # If only testing conditional processing, return here
+        if metrics_to_test == ["conditional_test"] or metrics_to_test == ["performance_test"]:
+            return
+
+    # Continue with standard processing
+    standard_metrics = [m for m in metrics_to_test if m not in ["conditional_test", "performance_test"]]
+    if standard_metrics:
         print(f"\n{'='*60}")
-        print(f"TESTING FLY {i+1}/{len(flies_to_test)}: {fly.metadata.name}")
+        print("📊 STANDARD EXPERIMENT METRICS TESTING")
         print(f"{'='*60}")
 
-        # Initialize the BallPushingMetrics object for this fly
-        metrics = BallPushingMetrics(fly.tracking_data)
-        fly_results = test_metrics(metrics, metrics_to_test, fly.metadata.name, return_results=True)
+        # Test on ALL flies in the experiment
+        flies_to_test = ExampleExperiment.flies
+        all_results = {}
+        summary_stats = {}
 
-        # Store results for summary
-        all_results[fly.metadata.name] = fly_results
+        for i, fly in enumerate(flies_to_test):
+            print(f"\n{'='*60}")
+            print(f"TESTING FLY {i+1}/{len(flies_to_test)}: {fly.metadata.name}")
+            print(f"{'='*60}")
 
-    # Generate experiment-wide summary
-    generate_experiment_summary(all_results, experiment_path, metrics_to_test)
+            # Initialize the BallPushingMetrics object for this fly
+            metrics = BallPushingMetrics(fly.tracking_data)
+            fly_results = test_metrics(metrics, standard_metrics, fly.metadata.name, return_results=True)
+
+            # Store results for summary
+            all_results[fly.metadata.name] = fly_results
+
+        # Generate experiment-wide summary
+        generate_experiment_summary(all_results, experiment_path, standard_metrics)
 
 
 def test_metrics(metrics, metrics_to_test, fly_name, return_results=False):
@@ -486,7 +899,9 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Test individual metrics for a fly or experiment.")
+    parser = argparse.ArgumentParser(
+        description="Test individual metrics and conditional processing for a fly or experiment."
+    )
     parser.add_argument(
         "--mode",
         choices=["fly", "experiment"],
@@ -502,13 +917,44 @@ if __name__ == "__main__":
         "--metrics",
         nargs="+",
         required=True,
-        help="List of metrics to test. Use predefined sets: 'new_metrics', 'orientation_metrics', 'basic_metrics', 'skeleton_metrics', or individual metric names (e.g., pauses max_event final_event).",
+        help="""List of metrics to test. Options include:
+
+        CONDITIONAL PROCESSING TESTS:
+        - 'conditional_test': Run comprehensive conditional processing tests
+        - 'performance_test': Run performance comparison tests
+
+        PREDEFINED METRIC SETS:
+        - 'basic_fast': Fast basic metrics only
+        - 'core_analysis': Core metrics without expensive computations
+        - 'expensive_only': Only expensive learning/binned metrics
+        - 'new_metrics': New skeleton and behavior metrics
+        - 'orientation_metrics': Orientation-based metrics
+        - 'basic_metrics': Basic behavioral metrics
+        - 'skeleton_metrics': Skeleton-based metrics
+        - 'comprehensive': All available metrics
+
+        INDIVIDUAL METRICS:
+        - Individual metric names (e.g., nb_events max_event learning_slope)
+        """,
     )
 
     args = parser.parse_args()
 
     # Convert the path to a Path object
     data_path = Path(args.path)
+
+    print(f"🧪 BallPushing Metrics Testing Suite")
+    print(f"{'='*60}")
+    print(f"Mode: {args.mode}")
+    print(f"Path: {data_path}")
+    print(f"Metrics/Tests: {args.metrics}")
+
+    # Show available predefined sets
+    if any(m in ["help", "--help", "-h"] for m in args.metrics):
+        print(f"\n📋 Available predefined metric sets:")
+        for name, metrics in get_predefined_metric_sets().items():
+            print(f"  {name:20} | {len(metrics):3d} metrics | {metrics[:3]}...")
+        exit(0)
 
     # Process based on mode
     if args.mode == "fly":
@@ -517,3 +963,10 @@ if __name__ == "__main__":
         process_experiment(data_path, args.metrics)
     else:
         raise ValueError(f"Invalid mode: {args.mode}. Must be 'fly' or 'experiment'.")
+
+    print(f"\n✅ Testing completed successfully!")
+    print(f"\n💡 Tips for conditional processing:")
+    print(f"   - Use 'conditional_test' to test the enabled_metrics functionality")
+    print(f"   - Use predefined sets like 'basic_fast' for quick analysis")
+    print(f"   - Use 'expensive_only' to test only computationally intensive metrics")
+    print(f"   - Set fly.config.enabled_metrics in your code to control which metrics are computed")
