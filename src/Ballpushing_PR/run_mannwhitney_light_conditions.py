@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to generate Mann-Whitney U test jitterboxplots for ball types experiments.
+Script to generate Mann-Whitney U test jitterboxplots for light condition experiments.
 
 This script generates comprehensive Mann-Whitney U test visualizations with:
 - Significance-based sorting (significantly increased/neutral/significantly decreased)
@@ -11,40 +11,35 @@ This script generates comprehensive Mann-Whitney U test visualizations with:
 - Proper spacing between boxplots
 
 Usage:
-    python run_mannwhitney_balltypes.py [--overwrite]
+    python run_mannwhitney_light_conditions.py [--overwrite]
 
 Arguments:
     --overwrite: If specified, overwrite existing plots. If not specified, skip metrics that already have plots.
 """
-
 import sys
-import os
+import time
 import argparse
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 from pathlib import Path
 
 # Add src directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))  # Go up to src directory
 sys.path.append(str(Path(__file__).parent))  # Also add current directory
 sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting directory
-
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from matplotlib.patches import Rectangle, Patch
 from scipy import stats
-from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu
-import scipy.stats as stats_module
+from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu, ttest_ind, levene
 from statsmodels.stats.multitest import multipletests
-import time
-import argparse
 
 
-def generate_balltype_mannwhitney_plots(
+def generate_light_condition_mannwhitney_plots(
     data,
     metrics,
-    y="BallType",
-    control_balltype="ctrl",
+    y="Light",
+    control_condition="off",
     hue=None,
     palette="Set2",
     figsize=(15, 10),
@@ -53,14 +48,14 @@ def generate_balltype_mannwhitney_plots(
     alpha=0.05,
 ):
     """
-    Generates jitterboxplots for each metric with Mann-Whitney U tests between each ball type and control.
+    Generates jitterboxplots for each metric with Mann-Whitney U tests between each light condition and control.
     Applies FDR correction across all comparisons for each metric.
 
     Parameters:
         data (pd.DataFrame): The dataset to plot.
         metrics (list): List of metric names to plot.
-        y (str): The name of the column for the y-axis (ball types). Default is "BallType".
-        control_balltype (str): Name of the control ball type. Default is "ctrl".
+        y (str): The name of the column for the y-axis (light conditions). Default is "Light".
+        control_condition (str): Name of the control light condition. Default is "off".
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
         figsize (tuple, optional): Size of each figure. Default is (15, 10).
@@ -75,6 +70,27 @@ def generate_balltype_mannwhitney_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create fixed color mapping for light conditions - this ensures consistent colors across all plots
+    all_light_conditions = sorted(data[y].unique())
+    light_condition_colors = {
+        "off": "#d62728",  # Red for control (off)
+        "on": "#2ca02c",  # Green for light on
+    }
+
+    # If there are other conditions, assign them colors from a palette
+    if len(all_light_conditions) > 2:
+        extra_colors = sns.color_palette("Set1", n_colors=len(all_light_conditions))
+        for i, condition in enumerate(all_light_conditions):
+            if condition not in light_condition_colors:
+                # Convert color tuple to hex string
+                color_tuple = extra_colors[i]
+                hex_color = "#{:02x}{:02x}{:02x}".format(
+                    int(color_tuple[0] * 255), int(color_tuple[1] * 255), int(color_tuple[2] * 255)
+                )
+                light_condition_colors[condition] = hex_color
+
+    print(f"Fixed color mapping for light conditions: {light_condition_colors}")
+
     all_stats = []
 
     for metric_idx, metric in enumerate(metrics):
@@ -83,59 +99,133 @@ def generate_balltype_mannwhitney_plots(
 
         plot_data = data.dropna(subset=[metric, y])
 
-        # Get all ball types except control
-        ball_types = [bt for bt in plot_data[y].unique() if bt != control_balltype]
+        # Get all light conditions except control
+        light_conditions = [lc for lc in plot_data[y].unique() if lc != control_condition]
 
         # Check if control exists
-        if control_balltype not in plot_data[y].unique():
-            print(f"Warning: Control ball type '{control_balltype}' not found for metric {metric}")
+        if control_condition not in plot_data[y].unique():
+            print(f"Warning: Control light condition '{control_condition}' not found for metric {metric}")
             continue
 
-        control_vals = plot_data[plot_data[y] == control_balltype][metric].dropna()
+        control_vals = plot_data[plot_data[y] == control_condition][metric].dropna()
         if len(control_vals) == 0:
             print(f"Warning: No control data for metric {metric}")
             continue
 
         control_median = control_vals.median()  # Calculate control median once
 
-        # Perform Mann-Whitney U tests for all ball types vs control
+        # Determine if we should use parametric tests (t-test) or non-parametric (Mann-Whitney)
+        # Criteria: 1) Both groups have >30 samples, 2) Data is continuous (not binary-like)
+        use_parametric = True
+        parametric_reason = []
+        central_tendency = "median"  # Default
+
+        # Check if metric is binary-like (only 0s and 1s)
+        all_unique_vals = plot_data[metric].dropna().unique()
+        is_binary_like = len(all_unique_vals) == 2 and set(all_unique_vals).issubset({0, 1, 0.0, 1.0})
+
+        if is_binary_like:
+            use_parametric = False
+            parametric_reason.append("binary-like data")
+        else:
+            central_tendency = "mean" if use_parametric else "median"
+
+        # Check sample sizes for all conditions
+        min_sample_size = len(control_vals)
+        for lc in light_conditions:
+            lc_vals = plot_data[plot_data[y] == lc][metric].dropna()
+            min_sample_size = min(min_sample_size, len(lc_vals))
+
+        if min_sample_size < 30:
+            use_parametric = False
+            parametric_reason.append(f"minimum sample size {min_sample_size} < 30")
+
+        # Determine if we need multiple comparison correction
+        n_comparisons = len(light_conditions)
+        need_correction = n_comparisons > 1
+
+        test_type = "t-test" if use_parametric else "Mann-Whitney U"
+        correction_note = "with FDR correction" if need_correction else "no correction needed"
+
+        if use_parametric:
+            print(f"  Using parametric tests ({test_type}) - sample sizes ≥30, continuous data")
+        else:
+            print(f"  Using non-parametric tests ({test_type}) - {', '.join(parametric_reason)}")
+
+        if need_correction:
+            print(f"  Multiple comparisons detected ({n_comparisons}), applying FDR correction")
+        else:
+            print(f"  Single comparison, no multiple testing correction needed")
+
+        # Perform statistical tests for all light conditions vs control
         pvals = []
         test_results = []
 
-        for ball_type in ball_types:
-            test_vals = plot_data[plot_data[y] == ball_type][metric].dropna()
+        for light_condition in light_conditions:
+            test_vals = plot_data[plot_data[y] == light_condition][metric].dropna()
 
             if len(test_vals) == 0:
                 continue
 
             try:
-                stat, pval = mannwhitneyu(test_vals, control_vals, alternative="two-sided")
+                if use_parametric:
+                    # Use independent t-test (assuming unequal variances - Welch's t-test)
+                    # First check for equal variances using Levene's test
+                    levene_stat, levene_p = levene(test_vals, control_vals)
+                    equal_var = levene_p > 0.05  # If p > 0.05, assume equal variances
+
+                    # Perform t-test
+                    stat, pval = ttest_ind(test_vals, control_vals, equal_var=equal_var)
+                    test_name = f"t-test ({'equal' if equal_var else 'unequal'} var)"
+                    central_tendency = "mean"
+                else:
+                    # Use Mann-Whitney U test
+                    stat, pval = mannwhitneyu(test_vals, control_vals, alternative="two-sided")
+                    test_name = "Mann-Whitney U"
+                    central_tendency = "median"
+
                 # Determine direction of effect
                 test_median = test_vals.median()
+                test_mean = test_vals.mean()
                 control_median = control_vals.median()
-                direction = "increased" if test_median > control_median else "decreased"
-                effect_size = test_median - control_median
+                control_mean = control_vals.mean()
+
+                # For parametric tests, use means; for non-parametric, use medians
+                if use_parametric:
+                    direction = "increased" if test_mean > control_mean else "decreased"
+                    effect_size = test_mean - control_mean
+                else:
+                    direction = "increased" if test_median > control_median else "decreased"
+                    effect_size = test_median - control_median
+
             except Exception as e:
-                print(f"Error in Mann-Whitney test for {ball_type} vs {control_balltype}: {e}")
+                print(f"Error in {test_type} for {light_condition} vs {control_condition}: {e}")
                 pval = 1.0
                 direction = "none"
                 effect_size = 0.0
                 stat = np.nan
+                test_name = f"{test_type} (failed)"
+                central_tendency = "median"  # Default fallback
 
             pvals.append(pval)
             test_results.append(
                 {
-                    "BallType": ball_type,
+                    "LightCondition": light_condition,
                     "Metric": metric,
-                    "Control": control_balltype,
+                    "Control": control_condition,
                     "pval_raw": pval,
                     "direction": direction,
                     "effect_size": effect_size,
                     "test_statistic": stat,
                     "test_median": test_vals.median() if len(test_vals) > 0 else np.nan,
+                    "test_mean": test_vals.mean() if len(test_vals) > 0 else np.nan,
                     "control_median": control_median,
+                    "control_mean": control_vals.mean(),
                     "test_n": len(test_vals),
                     "control_n": len(control_vals),
+                    "test_type": test_name,
+                    "parametric": use_parametric,
+                    "central_tendency": central_tendency,
                 }
             )
 
@@ -143,15 +233,23 @@ def generate_balltype_mannwhitney_plots(
             print(f"No valid comparisons for metric {metric}")
             continue
 
-        # Apply FDR correction
-        rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=alpha, method=fdr_method)
+        # Apply FDR correction only if multiple comparisons
+        if need_correction:
+            rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=alpha, method=fdr_method)
+            correction_applied = True
+        else:
+            # No correction needed for single comparison
+            pvals_corrected = pvals  # Use raw p-values
+            rejected = [p < alpha for p in pvals]  # Simple alpha threshold
+            correction_applied = False
 
-        # Update test results with FDR correction
+        # Update test results with corrected p-values (or raw if no correction)
         for i, result in enumerate(test_results):
-            result["pval_fdr"] = pvals_corrected[i]
-            result["significant_fdr"] = rejected[i]
+            result["pval_corrected"] = pvals_corrected[i]
+            result["significant"] = rejected[i]
+            result["correction_applied"] = correction_applied
 
-            # Determine significance level based on FDR-corrected p-values
+            # Determine significance level based on corrected p-values (or raw if no correction)
             if pvals_corrected[i] < 0.001:
                 result["sig_level"] = "***"
             elif pvals_corrected[i] < 0.01:
@@ -161,26 +259,32 @@ def generate_balltype_mannwhitney_plots(
             else:
                 result["sig_level"] = "ns"
 
-            # Override direction if not significant after FDR
+            # Override direction if not significant
             if not rejected[i]:
                 result["direction"] = "none"
 
         # Add control to results for sorting
         control_result = {
-            "BallType": control_balltype,
+            "LightCondition": control_condition,
             "Metric": metric,
-            "Control": control_balltype,
+            "Control": control_condition,
             "pval_raw": 1.0,
-            "pval_fdr": 1.0,
-            "significant_fdr": False,
+            "pval_corrected": 1.0,
+            "significant": False,
             "sig_level": "control",
             "direction": "control",
             "effect_size": 0.0,
             "test_statistic": np.nan,
             "test_median": control_median,
+            "test_mean": control_vals.mean(),
             "control_median": control_median,
+            "control_mean": control_vals.mean(),
             "test_n": len(control_vals),
             "control_n": len(control_vals),
+            "test_type": "control",
+            "parametric": use_parametric,
+            "central_tendency": central_tendency if "central_tendency" in locals() else "median",
+            "correction_applied": correction_applied,
         }
 
         all_results = test_results + [control_result]
@@ -190,9 +294,9 @@ def generate_balltype_mannwhitney_plots(
             # Primary sort: significance and direction
             if result["sig_level"] == "control":
                 priority = 2  # Controls in middle
-            elif result["significant_fdr"] and result["direction"] == "increased":
+            elif result["significant"] and result["direction"] == "increased":
                 priority = 1  # Significant increases at top
-            elif result["significant_fdr"] and result["direction"] == "decreased":
+            elif result["significant"] and result["direction"] == "decreased":
                 priority = 3  # Significant decreases at bottom
             else:
                 priority = 2  # Non-significant in middle
@@ -205,12 +309,12 @@ def generate_balltype_mannwhitney_plots(
 
             return (priority, median_sort)
 
-        # Sort ball types using the custom sorting key
+        # Sort light conditions using the custom sorting key
         sorted_results = sorted(all_results, key=sort_key)
-        sorted_ball_types = [r["BallType"] for r in sorted_results]
+        sorted_light_conditions = [r["LightCondition"] for r in sorted_results]
 
         # Update plot data with sorted categories
-        plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_ball_types, ordered=True)
+        plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_light_conditions, ordered=True)
         plot_data = plot_data.sort_values(by=[y])
 
         # Store stats for output
@@ -218,8 +322,8 @@ def generate_balltype_mannwhitney_plots(
             all_stats.append(result)
 
         # Calculate appropriate figure height based on number of categories
-        n_categories = len(sorted_ball_types)
-        # For ball types (fewer categories), use different sizing than nicknames
+        n_categories = len(sorted_light_conditions)
+        # For light conditions (fewer categories), use different sizing than nicknames
         # Minimum 1.0 inches per category for better readability with fewer items
         fig_height = max(8, n_categories * 1.0 + 4)  # +4 for margins and title
         # Increase width to accommodate legend outside
@@ -228,18 +332,13 @@ def generate_balltype_mannwhitney_plots(
         # Create the plot with adjusted size
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        # Set up colors for ball types
-        if isinstance(palette, dict):
-            colors = [palette.get(bt, "gray") for bt in sorted_ball_types]
-        elif isinstance(palette, str):
-            colors = sns.color_palette(palette, n_colors=len(sorted_ball_types))
-        else:
-            colors = palette  # Assume it's already a list of colors
+        # Set up colors for light conditions using our fixed mapping
+        colors = [light_condition_colors[lc] for lc in sorted_light_conditions]
 
         # Add colored backgrounds only for significant results
-        y_positions = range(len(sorted_ball_types))
-        for i, ball_type in enumerate(sorted_ball_types):
-            result = next((r for r in all_results if r["BallType"] == ball_type), None)
+        y_positions = range(len(sorted_light_conditions))
+        for i, light_condition in enumerate(sorted_light_conditions):
+            result = next((r for r in all_results if r["LightCondition"] == light_condition), None)
             if not result:
                 continue
 
@@ -247,10 +346,10 @@ def generate_balltype_mannwhitney_plots(
             if result["sig_level"] == "control":
                 bg_color = "lightblue"
                 alpha_bg = 0.1
-            elif result["significant_fdr"] and result["direction"] == "increased":
+            elif result["significant"] and result["direction"] == "increased":
                 bg_color = "lightgreen"
                 alpha_bg = 0.15
-            elif result["significant_fdr"] and result["direction"] == "decreased":
+            elif result["significant"] and result["direction"] == "decreased":
                 bg_color = "lightcoral"
                 alpha_bg = 0.15
             else:
@@ -261,17 +360,17 @@ def generate_balltype_mannwhitney_plots(
             ax.axhspan(i - 0.4, i + 0.4, color=bg_color, alpha=alpha_bg, zorder=0)
 
         # Draw boxplots with unfilled styling (like TNT version)
-        for ball_type in sorted_ball_types:
-            ball_type_data = plot_data[plot_data[y] == ball_type]
-            if ball_type_data.empty:
+        for light_condition in sorted_light_conditions:
+            condition_data = plot_data[plot_data[y] == light_condition]
+            if condition_data.empty:
                 continue
 
-            is_control = ball_type == control_balltype
+            is_control = light_condition == control_condition
 
             if is_control:
                 # Control group styling - red dashed boxes (like TNT version)
                 sns.boxplot(
-                    data=ball_type_data,
+                    data=condition_data,
                     x=metric,
                     y=y,
                     showfliers=False,
@@ -285,7 +384,7 @@ def generate_balltype_mannwhitney_plots(
             else:
                 # Test group styling - black solid boxes (like TNT version)
                 sns.boxplot(
-                    data=ball_type_data,
+                    data=condition_data,
                     x=metric,
                     y=y,
                     showfliers=False,
@@ -297,7 +396,7 @@ def generate_balltype_mannwhitney_plots(
                     capprops=dict(color="black", linewidth=1),
                 )
 
-        # Overlay stripplot for jitter with ball type colors (like TNT version)
+        # Overlay stripplot for jitter with light condition colors (like TNT version)
         sns.stripplot(
             data=plot_data,
             x=metric,
@@ -314,8 +413,8 @@ def generate_balltype_mannwhitney_plots(
         yticklabels = [label.get_text() for label in ax.get_yticklabels()]
         x_range = ax.get_xlim()[1] - ax.get_xlim()[0]
 
-        for i, ball_type in enumerate(sorted_ball_types):
-            result = next((r for r in all_results if r["BallType"] == ball_type), None)
+        for i, light_condition in enumerate(sorted_light_conditions):
+            result = next((r for r in all_results if r["LightCondition"] == light_condition), None)
             if not result:
                 continue
 
@@ -342,8 +441,8 @@ def generate_balltype_mannwhitney_plots(
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=10)
         plt.xlabel(metric, fontsize=14)
-        plt.ylabel("Ball Type", fontsize=14)
-        plt.title(f"Mann-Whitney U Test: {metric} by Ball Type (FDR corrected)", fontsize=16)
+        plt.ylabel("Light Condition", fontsize=14)
+        plt.title(f"Mann-Whitney U Test: {metric} by Light Condition (FDR corrected)", fontsize=16)
         ax.grid(axis="x", alpha=0.3)
 
         # Create custom legend (like TNT version)
@@ -369,7 +468,7 @@ def generate_balltype_mannwhitney_plots(
         plt.tight_layout()
 
         # Save plot
-        output_file = output_dir / f"{metric}_balltype_mannwhitney_fdr.pdf"
+        output_file = output_dir / f"{metric}_light_condition_mannwhitney_fdr.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close()
 
@@ -377,7 +476,7 @@ def generate_balltype_mannwhitney_plots(
 
         # Print FDR correction summary
         n_significant_raw = sum(1 for r in test_results if r["pval_raw"] < 0.05)
-        n_significant_fdr = sum(1 for r in test_results if r["significant_fdr"])
+        n_significant_fdr = sum(1 for r in test_results if r["significant"])
         print(f"  Raw significant: {n_significant_raw}/{len(test_results)}")
         print(f"  FDR significant: {n_significant_fdr}/{len(test_results)} (α={alpha})")
 
@@ -391,19 +490,19 @@ def generate_balltype_mannwhitney_plots(
 
     if not stats_df.empty:
         # Save statistics
-        stats_file = output_dir / "balltype_mannwhitney_fdr_statistics.csv"
+        stats_file = output_dir / "light_condition_mannwhitney_fdr_statistics.csv"
         stats_df.to_csv(stats_file, index=False)
         print(f"\nStatistics saved to: {stats_file}")
 
         # Generate text report
-        report_file = output_dir / "balltype_mannwhitney_fdr_report.md"
-        generate_text_report(stats_df, data, control_balltype, report_file)
+        report_file = output_dir / "light_condition_mannwhitney_fdr_report.md"
+        generate_text_report(stats_df, data, control_condition, report_file)
         print(f"Text report saved to: {report_file}")
 
         # Print overall summary
         total_tests = len(stats_df)
         total_significant_raw = (stats_df["pval_raw"] < 0.05).sum()
-        total_significant_fdr = stats_df["significant_fdr"].sum()
+        total_significant_fdr = stats_df["significant"].sum()
 
         print(f"\nOverall Summary:")
         print(f"Total comparisons: {total_tests}")
@@ -413,7 +512,7 @@ def generate_balltype_mannwhitney_plots(
     return stats_df
 
 
-def generate_text_report(stats_df, data, control_balltype, report_file):
+def generate_text_report(stats_df, data, control_condition, report_file):
     """
     Generate a human-readable text report of the statistical results.
 
@@ -423,16 +522,16 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
         DataFrame with statistical results
     data : pd.DataFrame
         Original data used for analysis
-    control_balltype : str
-        Name of the control ball type
+    control_condition : str
+        Name of the control light condition
     report_file : Path
         Path where to save the report
     """
     report_lines = []
-    report_lines.append("# Ball Types Mann-Whitney U Test Report")
+    report_lines.append("# Light Condition Mann-Whitney U Test Report")
     report_lines.append("## FDR-Corrected Statistical Analysis Results")
     report_lines.append("")
-    report_lines.append(f"**Control group:** {control_balltype}")
+    report_lines.append(f"**Control group:** {control_condition}")
     report_lines.append("")
 
     # Group by metric
@@ -446,7 +545,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
 
         # Get control median for reference
         control_median = 0  # Initialize default value
-        control_data = data[data["BallType"] == control_balltype][metric].dropna()
+        control_data = data[data["Light"] == control_condition][metric].dropna()
         if len(control_data) > 0:
             control_median = control_data.median()
             control_mean = control_data.mean()
@@ -454,21 +553,21 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             control_n = len(control_data)
 
             report_lines.append(
-                f"**Control ({control_balltype}):** median = {control_median:.3f}, mean = {control_mean:.3f} ± {control_std:.3f} (n={control_n})"
+                f"**Control ({control_condition}):** median = {control_median:.3f}, mean = {control_mean:.3f} ± {control_std:.3f} (n={control_n})"
             )
             report_lines.append("")
         else:
-            report_lines.append(f"**Control ({control_balltype}):** No data available")
+            report_lines.append(f"**Control ({control_condition}):** No data available")
             report_lines.append("")
 
-        # Analyze each ball type vs control
+        # Analyze each light condition vs control
         significant_increased = []
         significant_decreased = []
         non_significant = []
 
         for _, row in metric_stats.iterrows():
-            ball_type = row["BallType"]
-            p_fdr = row["pval_fdr"]
+            light_condition = row["LightCondition"]
+            p_fdr = row["pval_corrected"]
             sig_level = row["sig_level"]
             test_median = row["test_median"]
             effect_size = row["effect_size"]
@@ -480,13 +579,13 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             else:
                 percent_change = 0
 
-            description = f'"{ball_type}" (median = {test_median:.3f}, n={test_n})'
+            description = f'"{light_condition}" (median = {test_median:.3f}, n={test_n})'
 
-            if row["significant_fdr"]:
+            if row["significant"]:
                 if row["direction"] == "increased":
                     significant_increased.append(
                         {
-                            "ball_type": ball_type,
+                            "light_condition": light_condition,
                             "description": description,
                             "effect_size": effect_size,
                             "percent_change": percent_change,
@@ -497,7 +596,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
                 elif row["direction"] == "decreased":
                     significant_decreased.append(
                         {
-                            "ball_type": ball_type,
+                            "light_condition": light_condition,
                             "description": description,
                             "effect_size": effect_size,
                             "percent_change": percent_change,
@@ -508,7 +607,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             else:
                 non_significant.append(
                     {
-                        "ball_type": ball_type,
+                        "light_condition": light_condition,
                         "description": description,
                         "effect_size": effect_size,
                         "percent_change": percent_change,
@@ -555,9 +654,9 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
     report_lines.append("")
 
     total_comparisons = len(stats_df)
-    total_significant = stats_df["significant_fdr"].sum()
-    total_increased = len(stats_df[(stats_df["significant_fdr"]) & (stats_df["direction"] == "increased")])
-    total_decreased = len(stats_df[(stats_df["significant_fdr"]) & (stats_df["direction"] == "decreased")])
+    total_significant = stats_df["significant"].sum()
+    total_increased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "increased")])
+    total_decreased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "decreased")])
 
     report_lines.append(f"- **Total comparisons:** {total_comparisons}")
     report_lines.append(
@@ -571,7 +670,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
     report_lines.append("")
 
     # Add metrics summary
-    metrics_with_significant = stats_df[stats_df["significant_fdr"]]["Metric"].nunique()
+    metrics_with_significant = stats_df[stats_df["significant"]]["Metric"].nunique()
     total_metrics = stats_df["Metric"].nunique()
 
     report_lines.append(
@@ -586,8 +685,8 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
     print(f"Generated text report with {len(metrics)} metrics and {total_comparisons} comparisons")
 
 
-def load_and_clean_dataset(test_mode=False, test_sample_size=200):
-    """Load and clean the ball types dataset
+def load_and_clean_exploration_dataset(test_mode=False, test_sample_size=200):
+    """Load and clean the exploration dataset with light conditions
 
     Parameters:
     -----------
@@ -596,19 +695,19 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
     test_sample_size : int
         Number of samples to use in test mode
     """
-    # Load the ball types dataset
-    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_Balltypes/Datasets/250815_17_summary_ball_types_Data/summary/pooled_summary.feather"
+    # Load the exploration dataset
+    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/summary/pooled_summary.feather"
 
-    print(f"Loading ball types dataset from: {dataset_path}")
+    print(f"Loading exploration dataset from: {dataset_path}")
     try:
         dataset = pd.read_feather(dataset_path)
-        print(f"✅ Ball types dataset loaded successfully! Shape: {dataset.shape}")
+        print(f"✅ Exploration dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")
-        raise FileNotFoundError(f"Ball types dataset not found at {dataset_path}")
+        raise FileNotFoundError(f"Exploration dataset not found at {dataset_path}")
 
     # Drop TNT-specific metadata columns that cause pandas warnings
-    # These columns are not needed for ball types analysis
+    # These columns are not needed for light condition analysis
     tnt_metadata_columns = [
         "Nickname",
         "Brain region",
@@ -619,65 +718,51 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         "Experiment",
         "Date",
         "Arena",
+        "Period",
+        # "FeedingState",
+        "Orientation",
+        "Crossing",
+        "BallType",
+        "Used_to",
+        "Magnet",
+        "Peak",
     ]
     columns_to_drop = [col for col in tnt_metadata_columns if col in dataset.columns]
     if columns_to_drop:
         dataset = dataset.drop(columns=columns_to_drop)
-        print(f"Dropped TNT metadata columns to avoid warnings: {columns_to_drop}")
+        print(f"Dropped metadata columns to avoid warnings: {columns_to_drop}")
         print(f"Dataset shape after dropping metadata: {dataset.shape}")
+
+    # Clean up Light column - remove empty strings and convert to proper values
+    print(f"Original Light column values: {sorted(dataset['Light'].unique())}")
+
+    # Remove rows with empty Light values
+    dataset = dataset[dataset["Light"] != ""].copy()
+    print(f"After removing empty Light values, shape: {dataset.shape}")
+    print(f"Light column values after cleanup: {sorted(dataset['Light'].unique())}")
 
     # Convert boolean columns to int
     for col in dataset.columns:
         if dataset[col].dtype == "bool":
             dataset[col] = dataset[col].astype(int)
 
-    # Clean NA values following the same logic as All_metrics.py
-    # Use safe column access to handle missing columns - FIXED for performance
-    def safe_fillna(column_name, fill_value):
-        if column_name in dataset.columns:
-            dataset[column_name] = dataset[column_name].fillna(fill_value)
-            print(f"Filled NaN values in {column_name} with {fill_value}")
-        else:
-            print(f"Column {column_name} not found in dataset, skipping...")
-
-    # safe_fillna("max_event", -1)
-    # safe_fillna("first_significant_event", -1)
-    # safe_fillna("first_major_event", -1)
-    # safe_fillna("final_event", -1)
-
-    # Fill time columns with 3600
-    # safe_fillna("max_event_time", 3600)
-    # safe_fillna("first_significant_event_time", 3600)
-    # safe_fillna("first_major_event_time", 3600)
-    # safe_fillna("final_event_time", 3600)
-
     # Drop problematic columns if they exist
-    columns_to_drop = ["insight_effect", "insight_effect_log", "exit_time"]
+    columns_to_drop = ["insight_effect", "insight_effect_log", "exit_time", "index"]
     columns_to_drop = [col for col in columns_to_drop if col in dataset.columns]
     if columns_to_drop:
         dataset.drop(columns=columns_to_drop, inplace=True)
         print(f"Dropped columns: {columns_to_drop}")
 
-    # Fill remaining NA values with appropriate defaults (only if columns exist)
-    # safe_fillna("pulling_ratio", 0)
-    # safe_fillna("avg_displacement_after_success", 0)
-    # safe_fillna("avg_displacement_after_failure", 0)
-    # safe_fillna("influence_ratio", 0)
-
     # Handle new metrics with appropriate defaults - FIXED for performance
     new_metrics_defaults = {
-        "has_finished": np.nan,  # Binary metric, 0 if no finish detected
-        "persistence_at_end": np.nan,  # Time fraction, 0 if no persistence
-        "fly_distance_moved": np.nan,  # Distance, 0 if no movement detected
-        "time_chamber_beginning": np.nan,  # Time, 0 if no time in beginning chamber
-        "median_freeze_duration": np.nan,  # Duration, 0 if no freezes detected
-        "fraction_not_facing_ball": np.nan,  # Fraction, 0 if always facing ball or no data
-        "flailing": np.nan,  # Motion energy, 0 if no leg movement detected
-        "head_pushing_ratio": np.nan,  # Ratio, 0.5 if no contact data (neutral)
-        "compute_median_head_ball_distance": np.nan,  # Distance, 0 if no contact data
-        "compute_mean_head_ball_distance": np.nan,  # Distance, 0 if no contact data
-        "median_head_ball_distance": np.nan,  # Distance, 0 if no contact data
-        "mean_head_ball_distance": np.nan,  # Distance, 0 if no contact data
+        "has_finished": 0,  # Binary metric, 0 if no finish detected
+        "persistence_at_end": 0.0,  # Time fraction, 0 if no persistence
+        "fly_distance_moved": 0.0,  # Distance, 0 if no movement detected
+        "time_chamber_beginning": 0.0,  # Time, 0 if no time in beginning chamber
+        "median_freeze_duration": 0.0,  # Duration, 0 if no freezes detected
+        "fraction_not_facing_ball": 0.0,  # Fraction, 0 if always facing ball or no data
+        "flailing": 0.0,  # Motion energy, 0 if no leg movement detected
+        "head_pushing_ratio": 0.0,  # Ratio, 0.5 if no contact data (neutral)
     }
 
     # Fill all new metrics at once for better performance
@@ -705,7 +790,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         print(f"🧪 TEST MODE: Sampling {test_sample_size} random rows from {len(dataset)} total rows")
         dataset = dataset.sample(n=test_sample_size, random_state=42).reset_index(drop=True)
         print(f"🧪 TEST MODE: Dataset reduced to {len(dataset)} rows")
-        print(f"🧪 TEST MODE: Ball types in sample: {sorted(dataset['BallType'].unique())}")
+        print(f"🧪 TEST MODE: Light conditions in sample: {sorted(dataset['Light'].unique())}")
 
     return dataset
 
@@ -760,9 +845,9 @@ def should_skip_metric(metric, output_dir, overwrite=True):
     return False
 
 
-def get_nan_annotations(data, metrics, y_col="BallType"):
+def get_nan_annotations(data, metrics, y_col="Light"):
     """
-    Generate annotations for ball types that have NaN values in specific metrics.
+    Generate annotations for light conditions that have NaN values in specific metrics.
 
     Parameters:
     -----------
@@ -771,12 +856,12 @@ def get_nan_annotations(data, metrics, y_col="BallType"):
     metrics : list
         List of metric column names to check
     y_col : str
-        Column name for grouping (e.g., ball type)
+        Column name for grouping (e.g., light condition)
 
     Returns:
     --------
     dict
-        Dictionary mapping metric names to dictionaries of balltype: nan_info
+        Dictionary mapping metric names to dictionaries of condition: nan_info
     """
     nan_annotations = {}
 
@@ -786,14 +871,14 @@ def get_nan_annotations(data, metrics, y_col="BallType"):
 
         metric_annotations = {}
 
-        for balltype in data[y_col].unique():
-            balltype_data = data[data[y_col] == balltype][metric]
-            total_count = len(balltype_data)
-            nan_count = balltype_data.isnull().sum()
+        for condition in data[y_col].unique():
+            condition_data = data[data[y_col] == condition][metric]
+            total_count = len(condition_data)
+            nan_count = condition_data.isnull().sum()
 
             if nan_count > 0:
                 nan_percentage = (nan_count / total_count) * 100
-                metric_annotations[balltype] = {
+                metric_annotations[condition] = {
                     "nan_count": nan_count,
                     "total_count": total_count,
                     "nan_percentage": nan_percentage,
@@ -804,275 +889,6 @@ def get_nan_annotations(data, metrics, y_col="BallType"):
             nan_annotations[metric] = metric_annotations
 
     return nan_annotations
-
-
-def analyze_binary_metrics(data, binary_metrics, y="BallType", output_dir=None, overwrite=True):
-    """
-    Analyze binary metrics using appropriate statistical tests and visualizations.
-
-    Parameters:
-    -----------
-    data : pd.DataFrame
-        Dataset containing the binary metrics
-    binary_metrics : list
-        List of binary metric column names
-    y : str
-        Column name for grouping (e.g., ball type)
-    output_dir : str or Path
-        Directory to save plots
-    overwrite : bool
-        If True, overwrite existing plots. If False, skip existing plots.
-
-    Returns:
-    --------
-    pd.DataFrame
-        Statistics results for binary metrics
-    """
-    if not binary_metrics:
-        print("No binary metrics to analyze")
-        return pd.DataFrame()
-
-    print(f"\n{'='*50}")
-    print(f"BINARY METRICS ANALYSIS")
-    print(f"{'='*50}")
-
-    results = []
-
-    if output_dir:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Determine control group (ctrl)
-    control_balltype = "ctrl"
-    if control_balltype not in data[y].unique():
-        print(f"Warning: Control ball type '{control_balltype}' not found in data")
-        # Use the most common ball type as control
-        control_balltype = data[y].value_counts().index[0]
-
-    print(f"Using control group: {control_balltype}")
-
-    for metric in binary_metrics:
-        print(f"\nAnalyzing binary metric: {metric}")
-
-        # Check if we should skip this metric
-        if output_dir and should_skip_metric(metric, output_dir, overwrite):
-            continue
-
-        # Create contingency table
-        contingency = pd.crosstab(data[y], data[metric], margins=True)
-        print(f"Contingency table for {metric}:")
-        print(contingency)
-
-        # Calculate proportions for each ball type
-        proportions = data.groupby(y)[metric].agg(["count", "sum", "mean"]).round(4)
-        proportions["proportion"] = proportions["mean"]
-        proportions["n_success"] = proportions["sum"]
-        proportions["n_total"] = proportions["count"]
-        print(f"\nProportions for {metric}:")
-        print(proportions[["n_success", "n_total", "proportion"]])
-
-        # Statistical tests for each ball type vs control
-        pvals = []
-        temp_results = []
-
-        for balltype in data[y].unique():
-            if balltype == control_balltype:
-                continue
-
-            # Get data for this comparison
-            test_data = data[data[y] == balltype][metric].dropna()
-            control_data_subset = data[data[y] == control_balltype][metric].dropna()
-
-            if len(test_data) == 0 or len(control_data_subset) == 0:
-                continue
-
-            # Create 2x2 contingency table for Fisher's exact test
-            test_success = test_data.sum()
-            test_total = len(test_data)
-            control_success = control_data_subset.sum()
-            control_total = len(control_data_subset)
-
-            # Fisher's exact test
-            try:
-                # Create contingency table for Fisher's exact test
-                table = [[test_success, test_total - test_success], [control_success, control_total - control_success]]
-
-                # Run Fisher's exact test
-                fisher_result = fisher_exact(table)
-
-                # Extract results - scipy returns (odds_ratio, p_value)
-                odds_ratio = fisher_result[0]  # type: ignore
-                p_value = fisher_result[1]  # type: ignore
-
-                # Effect size (difference in proportions)
-                test_prop = test_success / test_total if test_total > 0 else 0
-                control_prop = control_success / control_total if control_total > 0 else 0
-                effect_size = test_prop - control_prop
-
-                pvals.append(p_value)
-                temp_results.append(
-                    {
-                        "metric": metric,
-                        "balltype": balltype,
-                        "control": control_balltype,
-                        "test_success": test_success,
-                        "test_total": test_total,
-                        "test_proportion": test_prop,
-                        "control_success": control_success,
-                        "control_total": control_total,
-                        "control_proportion": control_prop,
-                        "effect_size": effect_size,
-                        "odds_ratio": odds_ratio,
-                        "p_value_raw": p_value,
-                        "test_type": "Fisher exact",
-                    }
-                )
-
-                print(f"  {balltype} vs {control_balltype}: OR={odds_ratio:.3f}, p={p_value:.4f}")
-
-            except Exception as e:
-                print(f"  Error testing {balltype} vs {control_balltype}: {e}")
-
-        if pvals:
-            # Apply FDR correction
-            rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=0.05, method="fdr_bh")
-
-            # Update results with FDR correction
-            for i, result in enumerate(temp_results):
-                result["p_value"] = pvals_corrected[i]  # FDR-corrected p-value
-                result["significant"] = rejected[i]
-
-                # Determine significance level based on FDR-corrected p-values
-                if pvals_corrected[i] < 0.001:
-                    sig_level = "***"
-                elif pvals_corrected[i] < 0.01:
-                    sig_level = "**"
-                elif pvals_corrected[i] < 0.05:
-                    sig_level = "*"
-                else:
-                    sig_level = "ns"
-
-                result["sig_level"] = sig_level
-                results.append(result)
-
-            # Print FDR correction summary
-            n_significant_raw = sum(1 for p in pvals if p < 0.05)
-            n_significant_fdr = sum(rejected)
-            print(f"  Raw significant: {n_significant_raw}/{len(pvals)}")
-            print(f"  FDR significant: {n_significant_fdr}/{len(pvals)}")
-        else:
-            print(f"  No valid comparisons for {metric}")
-
-        # Create visualization
-        if output_dir:
-            create_binary_metric_plot(data, metric, y, output_dir, control_balltype)
-
-    results_df = pd.DataFrame(results)
-
-    if output_dir and not results_df.empty:
-        stats_file = output_dir / "binary_metrics_statistics.csv"
-        results_df.to_csv(stats_file, index=False)
-        print(f"\nBinary metrics statistics saved to: {stats_file}")
-
-    return results_df
-
-
-def create_binary_metric_plot(data, metric, y, output_dir, control_balltype=None):
-    """Create a visualization for binary metrics showing proportions"""
-
-    # Calculate proportions
-    prop_data = data.groupby(y)[metric].agg(["count", "sum", "mean"]).reset_index()
-    prop_data["proportion"] = prop_data["mean"]
-    prop_data["n_success"] = prop_data["sum"]
-    prop_data["n_total"] = prop_data["count"]
-
-    # Sort by proportion (descending) - higher proportions first
-    prop_data = prop_data.sort_values("proportion", ascending=False).reset_index(drop=True)
-
-    # Use a categorical color palette for ball types
-    n_ball_types = len(prop_data)
-    palette = sns.color_palette("Set1", n_colors=n_ball_types)
-    colors = palette[:n_ball_types]
-
-    # Calculate confidence intervals (Wilson score interval)
-    def wilson_ci(successes, total, confidence=0.95):
-        if total == 0:
-            return 0, 0
-        z = stats.norm.ppf((1 + confidence) / 2)
-        p = successes / total
-        denominator = 1 + z**2 / total
-        centre_adjusted_probability = (p + z**2 / (2 * total)) / denominator
-        adjusted_standard_deviation = np.sqrt((p * (1 - p) + z**2 / (4 * total)) / total) / denominator
-        lower_bound = centre_adjusted_probability - z * adjusted_standard_deviation
-        upper_bound = centre_adjusted_probability + z * adjusted_standard_deviation
-        return max(0, lower_bound), min(1, upper_bound)
-
-    ci_data = []
-    for _, row in prop_data.iterrows():
-        lower, upper = wilson_ci(row["n_success"], row["n_total"])
-        ci_data.append({"lower": lower, "upper": upper})
-
-    ci_df = pd.DataFrame(ci_data)
-    prop_data = pd.concat([prop_data, ci_df], axis=1)
-
-    # Create the plot - make it taller like the jitterboxplots
-    n_ball_types = len(prop_data)
-    fig_height = max(8, 0.6 * n_ball_types + 4)  # Dynamic height based on number of ball types
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, fig_height))
-
-    # Plot 1: Proportion with confidence intervals (horizontal bars)
-    y_positions = range(len(prop_data))
-    bars = ax1.barh(y_positions, prop_data["proportion"], color=colors, alpha=0.7)
-
-    # Add error bars (ensure no negative values)
-    yerr_lower = np.maximum(0, prop_data["proportion"] - prop_data["lower"])
-    yerr_upper = np.maximum(0, prop_data["upper"] - prop_data["proportion"])
-    xerr = [yerr_lower, yerr_upper]
-    ax1.errorbar(prop_data["proportion"], y_positions, xerr=xerr, fmt="none", color="black", capsize=5)
-
-    # Add sample sizes on bars
-    for i, (bar, row) in enumerate(zip(bars, prop_data.itertuples())):
-        width = bar.get_width()
-        ax1.text(
-            width + 0.01, bar.get_y() + bar.get_height() / 2.0, f"n={row.n_total}", ha="left", va="center", fontsize=8
-        )
-
-    ax1.set_ylabel("Ball Type")
-    ax1.set_xlabel(f"Proportion of {metric}")
-    ax1.set_title(f"{metric} - Proportions with 95% CI")
-    ax1.set_yticks(y_positions)
-    ax1.set_yticklabels(prop_data[y])
-    ax1.set_xlim(0, 1.1)
-    ax1.grid(True, alpha=0.3)
-
-    # Plot 2: Stacked bar chart showing counts (horizontal bars)
-    ax2.barh(y_positions, prop_data["n_success"], label=f"{metric}=1", color="lightgreen", alpha=0.8)
-    ax2.barh(
-        y_positions,
-        prop_data["n_total"] - prop_data["n_success"],
-        left=prop_data["n_success"],
-        label=f"{metric}=0",
-        color="lightcoral",
-        alpha=0.8,
-    )
-
-    ax2.set_ylabel("Ball Type")
-    ax2.set_xlabel("Count")
-    ax2.set_title(f"{metric} - Raw Counts")
-    ax2.set_yticks(y_positions)
-    ax2.set_yticklabels(prop_data[y])
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-
-    # Save the plot
-    output_file = output_dir / f"{metric}_binary_analysis.pdf"
-    plt.savefig(output_file, dpi=300, bbox_inches="tight")
-    plt.close()
-
-    print(f"  Binary plot saved: {output_file}")
-    print(f"  Sorted by proportion (descending): {prop_data['proportion'].tolist()}")
 
 
 def main(overwrite=True, test_mode=False):
@@ -1092,14 +908,16 @@ def main(overwrite=True, test_mode=False):
     - Batch fillna operations for better performance
     - FDR correction for proper multiple testing correction
     """
-    print(f"Starting Mann-Whitney U test analysis for ball types experiments...")
+    print(f"Starting Mann-Whitney U test analysis for light condition experiments...")
     if not overwrite:
         print("📄 Overwrite disabled: Will skip metrics with existing plots")
     if test_mode:
         print("🧪 TEST MODE: Only processing first 3 metrics for debugging")
 
     # Define output directories
-    base_output_dir = Path("/mnt/upramdya_data/MD/Ballpushing_Balltypes/Plots/Summary_metrics/BallTypes_Mannwhitney")
+    base_output_dir = Path(
+        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/Summary_metrics/250815_Light_Conditions_Mannwhitney"
+    )
 
     # Ensure the base output directory exists
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1107,7 +925,7 @@ def main(overwrite=True, test_mode=False):
 
     # Clean up any potential old outputs to avoid confusion
     print("Ensuring clean output directory structure...")
-    condition_subdir = "mannwhitney_balltypes"
+    condition_subdir = "mannwhitney_light_conditions"
     condition_dir = base_output_dir / condition_subdir
     condition_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Created/verified: {condition_dir}")
@@ -1116,24 +934,26 @@ def main(overwrite=True, test_mode=False):
     print(f"All outputs will be saved under: {base_output_dir}")
 
     # Load the dataset
-    print("Loading ball types dataset...")
-    dataset = load_and_clean_dataset(test_mode=test_mode, test_sample_size=200)
+    print("Loading exploration dataset...")
+    dataset = load_and_clean_exploration_dataset(test_mode=test_mode, test_sample_size=200)
+
+    # Get only the data where FeedingState is "starved_noWater"
+
+    dataset = dataset[dataset["FeedingState"] == "starved_noWater"]
 
     # Check what columns we have
     print(f"\nDataset columns: {list(dataset.columns)}")
 
-    # Check for BallType column
-    if "BallType" not in dataset.columns:
-        print("❌ BallType column not found in dataset!")
-        print("Available columns that might contain ball type info:")
-        potential_cols = [
-            col for col in dataset.columns if any(word in col.lower() for word in ["ball", "type", "condition"])
-        ]
+    # Check for Light column
+    if "Light" not in dataset.columns:
+        print("❌ Light column not found in dataset!")
+        print("Available columns that might contain light condition info:")
+        potential_cols = [col for col in dataset.columns if any(word in col.lower() for word in ["light", "condition"])]
         print(potential_cols)
         return
 
-    print(f"✅ BallType column found")
-    print(f"Ball types in dataset: {sorted(dataset['BallType'].unique())}")
+    print(f"✅ Light column found")
+    print(f"Light conditions in dataset: {sorted(dataset['Light'].unique())}")
 
     # Define core metrics to analyze (simplified approach)
     print(f"🎯 Using predefined core metrics for simplified analysis...")
@@ -1152,8 +972,7 @@ def main(overwrite=True, test_mode=False):
         "first_significant_event_time",
         "first_major_event",
         "first_major_event_time",
-        "major_event",
-        "major_event_time",
+        "major_event_first",
         "pulled",
         "pulling_ratio",
         "interaction_persistence",
@@ -1163,6 +982,8 @@ def main(overwrite=True, test_mode=False):
         "normalized_velocity",
         "auc",
         "overall_interaction_rate",
+        "chamber_time",
+        "pushed",
     ]
 
     # Additional pattern-based metrics
@@ -1179,8 +1000,7 @@ def main(overwrite=True, test_mode=False):
         "facing",
         "flailing",
         "head",
-        "median_",
-        "mean_",
+        "leg_visibility",
     ]
 
     excluded_patterns = [
@@ -1189,6 +1009,10 @@ def main(overwrite=True, test_mode=False):
         "slope",
         "_bin_",
         "logistic_",
+        "learning_",
+        "interaction_rate_bin",
+        "binned_auc",
+        "binned_slope",
     ]
 
     # Find metrics that exist in the dataset
@@ -1213,7 +1037,7 @@ def main(overwrite=True, test_mode=False):
     for pattern in additional_patterns:
         pattern_cols = [col for col in dataset.columns if pattern in col.lower()]
         for col in pattern_cols:
-            if col not in available_metrics and col != "BallType":  # Avoid duplicates and metadata
+            if col not in available_metrics and col != "Light":  # Avoid duplicates and metadata
                 # Check if metric should be excluded
                 should_exclude = any(excl_pattern in col.lower() for excl_pattern in excluded_patterns)
                 if should_exclude:
@@ -1301,9 +1125,6 @@ def main(overwrite=True, test_mode=False):
                 dtype = dataset[metric].dtype
                 print(f"  - {metric} ({reason}, {dtype}, {unique_count} unique values)")
 
-    # Use continuous metrics for the Mann-Whitney analysis
-    metric_cols = continuous_metrics
-
     # If in test mode, limit to first 3 metrics and show more timing info
     if test_mode:
         original_count = len(continuous_metrics)
@@ -1315,45 +1136,45 @@ def main(overwrite=True, test_mode=False):
         print(f"🧪 TEST MODE: With dataset sample size: {len(dataset)} rows")
         print(f"🧪 TEST MODE: This should complete much faster for debugging")
 
-    # Clean the dataset (already done in load_and_clean_dataset)
+    # Clean the dataset (already done in load_and_clean_exploration_dataset)
     print(f"\nDataset shape: {dataset.shape}")
-    print(f"Unique ball types: {len(dataset['BallType'].unique())}")
+    print(f"Unique light conditions: {len(dataset['Light'].unique())}")
 
     # Validate required columns
-    required_cols = ["BallType"]
+    required_cols = ["Light"]
     missing_cols = [col for col in required_cols if col not in dataset.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     print(f"✅ All required columns present")
 
-    # Generate plots for ball types analysis
+    # Generate plots for light condition analysis
     print(f"\n{'='*60}")
-    print(f"Processing Ball Types Analysis...")
+    print(f"Processing Light Condition Analysis...")
     print("=" * 60)
 
-    # Use all dataset for ball types
+    # Use all dataset for light condition analysis
     filtered_data = dataset
     print(f"Dataset shape: {filtered_data.shape}")
 
     if len(filtered_data) == 0:
-        print(f"No data for ball types analysis. Skipping...")
+        print(f"No data for light condition analysis. Skipping...")
         return
 
     # Create output directory
     output_dir = base_output_dir / condition_subdir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Ball types in dataset: {sorted(filtered_data['BallType'].unique())}")
+    print(f"Light conditions in dataset: {sorted(filtered_data['Light'].unique())}")
     print(f"Using simplified color palette for visualization")
 
     # 1. Process continuous metrics with Mann-Whitney U tests
     if continuous_metrics:
         print(f"\n--- CONTINUOUS METRICS ANALYSIS (Mann-Whitney U tests) ---")
         # Filter to only continuous metrics + required columns
-        continuous_data = filtered_data[["BallType"] + continuous_metrics].copy()
+        continuous_data = filtered_data[["Light"] + continuous_metrics].copy()
 
-        print(f"Generating Mann-Whitney plots for ball types...")
+        print(f"Generating Mann-Whitney plots for light conditions...")
         print(f"Continuous metrics dataset shape: {continuous_data.shape}")
         print(f"Output directory: {output_dir}")
 
@@ -1366,67 +1187,47 @@ def main(overwrite=True, test_mode=False):
                     metrics_to_process.append(metric)
 
             if len(metrics_to_process) < len(continuous_metrics):
-                skipped_count = len(continuous_metrics) - len(metrics_to_process)
-                print(f"📄 Skipped {skipped_count} metrics with existing plots")
-                print(f"📊 Processing {len(metrics_to_process)} metrics: {metrics_to_process}")
+                print(f"📄 Skipping {len(continuous_metrics) - len(metrics_to_process)} metrics with existing plots")
 
             if not metrics_to_process:
-                print(f"📄 All continuous metrics already have plots, skipping...")
+                print("📄 All metrics already have plots. Use --overwrite to regenerate.")
             else:
-                continuous_data = continuous_data[["BallType"] + metrics_to_process]
-                continuous_metrics = metrics_to_process
+                print(f"📄 Processing {len(metrics_to_process)} metrics without existing plots")
         else:
             metrics_to_process = continuous_metrics
 
         if metrics_to_process:
             # Check for NaN annotations
             print(f"📊 Checking for NaN values in {len(metrics_to_process)} metrics...")
-            nan_annotations = get_nan_annotations(continuous_data, metrics_to_process, "BallType")
+            nan_annotations = get_nan_annotations(continuous_data, metrics_to_process, "Light")
             if nan_annotations:
                 print(f"📋 NaN values detected in continuous metrics:")
-                for metric, balltype_info in nan_annotations.items():
-                    print(f"  {metric}: {len(balltype_info)} ball types have NaN values")
-                    for balltype, info in balltype_info.items():
-                        print(f"    - {balltype}: {info['annotation']}")
+                for metric, condition_info in nan_annotations.items():
+                    print(f"  {metric}: {len(condition_info)} light conditions have NaN values")
+                    for condition, info in condition_info.items():
+                        print(f"    - {condition}: {info['annotation']}")
 
             print(f"🚀 Starting Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics...")
             print(f"📊 Dataset shape for analysis: {continuous_data.shape}")
-            print(f"📊 Ball types: {sorted(continuous_data['BallType'].unique())}")
-            print(f"📊 Sample sizes per ball type:")
-            ball_type_counts = continuous_data["BallType"].value_counts()
-            for ball_type, count in ball_type_counts.items():
-                print(f"    {ball_type}: {count} samples")
+            print(f"📊 Light conditions: {sorted(continuous_data['Light'].unique())}")
+            print(f"📊 Sample sizes per light condition:")
+            condition_counts = continuous_data["Light"].value_counts()
+            for condition, count in condition_counts.items():
+                print(f"    {condition}: {count} samples")
 
-            print(f"⏳ This may take several minutes depending on the number of metrics and samples...")
-
-            import time
-
-            start_time = time.time()
-
-            # Determine control ball type
-            control_balltype = "ctrl"
-            available_balltypes = continuous_data["BallType"].unique()
-            if control_balltype not in available_balltypes:
-                print(f"Warning: Control ball type '{control_balltype}' not found in data")
-                # Use the most common ball type as control
-                control_balltype = str(continuous_data["BallType"].value_counts().index[0])
-                print(f"Using most common ball type as control: {control_balltype}")
-            else:
-                control_balltype = str(control_balltype)  # Ensure it's a string
-
-            print(
-                f"🚀 Starting FDR-corrected Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics..."
-            )
-            print(f"📊 Control group: {control_balltype}")
-            print(f"📊 Test groups: {[bt for bt in continuous_data['BallType'].unique() if bt != control_balltype]}")
+            # Determine control condition
+            control_condition = "off"
+            print(f"📊 Control condition: {control_condition}")
+            print(f"📊 Test conditions: {[lc for lc in continuous_data['Light'].unique() if lc != control_condition]}")
 
             # Use the new FDR-corrected function
-            stats_df = generate_balltype_mannwhitney_plots(
+            start_time = time.time()
+            stats_df = generate_light_condition_mannwhitney_plots(
                 continuous_data,
                 metrics=metrics_to_process,
-                y="BallType",
-                control_balltype=control_balltype,
-                hue="BallType",
+                y="Light",
+                control_condition=control_condition,
+                hue="Light",
                 palette="Set1",  # Use string palette instead of dict for compatibility
                 output_dir=str(output_dir),
                 fdr_method="fdr_bh",  # Benjamini-Hochberg FDR correction
@@ -1439,51 +1240,22 @@ def main(overwrite=True, test_mode=False):
                 f"✅ FDR-corrected Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
             )
 
-    # 2. Process binary metrics with Fisher's exact tests
-    if binary_metrics:
-        print(f"\n--- BINARY METRICS ANALYSIS (Fisher's exact tests) ---")
-        # Filter to only binary metrics + required columns
-        binary_data = filtered_data[["BallType"] + binary_metrics].copy()
-
-        print(f"Analyzing binary metrics for ball types...")
-        print(f"Binary metrics dataset shape: {binary_data.shape}")
-
-        # Check for NaN annotations in binary metrics
-        nan_annotations = get_nan_annotations(binary_data, binary_metrics, "BallType")
-        if nan_annotations:
-            print(f"📋 NaN values detected in binary metrics:")
-            for metric, balltype_info in nan_annotations.items():
-                print(f"  {metric}: {len(balltype_info)} ball types have NaN values")
-                for balltype, info in balltype_info.items():
-                    print(f"    - {balltype}: {info['annotation']}")
-
-        binary_output_dir = output_dir / "binary_analysis"
-        binary_output_dir.mkdir(parents=True, exist_ok=True)
-
-        binary_results = analyze_binary_metrics(
-            binary_data,
-            binary_metrics,
-            y="BallType",
-            output_dir=binary_output_dir,
-            overwrite=overwrite,
-        )
-
-    print(f"Unique ball types: {len(filtered_data['BallType'].unique())}")
+    print(f"Unique light conditions: {len(filtered_data['Light'].unique())}")
 
     print(f"\n{'='*60}")
-    print("✅ Ball types analysis complete! Check output directories for results.")
+    print("✅ Light condition analysis complete! Check output directories for results.")
     print("=" * 60)
 
 
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Generate Mann-Whitney U test jitterboxplots for ball types experiments",
+        description="Generate Mann-Whitney U test jitterboxplots for light condition experiments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_mannwhitney_balltypes.py                    # Overwrite existing plots
-  python run_mannwhitney_balltypes.py --no-overwrite     # Skip existing plots
+  python run_mannwhitney_light_conditions.py                    # Overwrite existing plots
+  python run_mannwhitney_light_conditions.py --no-overwrite     # Skip existing plots
         """,
     )
     parser.add_argument(
