@@ -35,7 +35,7 @@ from plot_configurations import get_config, CONTROL_ELLIPSES, SIGNIFICANCE_MARKE
 
 
 def load_data(config, pca_type="static"):
-    """Load PCA data and statistical results based on configuration"""
+    """Load PCA data and statistical results based on configuration (static only)"""
     # Get dynamic configuration that auto-detects Sparse vs regular PCA
     dynamic_config = get_dynamic_data_source(pca_type, workspace_root=".")
 
@@ -54,15 +54,7 @@ def load_data(config, pca_type="static"):
     except FileNotFoundError:
         print(f"Static statistical results file not found: {config['static_results_file']}")
 
-    # Load temporal results
-    temporal_results = None
-    try:
-        temporal_results = pd.read_csv(config["temporal_results_file"])
-        print(f"Temporal statistical results loaded: {config['temporal_results_file']}")
-    except FileNotFoundError:
-        print(f"Temporal statistical results file not found: {config['temporal_results_file']}")
-
-    return pca_data, static_results, temporal_results
+    return pca_data, static_results
 
 
 def get_significance_from_permutation(stats_results, significance_threshold=0.05):
@@ -72,13 +64,29 @@ def get_significance_from_permutation(stats_results, significance_threshold=0.05
 
     genotype_significance = {}
 
+    # Normalize columns to lower-case for robust access
+    lower_cols = {col.lower(): col for col in stats_results.columns}
+    genotype_col = None
+    for candidate in ["nickname", "genotype"]:
+        if candidate in lower_cols:
+            genotype_col = lower_cols[candidate]
+            break
+    if genotype_col is None:
+        raise KeyError("No genotype column found (expected 'Nickname' or 'genotype') in stats_results.")
+
+    # Find the permutation p-value column (case-insensitive)
+    perm_pval_col = None
+    for candidate in ["permutation_pval", "permutation pval"]:
+        if candidate in lower_cols:
+            perm_pval_col = lower_cols[candidate]
+            break
+    if perm_pval_col is None:
+        raise KeyError("No permutation p-value column found (expected 'Permutation_pval') in stats_results.")
+
     for _, row in stats_results.iterrows():
-        genotype = row["Nickname"]
-
-        # Use raw permutation test p-values (same as heatmap)
-        permutation_pval = row["Permutation_pval"]
+        genotype = row[genotype_col]
+        permutation_pval = row[perm_pval_col]
         is_significant = permutation_pval < significance_threshold
-
         genotype_significance[genotype] = {
             "is_significant": is_significant,
             "permutation_pval": permutation_pval,
@@ -146,11 +154,10 @@ def create_ellipses_for_controls(pca_data, x_col, y_col, config):
     return ellipse_plots
 
 
-def prepare_plotting_data(pca_data, static_results, temporal_results, config):
-    """Prepare data for plotting based on configuration"""
+def prepare_plotting_data(pca_data, static_results, config):
+    """Prepare data for plotting based on configuration (static only)"""
     # Get significance information
     static_significance = get_significance_from_permutation(static_results, 0.05)
-    temporal_significance = get_significance_from_permutation(temporal_results, 0.05)
 
     if config["significance_filter"] == "static":
         # Use only static significance
@@ -158,26 +165,6 @@ def prepare_plotting_data(pca_data, static_results, temporal_results, config):
             genotype for genotype, sig_info in static_significance.items() if sig_info["is_significant"]
         ]
         print(f"Using static significance: {len(significant_genotypes)} genotypes")
-
-    elif config["significance_filter"] == "temporal":
-        # Use only temporal significance
-        significant_genotypes = [
-            genotype for genotype, sig_info in temporal_significance.items() if sig_info["is_significant"]
-        ]
-        print(f"Using temporal significance: {len(significant_genotypes)} genotypes")
-
-    elif config["significance_filter"] == "combined":
-        # Use combined significance
-        static_significant = [
-            genotype for genotype, sig_info in static_significance.items() if sig_info["is_significant"]
-        ]
-        temporal_significant = [
-            genotype for genotype, sig_info in temporal_significance.items() if sig_info["is_significant"]
-        ]
-        significant_genotypes = list(set(static_significant + temporal_significant))
-        print(
-            f"Using combined significance: {len(static_significant)} static + {len(temporal_significant)} temporal = {len(significant_genotypes)} unique"
-        )
     else:
         raise ValueError(f"Unknown significance_filter: {config['significance_filter']}")
 
@@ -229,16 +216,13 @@ def prepare_plotting_data(pca_data, static_results, temporal_results, config):
     # Add p-value information using the correct field name
     def get_pval_info(nickname):
         static_pval = static_significance.get(nickname, {}).get("permutation_pval", None)
-        temporal_pval = temporal_significance.get(nickname, {}).get("permutation_pval", None)
-        return static_pval, temporal_pval
+        return static_pval
 
     pval_info = plot_data["Nickname"].apply(get_pval_info)
-    plot_data["static_pval"] = [p[0] for p in pval_info]
-    plot_data["temporal_pval"] = [p[1] for p in pval_info]
+    plot_data["static_pval"] = pval_info
 
     # Add significance markers - this is the key addition!
     def get_significance_type(nickname):
-        # Simplified: only check static significance since we're not using temporal
         in_static = nickname in [g for g, s in static_significance.items() if s["is_significant"]]
         return "significant" if in_static else "non_significant"
 
@@ -280,8 +264,9 @@ def create_scatter_plot(plot_data, x_col, y_col, x_label, y_label, config):
     elif config["aggregation_level"] == "individual":
         # Add fly ID for individual level data if available
         tooltips.insert(4, ("Fly ID", "@fly"))
-    # Add p-values if available
-    tooltips.extend([("Static p-val", "@static_pval{0.000}"), ("Temporal p-val", "@temporal_pval{0.000}")])
+
+    # Add static p-value only (no temporal)
+    tooltips.append(("Static p-val", "@static_pval{0.000}"))
 
     hover = HoverTool(tooltips=tooltips)
 
@@ -301,6 +286,7 @@ def create_scatter_plot(plot_data, x_col, y_col, x_label, y_label, config):
                 color = brain_region_colors.get(brain_region, "#000000")
 
                 # All tooltip fields must be included in vdims for HoverTool to work
+
                 vdims_list = [
                     y_col,
                     "Nickname",
@@ -310,7 +296,6 @@ def create_scatter_plot(plot_data, x_col, y_col, x_label, y_label, config):
                     "marker_size",
                     "n_flies",
                     "static_pval",
-                    "temporal_pval",
                 ]
 
                 # Add fly ID for individual level data
@@ -397,11 +382,11 @@ def create_histogram_plot(plot_data, col, label, config):
     return combined_hist
 
 
-def create_interactive_scatterplot_matrix(pca_data, static_results, temporal_results, config, n_components=6):
-    """Create interactive scatterplot matrix using HoloViews"""
+def create_interactive_scatterplot_matrix(pca_data, static_results, config, n_components=6):
+    """Create interactive scatterplot matrix using HoloViews (static only)"""
 
     # Prepare plotting data
-    plot_data = prepare_plotting_data(pca_data, static_results, temporal_results, config)
+    plot_data = prepare_plotting_data(pca_data, static_results, config)
 
     # Select PCA components
     available_pca_cols = [col for col in config["pca_columns"][:n_components] if col in plot_data.columns]
@@ -414,13 +399,26 @@ def create_interactive_scatterplot_matrix(pca_data, static_results, temporal_res
 
     for i, (pc_y_col, pc_y_label) in enumerate(zip(available_pca_cols, available_pc_labels)):
         for j, (pc_x_col, pc_x_label) in enumerate(zip(available_pca_cols, available_pc_labels)):
+            # Only show y-label for first column, x-label for last row
+            show_ylabel = j == 0
+            show_xlabel = i == len(available_pca_cols) - 1
 
             if i == j:
                 # Diagonal: histogram
-                plot = create_histogram_plot(plot_data, pc_x_col, pc_x_label, config)
+                plot = create_histogram_plot(plot_data, pc_x_col, pc_x_label if show_xlabel else " ", config)
+                # Remove y-label if not first column
+                if not show_ylabel:
+                    plot = plot.opts(ylabel="")
             else:
                 # Off-diagonal: scatter plot
-                plot = create_scatter_plot(plot_data, pc_x_col, pc_y_col, pc_x_label, pc_y_label, config)
+                plot = create_scatter_plot(
+                    plot_data,
+                    pc_x_col,
+                    pc_y_col,
+                    pc_x_label if show_xlabel else "",
+                    pc_y_label if show_ylabel else "",
+                    config,
+                )
 
                 # Add control ellipses for scatter plots
                 ellipses = create_ellipses_for_controls(pca_data, pc_x_col, pc_y_col, config)
@@ -432,6 +430,12 @@ def create_interactive_scatterplot_matrix(pca_data, static_results, temporal_res
                 v_line = hv.VLine(0).opts(color="black", alpha=0.3, line_width=1)
                 plot = plot * h_line * v_line
 
+            # Apply bigger size and smaller ticks
+            plot = plot.opts(
+                width=config["plot"]["width"],
+                height=config["plot"]["height"],
+                fontsize=config["plot"].get("fontsize", {"ticks": 8, "labels": 10, "title": 10}),
+            )
             plots[(i, j)] = plot
 
     # Create layout
@@ -447,13 +451,12 @@ def save_interactive_plot(plot, base_filename, formats=["html", "png"]):
     """Save interactive plot in multiple formats in organized directories"""
     saved_files = []
 
-    # Ensure the organized directory structure exists
     for fmt in formats:
-        os.makedirs(f"outputs/pca_matrices/{fmt}", exist_ok=True)
-
-    for fmt in formats:
+        filename = f"outputs/pca_matrices/{fmt}/{base_filename}.{fmt}"
+        # Ensure the full output directory exists (including all parents)
+        output_dir = os.path.dirname(filename)
+        os.makedirs(output_dir, exist_ok=True)
         try:
-            filename = f"outputs/pca_matrices/{fmt}/{base_filename}.{fmt}"
             if fmt == "html":
                 hv.save(plot, filename)
             elif fmt == "png":
@@ -467,11 +470,11 @@ def save_interactive_plot(plot, base_filename, formats=["html", "png"]):
 
 
 def main():
-    """Main function with command line interface"""
-    parser = argparse.ArgumentParser(description="Generate unified interactive PCA scatterplot matrices")
+    """Main function with command line interface (static only)"""
+    parser = argparse.ArgumentParser(description="Generate unified interactive PCA scatterplot matrices (static only)")
     parser.add_argument(
         "plot_type",
-        choices=["individual_static", "genotype_static", "individual_temporal", "genotype_temporal"],
+        choices=["individual_static", "genotype_static"],
         help="Type of plot to generate",
     )
     parser.add_argument("--n-components", type=int, default=6, help="Number of PCA components to include (default: 6)")
@@ -492,10 +495,10 @@ def main():
         print(f"Significance filter: {config['significance_filter']}")
 
     # Load data
-    pca_data, static_results, temporal_results = load_data(config, pca_type=config["data_source"])
+    pca_data, static_results = load_data(config, pca_type=config["data_source"])
 
     # Create the plot
-    plot = create_interactive_scatterplot_matrix(pca_data, static_results, temporal_results, config, args.n_components)
+    plot = create_interactive_scatterplot_matrix(pca_data, static_results, config, args.n_components)
 
     # Save the plots
     base_filename = config["output_filename"]

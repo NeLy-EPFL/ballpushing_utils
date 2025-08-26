@@ -12,7 +12,11 @@ from MFA_Stats_subsetcontrols import (
 )
 
 # --- PCA Static ---
-from PCA_Static import pca_scores_with_meta as static_scores, selected_dims as static_dims, results_df as static_results
+from PCA.old.PCA_Static import (
+    pca_scores_with_meta as static_scores,
+    selected_dims as static_dims,
+    results_df as static_results,
+)
 
 # --- PCA Temporal ---
 from PCA.old.PCA_Temporal import (

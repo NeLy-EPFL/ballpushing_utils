@@ -32,12 +32,12 @@ def get_max_components():
 
         print(f"Available static PCA components: {max_static}")
         print(f"Component names: {static_config.get('pca_columns', [])}")
-        return max_static if max_static > 0 else 10  # fallback to 10 since you have 10
+        return max_static if max_static > 0 else 20  # fallback to 15 since you have 15
 
     except Exception as e:
         print(f"Could not detect available components: {e}")
-        print("Falling back to 10 components")
-        return 10  # fallback to 10 since you know you have 10
+        print("Falling back to 15 components")
+        return 20  # fallback to 15 since you know you have 15
 
 
 def run_script(script_name, plot_type, n_components=None, verbose=False, additional_args=None):
@@ -86,31 +86,28 @@ def generate_all_plots(plot_types=None, static_only=False, interactive_only=Fals
     if n_components is None:
         n_components = get_max_components()
 
-    # Default to static plot types only (temporal commented out since only using static PCA)
     if plot_types is None:
-        plot_types = ["individual_static", "genotype_static"]  # Only static PCA plots
-        # Temporal plots commented out:
-        # "individual_temporal", "genotype_temporal"
+        plot_types = ["individual_static", "genotype_static"]
 
-    # Determine which script types to run
-    run_static = not interactive_only
-    run_interactive = not static_only
-
-    results = {"static": {}, "interactive": {}}
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    results = {}
 
-    for plot_type in plot_types:
-        print(f"\n🎯 Generating {plot_type} with {n_components} components...")
+    # Determine which styles to run
+    styles = []
+    if not interactive_only:
+        styles.append("static")
+    if not static_only:
+        styles.append("interactive")
 
-        # Run static version
-        if run_static:
-            static_script = os.path.join(script_dir, "unified_static_scatterplot_matrix.py")
-            results["static"][plot_type] = run_script(static_script, plot_type, n_components, verbose)
-
-        # Run interactive version
-        if run_interactive:
-            interactive_script = os.path.join(script_dir, "unified_interactive_scatterplot_matrix.py")
-            results["interactive"][plot_type] = run_script(interactive_script, plot_type, n_components, verbose)
+    for style in styles:
+        results[style] = {}
+        for plot_type in plot_types:
+            print(f"\n🎯 Generating {plot_type} ({style}) with {n_components} components...")
+            if style == "static":
+                script = os.path.join(script_dir, "unified_static_scatterplot_matrix.py")
+            else:
+                script = os.path.join(script_dir, "unified_interactive_scatterplot_matrix.py")
+            results[style][plot_type] = run_script(script, plot_type, n_components, verbose)
 
     return results
 
@@ -182,38 +179,43 @@ def generate_legend():
 
 def main():
     """Main function with command line interface"""
+
     parser = argparse.ArgumentParser(
-        description="Master script for generating all PCA scatterplot matrices",
+        description="Master script for generating all static and interactive PCA scatterplot matrices",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate all static PCA plots (both static and interactive) with auto-detected components
-  python master_scatterplot_generator.py
-
-  # Generate only static plots
-  python master_scatterplot_generator.py --static-only
+  # Generate all static and interactive PCA plots with auto-detected components
+  python master_scatterplot_generator.py --style both
 
   # Generate only individual fly plots (static PCA)
-  python master_scatterplot_generator.py --plot-types individual_static
+  python master_scatterplot_generator.py --plot-types individual_static --style static
+
+  # Generate only interactive plots
+  python master_scatterplot_generator.py --style interactive
 
   # Generate with verbose output and specific number of components
-  python master_scatterplot_generator.py --verbose --n-components 6
+  python master_scatterplot_generator.py --verbose --n-components 6 --style both
         """,
     )
 
     parser.add_argument(
         "--plot-types",
         nargs="+",
-        choices=["individual_static", "genotype_static"],  # Only static PCA choices
+        choices=["individual_static", "genotype_static"],
         help="Specific plot types to generate (default: both static types)",
     )
-    parser.add_argument("--static-only", action="store_true", help="Generate only static plots")
-    parser.add_argument("--interactive-only", action="store_true", help="Generate only interactive plots")
     parser.add_argument(
         "--n-components",
         type=int,
         default=None,
         help="Number of PCA components to include (default: auto-detect all available)",
+    )
+    parser.add_argument(
+        "--style",
+        choices=["static", "interactive", "both"],
+        default="both",
+        help="Which plot style(s) to generate: static, interactive, or both (default: both)",
     )
     parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
     parser.add_argument("--list-configs", action="store_true", help="List all available plot configurations and exit")
@@ -225,46 +227,48 @@ Examples:
         list_available_configs()
         return
 
-    # Validate arguments
-    if args.static_only and args.interactive_only:
-        parser.error("Cannot specify both --static-only and --interactive-only")
-
     # Auto-detect components if not specified
     max_components = get_max_components()
     n_components = args.n_components if args.n_components is not None else max_components
 
+    # Determine which styles to run
+    static_only = args.style == "static"
+    interactive_only = args.style == "interactive"
+
     # Print header
-    print("🚀 PCA Scatterplot Matrix Master Generator")
+    print("🚀 PCA Scatterplot Matrix Master Generator (Static & Interactive)")
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     if args.verbose:
         print(f"Plot types: {args.plot_types or 'all'}")
-        print(f"Static only: {args.static_only}")
-        print(f"Interactive only: {args.interactive_only}")
         print(f"Components: {n_components} (max available: {max_components})")
+        print(f"Styles: {args.style}")
 
     # Generate plots
     results = generate_all_plots(
         plot_types=args.plot_types,
-        static_only=args.static_only,
-        interactive_only=args.interactive_only,
+        static_only=static_only,
+        interactive_only=interactive_only,
         n_components=n_components,
         verbose=args.verbose,
     )
 
-    # Generate the combined legend
-    legend_success = generate_legend()
+    # Generate the combined legend (for static only, or both)
+    legend_success = False
+    if not interactive_only:
+        legend_success = generate_legend()
 
     # Print summary
     print_summary(results)
 
     # Add legend to summary
-    if legend_success:
-        print("\n📊 LEGEND:")
-        print("  outputs/pca_matrices/pca_legend_combined.png      ✓ SUCCESS")
-    else:
-        print("\n📊 LEGEND:")
-        print("  outputs/pca_matrices/pca_legend_combined.png      ✗ FAILED")
+    if not interactive_only:
+        if legend_success:
+            print("\n📊 LEGEND:")
+            print("  outputs/pca_matrices/pca_legend_combined.png      ✓ SUCCESS")
+        else:
+            print("\n📊 LEGEND:")
+            print("  outputs/pca_matrices/pca_legend_combined.png      ✗ FAILED")
 
     print(f"\nCompleted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 

@@ -756,3 +756,10 @@ src/PCA/nickname_significance_score_barplot_brainregion.png
 src/PCA/nickname_significance_score_barplot.png
 src/PCA/pca_with_metadata.feather
 src/PCA/mfa_with_metadata.feather
+src/PCA/old/
+src/PCA/best_pca_analysis/
+src/PCA/metrics_lists/
+src/PCA/multi_condition_pca_optimization/
+src/PCA/consistency_analysis/
+src/PCA/consistency_analysis_with_edges/
+src/PCA/correlation_heatmap.png
