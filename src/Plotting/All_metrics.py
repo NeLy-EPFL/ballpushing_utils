@@ -166,30 +166,34 @@ metric_names = sum(metric_groups.values(), [])  # Flatten all metric sublists
 metadata_names = [col for col in dataset.columns if col not in metric_names]
 
 
-# For each column, handle missing values gracefully
+# For plotting purposes, create display copies that handle NaN appropriately
+# Note: Keep original dataset intact, only modify display values for plots
 
-# For max event, first significant event, major event final event, if missing, set to -1
-dataset["max_event"].fillna(-1, inplace=True)
-dataset["first_significant_event"].fillna(-1, inplace=True)
-dataset["major_event"].fillna(-1, inplace=True)
-dataset["final_event"].fillna(-1, inplace=True)
+# Create display dataset for plotting (original dataset preserved)
+display_dataset = dataset.copy()
 
-# For max event time, first significant event time, major event final event time, if missing, set to 3600
-dataset["max_event_time"].fillna(3600, inplace=True)
-dataset["first_significant_event_time"].fillna(3600, inplace=True)
-dataset["major_event_time"].fillna(3600, inplace=True)
-dataset["final_event_time"].fillna(3600, inplace=True)
+# For event metrics, use -1 for display only (NaN values can't be plotted easily)
+display_dataset["max_event"].fillna(-1, inplace=True)
+display_dataset["first_significant_event"].fillna(-1, inplace=True)
+display_dataset["major_event"].fillna(-1, inplace=True)
+display_dataset["final_event"].fillna(-1, inplace=True)
 
-# Remove columns insight_effect, insight_effect_log, exit_time
+# For time metrics, use experiment duration for display only
+display_dataset["max_event_time"].fillna(3600, inplace=True)
+display_dataset["first_significant_event_time"].fillna(3600, inplace=True)
+display_dataset["major_event_time"].fillna(3600, inplace=True)
+display_dataset["final_event_time"].fillna(3600, inplace=True)
+
+# Note: Keep original dataset for metadata operations
 dataset.drop(columns=["insight_effect", "insight_effect_log", "exit_time"], inplace=True)
 
-# for pulling_ratio, avg_displacement_after_success, avg_displacement_before_success, and influence_ratio, if missing set to 0
-dataset["pulling_ratio"].fillna(0, inplace=True)
-dataset["avg_displacement_after_success"].fillna(0, inplace=True)
-dataset["avg_displacement_after_failure"].fillna(0, inplace=True)
-dataset["influence_ratio"].fillna(0, inplace=True)
+# for pulling_ratio, avg_displacement_after_success, avg_displacement_before_success, and influence_ratio, if missing set to 0 for display
+display_dataset["pulling_ratio"].fillna(0, inplace=True)
+display_dataset["avg_displacement_after_success"].fillna(0, inplace=True)
+display_dataset["avg_displacement_after_failure"].fillna(0, inplace=True)
+display_dataset["influence_ratio"].fillna(0, inplace=True)
 
-# Check which metrics have NA values
+# Check which metrics have NA values in original dataset (before display modifications)
 na_metrics = dataset[metric_names].isna().sum()
 print("Metrics with NA values:")
 print(na_metrics[na_metrics > 0])

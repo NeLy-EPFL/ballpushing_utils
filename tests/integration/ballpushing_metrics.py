@@ -80,6 +80,8 @@ def get_predefined_metric_sets():
             "compute_median_head_ball_distance",
             "compute_mean_head_ball_distance",
             "has_finished",
+            "has_major",
+            "has_significant",
             "compute_persistence_at_end",
             "compute_fly_distance_moved",
             "get_time_chamber_beginning",
@@ -94,7 +96,15 @@ def get_predefined_metric_sets():
             "compute_median_head_ball_distance",
             "compute_mean_head_ball_distance",
         ],
-        "basic_metrics": ["get_max_event", "get_final_event", "has_finished", "get_major_event", "chamber_ratio"],
+        "basic_metrics": [
+            "get_max_event",
+            "get_final_event",
+            "has_finished",
+            "has_major",
+            "has_significant",
+            "get_major_event",
+            "chamber_ratio",
+        ],
         "skeleton_metrics": [
             "compute_fraction_not_facing_ball",
             "compute_flailing",
@@ -111,6 +121,8 @@ def get_predefined_metric_sets():
             "get_max_event",
             "get_final_event",
             "has_finished",
+            "has_major",
+            "has_significant",
             "get_major_event",
             "chamber_ratio",
             "get_chamber_time",
@@ -590,6 +602,17 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False):
                 result = metrics.get_has_finished(0, 0)
             except Exception as e:
                 result = f"Error: {e}"
+
+        elif metric_name == "has_major" or metric_name == "get_has_major":
+            try:
+                result = metrics.get_has_major(0, 0)
+            except Exception as e:
+                result = f"Error: {e}"
+        elif metric_name == "has_significant" or metric_name == "get_has_significant":
+            try:
+                result = metrics.get_has_significant(0, 0)
+            except Exception as e:
+                result = f"Error: {e}"
         # Methods that need only fly_idx
         elif metric_name in [
             "compute_persistence_at_end",
@@ -640,6 +663,8 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False):
             "compute_leg_visibility_ratio",
             "compute_median_head_ball_distance",
             "compute_mean_head_ball_distance",
+            "has_major",
+            "has_significant",
         ]:
             try:
                 func = getattr(metrics, metric_name)
@@ -683,6 +708,8 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False):
         "compute_median_head_ball_distance",
         "compute_mean_head_ball_distance",
         "has_finished",
+        "has_major",
+        "has_significant",
     ]
 
     if isinstance(serializable_results, dict):
@@ -888,6 +915,8 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test):
             "compute_leg_visibility_ratio",
             "compute_median_head_ball_distance",
             "has_finished",
+            "has_major",
+            "has_significant",
         ]:
             if key_metric in fly_results:
                 value = fly_results[key_metric]

@@ -115,9 +115,22 @@ class BallPushingMetrics:
         return self._skeleton_metrics
 
     def _get_skeleton_data(self, fly_idx):
-        """Get skeleton data with caching."""
-        if fly_idx not in self._skeleton_data_cache:
-            self._skeleton_data_cache[fly_idx] = self.tracking_data.skeletontrack.objects[fly_idx].dataset
+        """Get skeleton data with caching. Returns None if missing."""
+        if fly_idx in self._skeleton_data_cache:
+            return self._skeleton_data_cache[fly_idx]
+        # Check for missing skeletontrack or objects
+        skeletontrack = getattr(self.tracking_data, "skeletontrack", None)
+        if skeletontrack is None or not hasattr(skeletontrack, "objects") or skeletontrack.objects is None:
+            if self.fly.config.debugging:
+                print(f"No skeletontrack or objects for fly_idx {fly_idx}")
+            self._skeleton_data_cache[fly_idx] = None
+            return None
+        try:
+            self._skeleton_data_cache[fly_idx] = skeletontrack.objects[fly_idx].dataset
+        except (IndexError, AttributeError, TypeError) as e:
+            if self.fly.config.debugging:
+                print(f"Error accessing skeleton data for fly_idx {fly_idx}: {e}")
+            self._skeleton_data_cache[fly_idx] = None
         return self._skeleton_data_cache[fly_idx]
 
     def _get_ball_data(self, ball_idx):
@@ -165,6 +178,18 @@ class BallPushingMetrics:
 
         # Get skeleton metrics once
         skeleton_metrics = self._get_skeleton_metrics()
+
+        # If skeleton data is missing, return default values for all skeleton-based metrics
+        if skeleton_data is None or skeleton_metrics is None:
+            if self.is_metric_enabled("fraction_not_facing_ball"):
+                results["fraction_not_facing_ball"] = np.nan
+            if self.is_metric_enabled("flailing"):
+                results["flailing"] = np.nan
+            if self.is_metric_enabled("head_pushing_ratio"):
+                results["head_pushing_ratio"] = np.nan
+            if self.is_metric_enabled("leg_visibility_ratio"):
+                results["leg_visibility_ratio"] = np.nan
+            return results
 
         # Compute individual metrics only if enabled
         if self.is_metric_enabled("fraction_not_facing_ball"):
@@ -254,6 +279,8 @@ class BallPushingMetrics:
                     "chamber_ratio": lambda: safe_call(self.chamber_ratio, fly_idx),
                     "distance_moved": lambda: safe_call(self.get_distance_moved, fly_idx, ball_idx),
                     "distance_ratio": lambda: safe_call(self.get_distance_ratio, fly_idx, ball_idx),
+                    "has_major": lambda: safe_call(self.get_has_major, fly_idx, ball_idx, default=0),
+                    "has_significant": lambda: safe_call(self.get_has_significant, fly_idx, ball_idx, default=0),
                     "insight_effect": lambda: (
                         safe_call(self.get_insight_effect, fly_idx, ball_idx)
                         if safe_call(self.get_major_event, fly_idx, ball_idx)
@@ -278,8 +305,8 @@ class BallPushingMetrics:
 
                 # Handle final event - only compute if needed
                 final_event = None
-                final_event_idx = -1
-                final_event_time = self.tracking_data.duration
+                final_event_idx = np.nan
+                final_event_time = np.nan
                 if (
                     self.is_metric_enabled("final_event")
                     or self.is_metric_enabled("final_event_time")
@@ -295,8 +322,8 @@ class BallPushingMetrics:
                 ):
                     final_event = metrics["final_event"]()
                     if final_event is None:
-                        final_event_idx = -1
-                        final_event_time = self.tracking_data.duration
+                        final_event_idx = np.nan
+                        final_event_time = np.nan
                     else:
                         final_event_idx, final_event_time, _ = final_event
 
@@ -317,7 +344,7 @@ class BallPushingMetrics:
                 filtered_events = events
                 filtered_significant_events = significant_events if significant_events is not None else []
 
-                if final_event_idx >= 0:
+                if not pd.isna(final_event_idx) and final_event_idx >= 0:
                     filtered_events = events[: final_event_idx + 1]
                     if significant_events is not None:
                         filtered_significant_events = [e for e in significant_events if e[1] <= final_event_idx]
@@ -363,7 +390,9 @@ class BallPushingMetrics:
                     "post_aha_count": 0,
                 }
                 if self.is_metric_enabled("major_event_first"):
-                    insight_effect = metrics["insight_effect"]()
+                    val = metrics["insight_effect"]()
+                    if isinstance(val, dict):
+                        insight_effect = val
 
                 pause_metrics = {"number_of_pauses": 0, "total_pause_duration": 0.0}
                 if self.is_metric_enabled("number_of_pauses") or self.is_metric_enabled("total_pause_duration"):
@@ -418,9 +447,18 @@ class BallPushingMetrics:
                     velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
 
                 # New metrics - conditional computation
+
                 has_finished = 0
                 if self.is_metric_enabled("has_finished"):
                     has_finished = safe_call(self.get_has_finished, fly_idx, ball_idx, default=0)
+
+                has_major = 0
+                if self.is_metric_enabled("has_major"):
+                    has_major = safe_call(self.get_has_major, fly_idx, ball_idx, default=0)
+
+                has_significant = 0
+                if self.is_metric_enabled("has_significant"):
+                    has_significant = safe_call(self.get_has_significant, fly_idx, ball_idx, default=0)
 
                 persistence_at_end = np.nan
                 if self.is_metric_enabled("persistence_at_end"):
@@ -524,7 +562,7 @@ class BallPushingMetrics:
                 ):
                     metrics_dict["first_significant_event_time"] = first_significant_event_result[1]
                 if self.is_metric_enabled("first_major_event"):
-                    metrics_dict["first_major_event"] = major_event[0] if major_event else -1
+                    metrics_dict["first_major_event"] = major_event[0] if major_event else np.nan
                 if self.is_metric_enabled("first_major_event_time"):
                     metrics_dict["first_major_event_time"] = major_event[1] if major_event else np.nan
                 if self.is_metric_enabled("major_event_first"):
@@ -547,7 +585,7 @@ class BallPushingMetrics:
                     metrics_dict["pulling_ratio"] = (
                         len(filtered_pulled) / (len(filtered_pushed) + len(filtered_pulled))
                         if (len(filtered_pushed) + len(filtered_pulled)) > 0
-                        else -1
+                        else np.nan
                     )
                 if self.is_metric_enabled("success_direction"):
                     metrics_dict["success_direction"] = metrics["success_direction"]()
@@ -640,6 +678,10 @@ class BallPushingMetrics:
                 # Additional metrics
                 if self.is_metric_enabled("has_finished"):
                     metrics_dict["has_finished"] = has_finished
+                if self.is_metric_enabled("has_major"):
+                    metrics_dict["has_major"] = has_major
+                if self.is_metric_enabled("has_significant"):
+                    metrics_dict["has_significant"] = has_significant
                 if self.is_metric_enabled("persistence_at_end"):
                     metrics_dict["persistence_at_end"] = persistence_at_end
                 if self.is_metric_enabled("fly_distance_moved"):
@@ -915,14 +957,14 @@ class BallPushingMetrics:
                 if chamber_exit_time is not None:
                     max_event_time -= chamber_exit_time
             else:
-                max_event_time = self.tracking_data.duration
+                max_event_time = np.nan
         else:
             if max_event:
                 max_event_time = (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
             else:
-                max_event_time = self.tracking_data.duration
+                max_event_time = np.nan
 
-        return max_event_idx, max_event_time
+        return max_event_idx if max_event_idx is not None else np.nan, max_event_time
 
     def get_max_distance(self, fly_idx, ball_idx):
         """
@@ -1081,7 +1123,7 @@ class BallPushingMetrics:
 
             return first_significant_event_idx, first_significant_event_time
         else:
-            return -1, self.tracking_data.duration
+            return np.nan, np.nan
 
     def check_yball_variation(self, event, ball_data, threshold=None):
 
@@ -1351,7 +1393,7 @@ class BallPushingMetrics:
 
             return major_event_idx, first_major_event_time
         else:
-            return -1, self.tracking_data.duration
+            return np.nan, np.nan
 
     def get_insight_effect(self, fly_idx, ball_idx, epsilon=1e-6, strength_threshold=2, subset=None):
         """
@@ -2109,6 +2151,30 @@ class BallPushingMetrics:
         final_event = self.get_final_event(fly_idx, ball_idx)
         return 1 if final_event is not None else 0
 
+    def get_has_major(self, fly_idx, ball_idx):
+        """
+        Check if a major event exists for this fly and ball.
+
+        Returns
+        -------
+        int
+            1 if a major event exists, 0 otherwise.
+        """
+        major_event_idx, _ = self.get_major_event(fly_idx, ball_idx)
+        return 1 if not (np.isnan(major_event_idx)) else 0
+
+    def get_has_significant(self, fly_idx, ball_idx):
+        """
+        Check if a significant event exists for this fly and ball.
+
+        Returns
+        -------
+        int
+            1 if a significant event exists, 0 otherwise.
+        """
+        significant_events = self.get_significant_events(fly_idx, ball_idx)
+        return 1 if significant_events and len(significant_events) > 0 else 0
+
     def compute_persistence_at_end(self, fly_idx):
         """
         Compute the fraction of time the fly spent at a certain distance from start.
@@ -2336,49 +2402,51 @@ class BallPushingMetrics:
             corridor_direction = np.array([ball_initial_x - start_x, ball_initial_y - start_y])
             corridor_direction = corridor_direction / np.linalg.norm(corridor_direction)
 
-        # Calculate fly body orientation for each frame
-        fly_orientations = []
-        for i in range(len(skeleton_data)):
-            try:
-                # Get body keypoints using the mapped names
-                head_x = skeleton_data[f"x_{keypoint_mapping['Head']}"].iloc[i]
-                head_y = skeleton_data[f"y_{keypoint_mapping['Head']}"].iloc[i]
-                thorax_x = skeleton_data[f"x_{keypoint_mapping['Thorax']}"].iloc[i]
-                thorax_y = skeleton_data[f"y_{keypoint_mapping['Thorax']}"].iloc[i]
-                abdomen_x = skeleton_data[f"x_{keypoint_mapping['Abdomen']}"].iloc[i]
-                abdomen_y = skeleton_data[f"y_{keypoint_mapping['Abdomen']}"].iloc[i]
+        # Calculate fly body orientation for each frame - OPTIMIZED VERSION
+        try:
+            # Get body keypoints using the mapped names - vectorized approach
+            head_x = skeleton_data[f"x_{keypoint_mapping['Head']}"].values
+            head_y = skeleton_data[f"y_{keypoint_mapping['Head']}"].values
+            thorax_x = skeleton_data[f"x_{keypoint_mapping['Thorax']}"].values
+            thorax_y = skeleton_data[f"y_{keypoint_mapping['Thorax']}"].values
+            abdomen_x = skeleton_data[f"x_{keypoint_mapping['Abdomen']}"].values
+            abdomen_y = skeleton_data[f"y_{keypoint_mapping['Abdomen']}"].values
 
-                # Skip if any coordinates are NaN
-                if any(np.isnan([head_x, head_y, thorax_x, thorax_y, abdomen_x, abdomen_y])):
-                    fly_orientations.append(np.nan)
-                    continue
+            # Create body vectors (from abdomen to head) - vectorized
+            body_vectors = np.column_stack([head_x - abdomen_x, head_y - abdomen_y])
 
-                # Calculate body axis vector (from abdomen to head)
-                body_vector = np.array([head_x - abdomen_x, head_y - abdomen_y])
+            # Calculate norms - vectorized
+            body_norms = np.linalg.norm(body_vectors, axis=1)
 
-                # Normalize the body vector
-                body_norm = np.linalg.norm(body_vector)
-                if body_norm == 0:
-                    fly_orientations.append(np.nan)
-                    continue
+            # Normalize body vectors - vectorized (avoid division by zero)
+            valid_norms = body_norms > 0
+            normalized_body_vectors = np.zeros_like(body_vectors)
+            normalized_body_vectors[valid_norms] = body_vectors[valid_norms] / body_norms[valid_norms, np.newaxis]
 
-                body_vector = body_vector / body_norm
+            # Calculate dot products with corridor direction - vectorized
+            dot_products = np.dot(normalized_body_vectors, corridor_direction)
 
-                # Calculate angle between body direction and corridor direction
-                dot_product = np.dot(body_vector, corridor_direction)
-                # Clamp dot product to [-1, 1] to avoid numerical errors
-                dot_product = np.clip(dot_product, -1.0, 1.0)
-                angle_rad = np.arccos(dot_product)
-                angle_deg = np.degrees(angle_rad)
+            # Clamp dot products and calculate angles - vectorized
+            dot_products = np.clip(dot_products, -1.0, 1.0)
+            angles_rad = np.arccos(dot_products)
+            fly_orientations = np.degrees(angles_rad)
 
-                fly_orientations.append(angle_deg)
+            # Set invalid orientations to NaN
+            invalid_mask = (
+                np.isnan(head_x)
+                | np.isnan(head_y)
+                | np.isnan(thorax_x)
+                | np.isnan(thorax_y)
+                | np.isnan(abdomen_x)
+                | np.isnan(abdomen_y)
+                | (body_norms == 0)
+            )
+            fly_orientations[invalid_mask] = np.nan
 
-            except Exception as e:
-                if self.fly.config.debugging:
-                    print(f"Error calculating orientation at frame {i}: {e}")
-                fly_orientations.append(np.nan)
-
-        fly_orientations = np.array(fly_orientations)
+        except Exception as e:
+            if self.fly.config.debugging:
+                print(f"Error calculating orientations: {e}")
+            return 0.0
 
         # Determine frames where fly is not facing the ball and is outside chamber
         not_facing_ball = fly_orientations > angle_threshold

@@ -99,7 +99,7 @@ class Config:
     # Metrics configuration - which metrics to compute in BallPushingMetrics
     # Set to None to compute all metrics (default), or provide a list of metric names
     # Default list excludes expensive and redundant metrics (binned, r2, slope, logistic patterns)
-    enabled_metrics: Optional[list] = field(default_factory=_default_enabled_metrics)
+    enabled_metrics: Optional[list] = None#field(default_factory=_default_enabled_metrics)
 
     # Pixel to mm conversion factor (500 pixels = 30 mm)
     pixels_per_mm: float = 500 / 30  # 16.67 pixels per mm
