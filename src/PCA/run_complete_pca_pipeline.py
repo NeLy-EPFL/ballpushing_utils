@@ -9,7 +9,7 @@ Runs the full static PCA analysis workflow in sequence:
 
 All outputs are organized in a timestamped results directory for easy review.
 """
-
+# TODO: Rework this with new PCA pipeline structure
 import subprocess
 import sys
 import os
