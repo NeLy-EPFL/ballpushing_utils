@@ -761,9 +761,9 @@ def generate_jitterboxplots_with_mannwhitney(
                 stat_info = stats_for_nickname[0]
                 if stat_info["significant"]:
                     yticklocs = ax.get_yticks()
-                    # Add significance stars
+                    # Add significance stars (closer to the plot)
                     ax.text(
-                        x=ax.get_xlim()[1] + 0.01 * x_range,
+                        x=ax.get_xlim()[1] + 0.003 * x_range,  # Much closer: 0.003 instead of 0.01
                         y=float(yticklocs[idx]),
                         s=stat_info["sig_level"],
                         color="red",
@@ -774,9 +774,9 @@ def generate_jitterboxplots_with_mannwhitney(
                         clip_on=False,
                     )
 
-        # Set xlim to accommodate annotations
+        # Set xlim to accommodate annotations (closer to plot)
         x_max = plot_data[metric].quantile(0.99)
-        ax.set_xlim(left=None, right=x_max * 1.2)  # Less extra space since legend will be outside
+        ax.set_xlim(left=None, right=x_max * 1.08)  # Much less extra space: 1.08 instead of 1.2
 
         # Font and labels with larger sizes for readability
         plt.xticks(fontsize=12)
@@ -786,14 +786,14 @@ def generate_jitterboxplots_with_mannwhitney(
         plt.title(f"Mann-Whitney U Test: {metric} by {y}", fontsize=16)
 
         # Color y-axis labels by brain region if requested
-        if color_y_labels_by_brain_region and "Brain region" in data.columns:
-            # Create mapping from nickname to brain region using the data
+        if color_y_labels_by_brain_region and "Simplified region" in data.columns:
+            # Create mapping from simplified nickname to brain region using the data
             nickname_to_brainregion = {}
             for nickname in plot_data[y].unique():
                 if pd.notna(nickname):
                     nickname_data = plot_data[plot_data[y] == nickname]
                     if not nickname_data.empty:
-                        brain_region = nickname_data["Brain region"].iloc[0]
+                        brain_region = nickname_data["Simplified region"].iloc[0]
                         nickname_to_brainregion[nickname] = brain_region
 
             # Apply colors to y-tick labels
@@ -814,9 +814,9 @@ def generate_jitterboxplots_with_mannwhitney(
 
         # Add brain region color legend if y-labels are colored by brain region
         brain_region_elements = []
-        if color_y_labels_by_brain_region and "Brain region" in data.columns:
+        if color_y_labels_by_brain_region and "Simplified region" in data.columns:
             # Get unique brain regions present in the current plot data
-            present_regions = plot_data["Brain region"].unique()
+            present_regions = plot_data["Simplified region"].unique()
             present_regions = [r for r in present_regions if pd.notna(r) and r in Config.color_dict]
 
             if present_regions:
@@ -1004,7 +1004,7 @@ def bootstrapped_ci_stats_df(data, metrics, y="Nickname", split_col="Split", n_b
 #     dataset, metric_names, y="Nickname", split_col="Split", output_csv="nickname_vs_control_stats.csv"
 # )
 
-stats_df = bootstrapped_ci_stats_df(dataset, metric_names, y="Nickname", n_boot=1000, alpha=0.01)
+# stats_df = bootstrapped_ci_stats_df(dataset, metric_names, y="Nickname", n_boot=1000, alpha=0.01)
 
 ### Grouping by control
 
@@ -1022,94 +1022,94 @@ stats_df = bootstrapped_ci_stats_df(dataset, metric_names, y="Nickname", n_boot=
 #     control_name="Empty-Split",
 # )
 
-generate_jitterboxplots_for_all_metrics(
-    data=SplitLines,
-    metrics=metric_names,
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 30),
-    output_dir=OUTPUT_DIR / "split",
-    control_name="Empty-Split",
-    stats_df=stats_df,
-)
+# generate_jitterboxplots_for_all_metrics(
+#     data=SplitLines,
+#     metrics=metric_names,
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 30),
+#     output_dir=OUTPUT_DIR / "split",
+#     control_name="Empty-Split",
+#     stats_df=stats_df,
+# )
 
-generate_jitterboxplots_for_all_metrics(
-    data=NoSplit,
-    metrics=metric_names,
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 30),
-    output_dir=OUTPUT_DIR / "nosplit",
-    control_name="Empty-Gal4",
-    stats_df=stats_df,
-)
+# generate_jitterboxplots_for_all_metrics(
+#     data=NoSplit,
+#     metrics=metric_names,
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 30),
+#     output_dir=OUTPUT_DIR / "nosplit",
+#     control_name="Empty-Gal4",
+#     stats_df=stats_df,
+# )
 
-generate_jitterboxplots_for_all_metrics(
-    data=Mutants,
-    metrics=metric_names,
-    y="Nickname",  # Categorical column
-    hue="Brain region",  # Optional grouping column
-    palette=Config.color_dict,
-    figsize=(10, 30),
-    output_dir=OUTPUT_DIR / "mutant",
-    control_name="TNTxPR",  # Control name for mutants
-    stats_df=stats_df,
-)
+# generate_jitterboxplots_for_all_metrics(
+#     data=Mutants,
+#     metrics=metric_names,
+#     y="Nickname",  # Categorical column
+#     hue="Brain region",  # Optional grouping column
+#     palette=Config.color_dict,
+#     figsize=(10, 30),
+#     output_dir=OUTPUT_DIR / "mutant",
+#     control_name="TNTxPR",  # Control name for mutants
+#     stats_df=stats_df,
+# )
 
-# Generate new Mann-Whitney U test plots with significance annotations
-print("\n" + "=" * 50)
-print("Generating Mann-Whitney U Test Plots")
-print("=" * 50)
+# # Generate new Mann-Whitney U test plots with significance annotations
+# print("\n" + "=" * 50)
+# print("Generating Mann-Whitney U Test Plots")
+# print("=" * 50)
 
-# For Split lines
-print("Processing Split lines...")
-stats_split = generate_jitterboxplots_with_mannwhitney(
-    data=SplitLines,
-    metrics=metric_names,
-    y="Nickname",
-    split_col="Split",
-    hue="Brain region",
-    palette=Config.color_dict,
-    figsize=(12, 30),
-    output_dir=OUTPUT_DIR / "mannwhitney_split",
-)
+# # For Split lines
+# print("Processing Split lines...")
+# stats_split = generate_jitterboxplots_with_mannwhitney(
+#     data=SplitLines,
+#     metrics=metric_names,
+#     y="Nickname",
+#     split_col="Split",
+#     hue="Brain region",
+#     palette=Config.color_dict,
+#     figsize=(12, 30),
+#     output_dir=OUTPUT_DIR / "mannwhitney_split",
+# )
 
-# For No Split lines
-print("Processing No Split lines...")
-stats_nosplit = generate_jitterboxplots_with_mannwhitney(
-    data=NoSplit,
-    metrics=metric_names,
-    y="Nickname",
-    split_col="Split",
-    hue="Brain region",
-    palette=Config.color_dict,
-    figsize=(12, 30),
-    output_dir=OUTPUT_DIR / "mannwhitney_nosplit",
-)
+# # For No Split lines
+# print("Processing No Split lines...")
+# stats_nosplit = generate_jitterboxplots_with_mannwhitney(
+#     data=NoSplit,
+#     metrics=metric_names,
+#     y="Nickname",
+#     split_col="Split",
+#     hue="Brain region",
+#     palette=Config.color_dict,
+#     figsize=(12, 30),
+#     output_dir=OUTPUT_DIR / "mannwhitney_nosplit",
+# )
 
-# For Mutants
-print("Processing Mutants...")
-stats_mutants = generate_jitterboxplots_with_mannwhitney(
-    data=Mutants,
-    metrics=metric_names,
-    y="Nickname",
-    split_col="Split",
-    hue="Brain region",
-    palette=Config.color_dict,
-    figsize=(12, 30),
-    output_dir=OUTPUT_DIR / "mannwhitney_mutant",
-)
+# # For Mutants
+# print("Processing Mutants...")
+# stats_mutants = generate_jitterboxplots_with_mannwhitney(
+#     data=Mutants,
+#     metrics=metric_names,
+#     y="Nickname",
+#     split_col="Split",
+#     hue="Brain region",
+#     palette=Config.color_dict,
+#     figsize=(12, 30),
+#     output_dir=OUTPUT_DIR / "mannwhitney_mutant",
+# )
 
-# Combine all statistics
-all_mannwhitney_stats = pd.concat([stats_split, stats_nosplit, stats_mutants], ignore_index=True)
-all_stats_path = OUTPUT_DIR / "all_mannwhitney_statistics.csv"
-all_mannwhitney_stats.to_csv(all_stats_path, index=False)
+# # Combine all statistics
+# all_mannwhitney_stats = pd.concat([stats_split, stats_nosplit, stats_mutants], ignore_index=True)
+# all_stats_path = OUTPUT_DIR / "all_mannwhitney_statistics.csv"
+# all_mannwhitney_stats.to_csv(all_stats_path, index=False)
 
-print(f"\nAll Mann-Whitney statistics saved to: {all_stats_path}")
-print(f"Total significant results: {all_mannwhitney_stats['significant'].sum()}")
-print(f"Significance breakdown:")
-for level in ["***", "**", "*", "ns"]:
-    count = (all_mannwhitney_stats["sig_level"] == level).sum()
-    print(f"  {level}: {count} results")
+# print(f"\nAll Mann-Whitney statistics saved to: {all_stats_path}")
+# print(f"Total significant results: {all_mannwhitney_stats['significant'].sum()}")
+# print(f"Significance breakdown:")
+# for level in ["***", "**", "*", "ns"]:
+#     count = (all_mannwhitney_stats["sig_level"] == level).sum()
+#     print(f"  {level}: {count} results")
