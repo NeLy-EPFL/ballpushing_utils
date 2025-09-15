@@ -787,6 +787,81 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: F1 Metrics Test (Comprehensive)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--test",
+                "comprehensive",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Metrics Test (Validation Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--test",
+                "validation"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Metrics Test (F1 Features Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--test",
+                "f1_features",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Metrics Test (Custom Path)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "${input:f1FlyPath}",
+                "--test",
+                "comprehensive",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ],
     "inputs": [
@@ -854,6 +929,12 @@
                 "ball",
                 "fly"
             ]
+        },
+        {
+            "id": "f1FlyPath",
+            "description": "Path to F1 fly directory",
+            "default": "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+            "type": "promptString"
         }
     ]
 }

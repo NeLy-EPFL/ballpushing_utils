@@ -37,6 +37,8 @@ def get_predefined_metric_sets():
             "final_event_time",
             "chamber_time",
             "chamber_ratio",
+            "nb_long_pauses",
+            "median_long_pause_duration",
         ],
         "core_analysis": [
             "nb_events",
@@ -87,6 +89,7 @@ def get_predefined_metric_sets():
             "get_time_chamber_beginning",
             "compute_median_freeze_duration",
             "compute_nb_freeze",
+            "compute_long_pause_metrics",
         ],
         "orientation_metrics": [
             "compute_fraction_not_facing_ball",
@@ -115,6 +118,7 @@ def get_predefined_metric_sets():
             "compute_pause_metrics",
             "compute_median_freeze_duration",
             "compute_nb_freeze",
+            "compute_long_pause_metrics",
         ],
         "comprehensive": [
             # Core behavioral metrics
@@ -623,6 +627,7 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False):
             "chamber_ratio",
             "get_chamber_time",
             "compute_pause_metrics",
+            "compute_long_pause_metrics",
             "compute_velocity_trend",
         ]:
             try:
@@ -841,6 +846,7 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test):
         "compute_mean_head_ball_distance",
         "compute_fraction_not_facing_ball",
         "compute_flailing",
+        "compute_long_pause_metrics",
     ]
 
     for metric in key_metrics:
@@ -914,6 +920,7 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test):
             "compute_nb_freeze",
             "compute_leg_visibility_ratio",
             "compute_median_head_ball_distance",
+            "compute_long_pause_metrics",
             "has_finished",
             "has_major",
             "has_significant",

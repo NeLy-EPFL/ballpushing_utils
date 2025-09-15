@@ -649,10 +649,10 @@ def analyze_correlations(dataset, metric_columns, correlation_threshold=0.8, nan
         print(f"  - {row['metric']}: {row['selection_freq']*100:.1f}%")
 
     stable_metrics = stability_df[stability_df["selection_freq"] > 0.5]["metric"].tolist()
-    with open("stable_metrics_for_pca.txt", "w") as f:
+    with open("stable_metrics_for_pca_alt.txt", "w") as f:
         for m in stable_metrics:
             f.write(m + "\n")
-    print(f"\n💾 Saved stable metrics list for PCA to stable_metrics_for_pca.txt")
+    print(f"\n💾 Saved stable metrics list for PCA to stable_metrics_for_pca_alt.txt")
 
     # ---- Per-family clustering and selection ----
     tmp_for_corr = metrics_data.copy()
@@ -743,10 +743,10 @@ def analyze_correlations(dataset, metric_columns, correlation_threshold=0.8, nan
     correlation_matrix = tmp_for_corr.loc[:, combined_selected].corr(method="spearman")
 
     # Save outputs
-    with open("final_metrics_for_pca.txt", "w") as f:
+    with open("final_metrics_for_pca_alt.txt", "w") as f:
         for m in combined_selected:
             f.write(m + "\n")
-    print(f"\n💾 Saved final metrics list for PCA to final_metrics_for_pca.txt")
+    print(f"\n💾 Saved final metrics list for PCA to final_metrics_for_pca_alt.txt")
 
     with open("final_metrics_by_family.txt", "w") as f:
         for fam, reps in sorted(family_selected.items()):

@@ -319,6 +319,8 @@ class BallPushingMetrics:
                     or self.is_metric_enabled("interaction_persistence")
                     or self.is_metric_enabled("number_of_pauses")
                     or self.is_metric_enabled("total_pause_duration")
+                    or self.is_metric_enabled("nb_long_pauses")
+                    or self.is_metric_enabled("median_long_pause_duration")
                 ):
                     final_event = metrics["final_event"]()
                     if final_event is None:
@@ -400,6 +402,14 @@ class BallPushingMetrics:
                         self.compute_pause_metrics,
                         fly_idx,
                         default={"number_of_pauses": 0, "total_pause_duration": 0.0},
+                    )
+
+                long_pause_metrics = {"nb_long_pauses": 0, "median_long_pause_duration": np.nan}
+                if self.is_metric_enabled("nb_long_pauses") or self.is_metric_enabled("median_long_pause_duration"):
+                    long_pause_metrics = safe_call(
+                        self.compute_long_pause_metrics,
+                        fly_idx,
+                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
                     )
 
                 interaction_persistence = np.nan
@@ -629,6 +639,22 @@ class BallPushingMetrics:
                         default={"number_of_pauses": 0, "total_pause_duration": 0.0},
                     )["total_pause_duration"]
 
+                # Long pause metrics
+                if self.is_metric_enabled("nb_long_pauses"):
+                    metrics_dict["nb_long_pauses"] = safe_call(
+                        self.compute_long_pause_metrics,
+                        fly_idx,
+                        subset=filtered_events,
+                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
+                    )["nb_long_pauses"]
+                if self.is_metric_enabled("median_long_pause_duration"):
+                    metrics_dict["median_long_pause_duration"] = safe_call(
+                        self.compute_long_pause_metrics,
+                        fly_idx,
+                        subset=filtered_events,
+                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
+                    )["median_long_pause_duration"]
+
                 # Learning and logistic metrics (expensive)
                 if self.is_metric_enabled("learning_slope"):
                     metrics_dict["learning_slope"] = learning_slope["slope"]
@@ -692,6 +718,10 @@ class BallPushingMetrics:
                     metrics_dict["median_freeze_duration"] = median_freeze_duration
                 if self.is_metric_enabled("nb_freeze"):
                     metrics_dict["nb_freeze"] = nb_freeze
+                if self.is_metric_enabled("nb_long_pauses"):
+                    metrics_dict["nb_long_pauses"] = long_pause_metrics["nb_long_pauses"]
+                if self.is_metric_enabled("median_long_pause_duration"):
+                    metrics_dict["median_long_pause_duration"] = long_pause_metrics["median_long_pause_duration"]
                 if self.is_metric_enabled("fraction_not_facing_ball"):
                     metrics_dict["fraction_not_facing_ball"] = fraction_not_facing_ball
                 if self.is_metric_enabled("flailing"):
@@ -1651,6 +1681,68 @@ class BallPushingMetrics:
         return {
             "number_of_pauses": number_of_pauses,
             "total_pause_duration": total_pause_duration,
+        }
+
+    def compute_long_pause_metrics(
+        self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2, long_pause_threshold=15.0
+    ):
+        """
+        Compute the number of long pauses and median long pause duration for a given fly.
+        Long pauses are defined as pauses that are longer than long_pause_threshold (default 15s).
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        subset : list, optional
+            List of events to consider. If None, all pauses are considered.
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause (default is 5).
+        window : int, optional
+            Number of frames to use for calculating movement (default is 5).
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for a pause to be considered valid (default is 2).
+        long_pause_threshold : float, optional
+            Minimum duration (in seconds) for a pause to be considered a long pause (default is 15.0).
+
+        Returns
+        -------
+        dict
+            Dictionary containing 'nb_long_pauses' and 'median_long_pause_duration'.
+        """
+        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
+
+        if subset is not None:
+            # Flatten all intervals in subset to a set of valid time ranges (in seconds)
+            valid_ranges = []
+            for event in subset:
+                start_time = event[0] / self.fly.experiment.fps
+                end_time = event[1] / self.fly.experiment.fps
+                valid_ranges.append((start_time, end_time))
+            # Filter pauses to only those that overlap with any valid range
+            filtered_pauses = []
+            for pause in pauses:
+                pause_start, pause_end, duration = pause
+                if any((pause_start < end and pause_end > start) for start, end in valid_ranges):
+                    filtered_pauses.append(pause)
+            pauses = filtered_pauses
+
+        # Filter for long pauses only
+        long_pauses = [pause for pause in pauses if pause[2] >= long_pause_threshold]
+
+        if not long_pauses:
+            return {
+                "nb_long_pauses": 0,
+                "median_long_pause_duration": np.nan,
+            }
+
+        nb_long_pauses = len(long_pauses)
+        long_pause_durations = [pause[2] for pause in long_pauses]
+        median_long_pause_duration = np.median(long_pause_durations)
+
+        return {
+            "nb_long_pauses": nb_long_pauses,
+            "median_long_pause_duration": median_long_pause_duration,
         }
 
     def compute_nb_freeze(self, fly_idx, freeze_threshold=2.0, threshold=5, window=5):
