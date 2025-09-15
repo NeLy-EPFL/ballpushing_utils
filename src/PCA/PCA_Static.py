@@ -330,6 +330,7 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
             "explained_variance_total": float(explained_variance_ratio.sum()),
             "n_genotypes_tested": len(results_df),
             "significant_hits": significant_genotypes,
+            "all_tested_genotypes": all_nicknames.tolist(),  # Include ALL tested genotypes
             "is_edge_case": is_edge_case,
             "edge_case_type": getattr(params, "edge_case_type", None) if is_edge_case else None,
             "all_results": results_df.to_dict("records"),
@@ -471,6 +472,10 @@ def main():
     optimized_hit_counts = {}
     edge_case_hit_counts = {}
 
+    # Track ALL genotypes tested (not just significant ones)
+    all_tested_genotypes = set()
+    genotype_tested_counts = {}  # How many configs each genotype was tested in
+
     config_details = []
 
     total_configs = 0
@@ -507,6 +512,12 @@ def main():
                     successful_edge_cases += 1
                 else:
                     successful_optimized += 1
+
+                # Track ALL tested genotypes (not just significant ones)
+                all_tested_in_config = detailed_results.get("all_tested_genotypes", [])
+                for genotype in all_tested_in_config:
+                    all_tested_genotypes.add(genotype)
+                    genotype_tested_counts[genotype] = genotype_tested_counts.get(genotype, 0) + 1
 
                 # Track hits by category
                 for genotype in significant_genotypes:
@@ -550,10 +561,12 @@ def main():
     print(f"   Total unique hits: {total_unique_hits}")
     print(f"   Optimized unique hits: {optimized_unique_hits}")
     print(f"   Edge case unique hits: {edge_case_unique_hits}")
+    print(f"   Total genotypes tested: {len(all_tested_genotypes)}")
 
-    # Create comprehensive consistency dataframes
+    # Create comprehensive consistency dataframes for ALL tested genotypes
     all_consistency_data = []
-    for genotype, count in hit_counts.items():
+    for genotype in all_tested_genotypes:
+        count = hit_counts.get(genotype, 0)  # 0 if never significant
         consistency_score = count / successful_configs
         optimized_count = optimized_hit_counts.get(genotype, 0)
         edge_case_count = edge_case_hit_counts.get(genotype, 0)

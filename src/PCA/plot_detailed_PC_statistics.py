@@ -866,9 +866,16 @@ def plot_two_way_dendrogram_custom(
         print("No data available to build clustering matrix.")
         return None
 
-    # 2) Linkages
-    row_Z = linkage(pdist(M.values, metric=row_metric), method=row_linkage) if M.shape[0] > 1 else None
-    col_Z = linkage(pdist(M.values.T, metric=col_metric), method=col_linkage) if M.shape[1] > 1 else None
+    # 2) Linkages (allow callers to override precomputed linkages via kwargs row_Z / col_Z)
+    # If the caller supplied row_Z/col_Z (positional kwargs), use them; otherwise compute from M
+    # Note: function signature accepts optional row_Z and col_Z at the end of kwargs
+    row_Z = globals().get("_plot_custom_row_Z", None)
+    col_Z = globals().get("_plot_custom_col_Z", None)
+    # If caller did not set the globals, compute from the matrix
+    if row_Z is None:
+        row_Z = linkage(pdist(M.values, metric=row_metric), method=row_linkage) if M.shape[0] > 1 else None
+    if col_Z is None:
+        col_Z = linkage(pdist(M.values.T, metric=col_metric), method=col_linkage) if M.shape[1] > 1 else None
 
     # 3) BALANCED GridSpec layout: more space for nicknames, proper spacing
     plt.style.use("default")
@@ -1085,6 +1092,130 @@ def plot_two_way_dendrogram_custom(
     }
 
 
+def plot_two_way_dendrogram_mixed(
+    results_df,
+    method_name,
+    OUTPUT_DIR,
+    loadings_csv_path,
+    only_significant_hits=True,
+    alpha=0.05,
+    weight_mode="linear_cap",
+    # clustering choices
+    row_metric="euclidean",
+    row_linkage="ward",
+    col_metric="euclidean",
+    col_linkage="ward",
+    # plotting passthroughs
+    **plot_kwargs,
+):
+    """
+    Two-way dendrogram where rows (genotypes) are clustered using the signed p-weight matrix
+    (same as the other functions), but columns (PCs) are clustered by similarity of their
+    loadings (read from `loadings_csv_path`). The loadings CSV should have PC rows and feature
+    columns (this matches the saved output from the PCA step).
+
+    Returns the same dict as `plot_two_way_dendrogram_custom`.
+    """
+    # Build M and pc_names
+    M, pc_names = _build_signed_weighted_matrix(
+        results_df, only_significant_hits=only_significant_hits, alpha=alpha, weight_mode=weight_mode
+    )
+    if M.empty:
+        print("No data available to build clustering matrix (mixed).")
+        return None
+
+    # Row linkage from the signed p-weight matrix
+    row_Z = linkage(pdist(M.values, metric=row_metric), method=row_linkage) if M.shape[0] > 1 else None
+
+    # Load loadings CSV and construct PC x features matrix aligned to pc_names
+    if not os.path.exists(loadings_csv_path):
+        print(f"Loadings file not found: {loadings_csv_path}")
+        return None
+
+    loadings_df = pd.read_csv(loadings_csv_path, index_col=0)
+
+    # Attempt to align loadings rows to pc_names by numeric suffix (e.g. PCA1 / PC1)
+    def find_row_for_pc(pc_label, loadings_index):
+        import re
+
+        m = re.match(r"PC(\d+)$", pc_label)
+        if not m:
+            return None
+        idx_num = m.group(1)
+        # Try exact match first
+        if pc_label in loadings_index:
+            return pc_label
+        # Try any index that ends with the same number
+        for r in loadings_index:
+            m2 = re.match(r".*?(\d+)$", str(r))
+            if m2 and m2.group(1) == idx_num:
+                return r
+        return None
+
+    loadings_index = list(loadings_df.index.astype(str))
+    pc_row_names = []
+    missing = []
+    for pc in pc_names:
+        r = find_row_for_pc(pc, loadings_index)
+        if r is None:
+            missing.append(pc)
+            pc_row_names.append(None)
+        else:
+            pc_row_names.append(r)
+
+    if any(x is None for x in pc_row_names):
+        print(f"Warning: could not find loadings rows for PCs: {missing}. Falling back to clustering PCs by M.T")
+        col_Z = linkage(pdist(M.values.T, metric=col_metric), method=col_linkage) if M.shape[1] > 1 else None
+    else:
+        # Build matrix where rows are in pc_names order.
+        # Use absolute loadings to break orthogonality and normalize rows so clustering focuses
+        # on profile shape rather than raw scale.
+        col_matrix = loadings_df.loc[pc_row_names].values.astype(float)
+        # take absolute values
+        col_matrix = np.abs(col_matrix)
+        # Replace NaNs with zero
+        if np.isnan(col_matrix).any():
+            col_matrix = np.nan_to_num(col_matrix)
+        # Normalize rows to unit L2 norm to focus on relative feature contributions
+        row_norms = np.linalg.norm(col_matrix, axis=1, keepdims=True)
+        row_norms[row_norms == 0] = 1.0
+        col_matrix = col_matrix / row_norms
+        col_Z = linkage(pdist(col_matrix, metric=col_metric), method=col_linkage) if col_matrix.shape[0] > 1 else None
+
+    # Use the existing custom plot by temporarily passing precomputed linkages via globals
+    # (less invasive than refactoring the function signature in many call sites)
+    prev_row_Z = globals().get("_plot_custom_row_Z", None)
+    prev_col_Z = globals().get("_plot_custom_col_Z", None)
+    try:
+        globals()["_plot_custom_row_Z"] = row_Z
+        globals()["_plot_custom_col_Z"] = col_Z
+        out = plot_two_way_dendrogram_custom(
+            results_df,
+            method_name,
+            OUTPUT_DIR,
+            only_significant_hits=only_significant_hits,
+            alpha=alpha,
+            weight_mode=weight_mode,
+            row_metric=row_metric,
+            row_linkage=row_linkage,
+            col_metric=col_metric,
+            col_linkage=col_linkage,
+            **plot_kwargs,
+        )
+    finally:
+        # restore globals
+        if prev_row_Z is None:
+            globals().pop("_plot_custom_row_Z", None)
+        else:
+            globals()["_plot_custom_row_Z"] = prev_row_Z
+        if prev_col_Z is None:
+            globals().pop("_plot_custom_col_Z", None)
+        else:
+            globals()["_plot_custom_col_Z"] = prev_col_Z
+
+    return out
+
+
 def main():
     """Main analysis function"""
     print("🏆 BEST PCA CONFIGURATION DETAILED ANALYSIS")
@@ -1181,6 +1312,25 @@ def main():
             fig_size=(12, 12),
             annotate=False,
         )
+
+        # If explicit loadings CSV is available, create a mixed dendrogram:
+        loadings_csv = "/home/matthias/ballpushing_utils/src/PCA/best_pca_analysis/best_pca_loadings.csv"
+        if os.path.exists(loadings_csv):
+            print(f"\n🎯 Creating mixed dendrogram using PC loadings from: {loadings_csv}")
+            plot_two_way_dendrogram_mixed(
+                results_df,
+                method_name,
+                OUTPUT_DIR,
+                loadings_csv_path=loadings_csv,
+                only_significant_hits=True,
+                alpha=0.05,
+                weight_mode="linear_cap",
+                row_metric="euclidean",
+                row_linkage="ward",
+                col_metric="euclidean",
+                col_linkage="ward",
+                fig_size=(12, 12),
+            )
 
     # Summary statistics
     total_hits = len(results_df[results_df["significant"]])
