@@ -24,6 +24,12 @@ from Ballpushing_utils import utilities, config
 
 # This script processes datasets for ball-pushing experiments, generating
 # datasets for experiments.
+#
+# PERFORMANCE OPTIMIZATIONS:
+# - Conditional cache clearing: Only clears caches when memory usage exceeds threshold
+# - Batch processing: For flies mode, processes multiple flies before clearing caches
+# - Memory monitoring: Tracks memory usage and provides detailed logging
+# - Configurable thresholds: Memory threshold and batch size can be adjusted
 
 # Available datasets:
 # - coordinates : Full coordinates of ball and fly positions over time
@@ -44,6 +50,15 @@ from Ballpushing_utils import utilities, config
 # Process experiments with filter (no YAML):
 # python dataset_builder.py --mode experiment
 #
+# Process flies with optimized batch cache clearing:
+# python dataset_builder.py --mode flies --yaml flies.yaml --batch-size 10
+#
+# Process with custom memory threshold (4GB):
+# python dataset_builder.py --mode flies --yaml flies.yaml --memory-threshold 4096
+#
+# Force original cache clearing behavior:
+# python dataset_builder.py --mode flies --yaml flies.yaml --force-cache-clear
+#
 # Verify existing datasets and create missing pooled datasets:
 # python dataset_builder.py --verify /path/to/existing/dataset/directory
 #
@@ -63,7 +78,7 @@ from Ballpushing_utils import utilities, config
 CONFIG = {
     "PATHS": {
         "data_root": [Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen"),
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -75,6 +90,7 @@ CONFIG = {
             "summary",  # Re-enabled for testing the optimization
             # "coordinates",
         ],  # Metrics to process (add/remove as needed)
+        "memory_threshold_mb": 2048,  # Memory threshold in MB for conditional cache clearing
     },
 }
 
@@ -140,6 +156,258 @@ def log_memory_usage(label):
     logging.info(f"Memory usage at {label}: {memory_info.rss / 1024 / 1024:.2f} MB")
 
 
+def get_memory_usage_mb():
+    """
+    Get current memory usage in MB.
+
+    Returns
+    -------
+    float
+        Memory usage in MB.
+    """
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    return memory_info.rss / 1024 / 1024
+
+
+def should_clear_caches(memory_threshold_mb=None):
+    """
+    Check if cache clearing is needed based on memory usage.
+
+    Parameters
+    ----------
+    memory_threshold_mb : int, optional
+        Memory threshold in MB above which caches should be cleared.
+        If None, uses CONFIG value.
+
+    Returns
+    -------
+    bool
+        True if caches should be cleared, False otherwise.
+    """
+    if memory_threshold_mb is None:
+        memory_threshold_mb = CONFIG["PROCESSING"]["memory_threshold_mb"]
+
+    current_memory = get_memory_usage_mb()
+    return current_memory > memory_threshold_mb
+
+
+def clear_experiment_caches_batch(experiment, force=False):
+    """
+    Clear caches for all flies in an experiment efficiently.
+
+    Parameters
+    ----------
+    experiment : Experiment
+        The experiment object containing flies to clear caches for.
+    force : bool
+        If True, clear caches regardless of memory usage. If False, only clear if needed.
+
+    Returns
+    -------
+    bool
+        True if caches were cleared, False if clearing was skipped.
+    """
+    if not force and not should_clear_caches():
+        logging.debug("Skipping cache clearing - memory usage below threshold")
+        return False
+
+    memory_before = get_memory_usage_mb()
+    start_time = time.time()
+
+    if experiment is not None and hasattr(experiment, "flies"):
+        # Clear caches for all flies at once
+        for fly in experiment.flies:
+            if hasattr(fly, "clear_caches"):
+                fly.clear_caches()
+
+        # Force garbage collection once for all flies
+        gc.collect()
+
+        memory_after = get_memory_usage_mb()
+        elapsed_time = time.time() - start_time
+        memory_freed = memory_before - memory_after
+
+        logging.info(
+            f"Batch cleared caches for {len(experiment.flies)} flies in {elapsed_time:.2f}s. "
+            f"Memory freed: {memory_freed:.1f}MB ({memory_before:.1f}MB → {memory_after:.1f}MB)"
+        )
+
+    return True
+
+
+def clear_fly_caches_conditional(fly, force=False):
+    """
+    Conditionally clear caches for a single fly based on memory usage.
+
+    Parameters
+    ----------
+    fly : Fly
+        The fly object to clear caches for.
+    force : bool
+        If True, clear caches regardless of memory usage. If False, only clear if needed.
+
+    Returns
+    -------
+    bool
+        True if caches were cleared, False if clearing was skipped.
+    """
+    if not force and not should_clear_caches():
+        logging.debug(f"Skipping cache clearing for {fly.metadata.name} - memory usage below threshold")
+        return False
+
+    memory_before = get_memory_usage_mb()
+    start_time = time.time()
+
+    if hasattr(fly, "clear_caches"):
+        fly.clear_caches()
+
+    # Force garbage collection
+    gc.collect()
+
+    memory_after = get_memory_usage_mb()
+    elapsed_time = time.time() - start_time
+    memory_freed = memory_before - memory_after
+
+    logging.debug(
+        f"Cleared caches for {fly.metadata.name} in {elapsed_time:.2f}s. "
+        f"Memory freed: {memory_freed:.1f}MB ({memory_before:.1f}MB → {memory_after:.1f}MB)"
+    )
+
+    return True
+
+
+def estimate_cache_clearing_time(num_flies, individual_time_ms=100, batch_time_ms=500):
+    """
+    Estimate time savings from batch cache clearing.
+
+    Parameters
+    ----------
+    num_flies : int
+        Number of flies to process.
+    individual_time_ms : float
+        Average time in milliseconds to clear cache for one fly individually.
+    batch_time_ms : float
+        Average time in milliseconds to clear cache for a batch of flies.
+
+    Returns
+    -------
+    tuple
+        (individual_total_ms, batch_total_ms, savings_ms, savings_percent)
+    """
+    individual_total = num_flies * individual_time_ms
+    num_batches = (num_flies + 4) // 5  # Assuming batch size of 5
+    batch_total = num_batches * batch_time_ms
+    savings = individual_total - batch_total
+    savings_percent = (savings / individual_total) * 100 if individual_total > 0 else 0
+
+    return individual_total, batch_total, savings, savings_percent
+
+
+def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
+    """
+    Process multiple fly directories in batches with efficient cache management.
+
+    Parameters
+    ----------
+    fly_dirs : list
+        List of fly directory paths.
+    metrics : list
+        List of metrics to process.
+    output_data : Path
+        Output directory for datasets.
+    batch_size : int
+        Number of flies to process before clearing caches.
+
+    Returns
+    -------
+    list
+        List of successfully processed fly names.
+    """
+    processed_flies = []
+    batch_flies = []
+
+    for i, fly_dir in enumerate(fly_dirs):
+        try:
+            # Extract fly name
+            experiment_name = fly_dir.parent.parent.name
+            arena_name = fly_dir.parent.name
+            corridor_name = fly_dir.name
+            fly_name = f"{experiment_name}_{arena_name}_{corridor_name}"
+
+            logging.info(f"Processing fly directory: {fly_dir} ({i+1}/{len(fly_dirs)})")
+
+            # Check if all datasets already exist
+            all_datasets_exist = True
+            for metric in metrics:
+                dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
+                if not dataset_path.exists():
+                    all_datasets_exist = False
+                    break
+
+            if all_datasets_exist:
+                logging.info(f"All datasets for {fly_name} already exist. Skipping.")
+                processed_flies.append(fly_name)
+                continue
+
+            # Create and process fly
+            fly = Ballpushing_utils.Fly(fly_dir, as_individual=True)
+            batch_flies.append((fly, fly_name))
+
+            # Process each metric for this specific fly
+            for metric in metrics:
+                dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
+
+                if dataset_path.exists():
+                    logging.info(f"Dataset {dataset_path} already exists. Skipping.")
+                    continue
+
+                # Create dataset for this specific fly
+                dataset = Ballpushing_utils.Dataset(fly, dataset_type=metric)
+
+                if dataset.data is not None and not dataset.data.empty:
+                    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+                    dataset.data.to_feather(dataset_path)
+                    logging.info(f"Saved {metric} dataset for {fly_name} to {dataset_path} ({len(dataset.data)} rows)")
+                else:
+                    logging.warning(f"No data available for {fly_name} with metric {metric}")
+
+            processed_flies.append(fly_name)
+
+            # Clear caches in batches
+            if len(batch_flies) >= batch_size or i == len(fly_dirs) - 1:
+                memory_before = get_memory_usage_mb()
+                start_time = time.time()
+
+                # Clear all flies in the batch
+                for fly, name in batch_flies:
+                    if hasattr(fly, "clear_caches"):
+                        fly.clear_caches()
+                    del fly
+
+                # Force garbage collection once for the whole batch
+                gc.collect()
+
+                memory_after = get_memory_usage_mb()
+                elapsed_time = time.time() - start_time
+                memory_freed = memory_before - memory_after
+
+                logging.info(
+                    f"Batch cleared caches for {len(batch_flies)} flies in {elapsed_time:.2f}s. "
+                    f"Memory freed: {memory_freed:.1f}MB ({memory_before:.1f}MB → {memory_after:.1f}MB)"
+                )
+
+                batch_flies = []  # Reset batch
+
+        except Exception as e:
+            logging.error(f"Error processing fly directory {fly_dir}: {str(e)}")
+            import traceback
+
+            logging.error(f"Traceback: {traceback.format_exc()}")
+
+    return processed_flies
+
+
 def process_experiment(folder, metrics, output_data):
     """
     Process an experiment folder in experiment mode.
@@ -190,23 +458,17 @@ def process_experiment(folder, metrics, output_data):
             else:
                 logging.warning(f"No data available for {folder.name} with metric {metric}")
 
-            # Clear caches between experiments to prevent memory accumulation
-            # For experiment-level processing, we need to clear caches for each fly
-            if experiment is not None and hasattr(experiment, "flies"):
-                for fly in experiment.flies:
-                    # Clear all caches on the Fly object (includes BallPushingMetrics, FlyTrackingData, etc.)
-                    if hasattr(fly, "clear_caches"):
-                        fly.clear_caches()
-                        print(f"Cleared all caches for fly: {fly.metadata.name}")
-
-            # Force garbage collection
-            gc.collect()
+        # Clear caches after processing all metrics for this experiment (batch clearing)
+        # Force clear to ensure memory is freed after processing the experiment
+        cleared = clear_experiment_caches_batch(experiment, force=True)
+        if not cleared and experiment is not None:
+            logging.debug(f"Skipped cache clearing for {folder.name} - memory usage acceptable")
 
     except Exception as e:
         logging.error(f"Error processing experiment {folder.name}: {str(e)}")
 
 
-def process_fly_directory(fly_dir, metrics, output_data):
+def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False):
     """
     Process an individual fly directory in flies mode.
 
@@ -218,6 +480,8 @@ def process_fly_directory(fly_dir, metrics, output_data):
         List of metrics to process.
     output_data : Path
         Output directory for datasets.
+    force_cache_clear : bool
+        If True, always clear caches regardless of memory usage.
     """
     logging.info(f"Processing fly directory: {fly_dir}")
 
@@ -271,17 +535,13 @@ def process_fly_directory(fly_dir, metrics, output_data):
             else:
                 logging.warning(f"No data available for {fly_name} with metric {metric}")
 
-        # Clear caches and force garbage collection after processing each fly
-        if hasattr(fly, "clear_caches"):
-            fly.clear_caches()
-            print(f"Cleared all caches for fly: {fly.metadata.name}")
+        # Conditionally clear caches based on memory usage or force flag
+        cleared = clear_fly_caches_conditional(fly, force=force_cache_clear)
+        if cleared:
+            logging.debug(f"Cleared caches for fly: {fly.metadata.name}")
 
         # Clear the fly object
         del fly
-
-        # Force garbage collection
-        gc.collect()
-        logging.debug(f"Cleared caches and performed garbage collection after processing {fly_name}")
 
     except Exception as e:
         logging.error(f"Error processing fly directory {fly_dir}: {str(e)}")
@@ -553,9 +813,41 @@ if __name__ == "__main__":
         default="INFO",
         help="Set the logging level (default: INFO)",
     )
+    parser.add_argument(
+        "--memory-threshold",
+        type=int,
+        default=2048,
+        help="Memory threshold in MB for conditional cache clearing (default: 2048MB)",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=5,
+        help="Number of flies to process before clearing caches in batch mode (default: 5)",
+    )
+    parser.add_argument(
+        "--force-cache-clear",
+        action="store_true",
+        help="Always clear caches regardless of memory usage (original behavior)",
+    )
     args = parser.parse_args()
 
+    # Update CONFIG with command line arguments
+    CONFIG["PROCESSING"]["memory_threshold_mb"] = args.memory_threshold
+
     logging.basicConfig(level=getattr(logging, args.log_level))
+
+    # Log optimization settings
+    logging.info(f"Cache management configuration:")
+    logging.info(f"  - Memory threshold: {args.memory_threshold}MB")
+    logging.info(f"  - Batch size (flies mode): {args.batch_size}")
+    logging.info(f"  - Force cache clearing: {args.force_cache_clear}")
+    if args.mode == "flies" and args.batch_size > 1 and not args.force_cache_clear:
+        logging.info(f"  - Will use batch processing for optimal cache management")
+    elif args.force_cache_clear:
+        logging.info(f"  - Will use original cache clearing behavior")
+    else:
+        logging.info(f"  - Will use conditional cache clearing based on memory usage")
 
     # Handle verification mode
     if args.verify:
@@ -681,41 +973,74 @@ if __name__ == "__main__":
     else:
         processed_items = set()
 
-    for item in processing_items:
-        # Initialize variables for each item
-        item_name = ""
-        log_label = ""
+    # Choose processing approach based on mode and options
+    if args.mode == "flies" and args.batch_size > 1 and not args.force_cache_clear:
+        # Use batch processing for flies mode to optimize cache clearing
+        logging.info(f"Using batch processing for flies with batch size: {args.batch_size}")
 
-        if args.mode == "experiment":
-            item_name = item.name
-            log_label = f"experiment {item_name}"
-        elif args.mode == "flies":
-            # Create a unique name for the fly directory
-            item_name = f"{item.parent.parent.name}_{item.parent.name}_{item.name}"
-            log_label = f"fly {item_name}"
+        # Filter out already processed flies
+        flies_to_process = []
+        for fly_dir in processing_items:
+            item_name = f"{fly_dir.parent.parent.name}_{fly_dir.parent.name}_{fly_dir.name}"
+            if item_name not in processed_items:
+                flies_to_process.append(fly_dir)
+            else:
+                logging.info(f"Skipping already processed fly {item_name}")
 
-        if item_name in processed_items:
-            logging.info(f"Skipping already processed {log_label}")
-            continue
+        log_memory_usage("Before batch processing flies")
 
-        log_memory_usage(f"Before processing {log_label}")
+        # Process flies in batches
+        successfully_processed = process_flies_batch(
+            flies_to_process, CONFIG["PROCESSING"]["metrics"], output_data, batch_size=args.batch_size
+        )
 
-        try:
+        # Update checkpoint with all processed flies
+        processed_items.update(successfully_processed)
+        with open(checkpoint_file, "w") as f:
+            json.dump(list(processed_items), f)
+
+        log_memory_usage("After batch processing flies")
+
+    else:
+        # Use original individual processing
+        for item in processing_items:
+            # Initialize variables for each item
+            item_name = ""
+            log_label = ""
+
             if args.mode == "experiment":
-                process_experiment(item, CONFIG["PROCESSING"]["metrics"], output_data)
+                item_name = item.name
+                log_label = f"experiment {item_name}"
             elif args.mode == "flies":
-                process_fly_directory(item, CONFIG["PROCESSING"]["metrics"], output_data)
+                # Create a unique name for the fly directory
+                item_name = f"{item.parent.parent.name}_{item.parent.name}_{item.name}"
+                log_label = f"fly {item_name}"
 
-            processed_items.add(item_name)
+            if item_name in processed_items:
+                logging.info(f"Skipping already processed {log_label}")
+                continue
 
-            # Save checkpoint after each successful processing
-            with open(checkpoint_file, "w") as f:
-                json.dump(list(processed_items), f)
+            log_memory_usage(f"Before processing {log_label}")
 
-        except Exception as e:
-            logging.error(f"Error processing {log_label}: {str(e)}")
+            try:
+                if args.mode == "experiment":
+                    process_experiment(item, CONFIG["PROCESSING"]["metrics"], output_data)
+                elif args.mode == "flies":
+                    # Use individual processing with configurable cache clearing
+                    process_fly_directory(
+                        item, CONFIG["PROCESSING"]["metrics"], output_data, force_cache_clear=args.force_cache_clear
+                    )
 
-        log_memory_usage(f"After processing {log_label}")
+                processed_items.add(item_name)
+
+                # Save checkpoint after each successful processing
+                with open(checkpoint_file, "w") as f:
+                    json.dump(list(processed_items), f)
+
+            except Exception as e:
+                logging.error(f"Error processing {log_label}: {str(e)}")
+
+            log_memory_usage(f"After processing {log_label}")
 
     if checkpoint_file.exists():
         checkpoint_file.unlink()

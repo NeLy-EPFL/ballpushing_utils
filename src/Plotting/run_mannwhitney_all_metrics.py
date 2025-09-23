@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to generate Mann-Whitney U test jitterboxplots for all metrics.
+Script to generate Mann-Whitney U test jitterboxplots for all metrics or specific metrics.
 
 This script generates comprehensive Mann-Whitney U test visualizations with:
 - Significance-based sorting (significantly increased/neutral/significantly decreased)
@@ -11,11 +11,12 @@ This script generates comprehensive Mann-Whitney U test visualizations with:
 - Proper spacing between boxplots
 
 Usage:
-    python run_mannwhitney_all_metrics.py [--overwrite] [--test]
+    python run_mannwhitney_all_metrics.py [--no-overwrite] [--test] [--metrics METRIC1 METRIC2 ...]
 
 Arguments:
-    --overwrite: If specified, overwrite existing plots. If not specified, skip metrics that already have plots.
+    --no-overwrite: Skip metrics that already have existing plots (default: overwrite existing plots)
     --test: Enable test mode for faster debugging (limits metrics and samples)
+    --metrics: Process only specific metrics (space-separated list)
 """
 
 import sys
@@ -94,7 +95,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=500):
         Number of samples to use in test mode
     """
     # Load the dataset - updated to use the latest dataset with all metrics
-    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
 
     print(f"Loading dataset from: {dataset_path}")
     try:
@@ -559,7 +560,7 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_nickname=None
     print(f"  Sorted by proportion (descending): {prop_data['proportion'].tolist()}")
 
 
-def main(overwrite=True, test_mode=False):
+def main(overwrite=True, test_mode=False, specific_metrics=None):
     """Main function to run Mann-Whitney plots for all metrics.
 
     Parameters:
@@ -568,11 +569,16 @@ def main(overwrite=True, test_mode=False):
         If True, overwrite existing plots. If False, skip metrics with existing plots.
     test_mode : bool
         If True, only process the first 5 metrics and sample data for fast testing.
+    specific_metrics : list or None
+        If provided, only process these specific metrics. If None, process all metrics.
     """
     # Record overall start time
     overall_start_time = time.time()
 
-    print(f"Starting Mann-Whitney U test analysis for all metrics...")
+    if specific_metrics:
+        print(f"Starting Mann-Whitney U test analysis for specific metrics: {specific_metrics}")
+    else:
+        print(f"Starting Mann-Whitney U test analysis for all metrics...")
     if not overwrite:
         print("📄 Overwrite disabled: Will skip metrics with existing plots")
     if test_mode:
@@ -699,8 +705,50 @@ def main(overwrite=True, test_mode=False):
 
     metric_cols = filtered_metrics
 
-    # If in test mode, limit to first 5 metrics for faster debugging
-    if test_mode:
+    # Apply specific metrics filtering if provided
+    if specific_metrics:
+        print(f"\n📊 SPECIFIC METRICS FILTERING: Requested {len(specific_metrics)} specific metrics")
+
+        # Find which requested metrics are available in the DATASET (not just in the filtered list)
+        available_specific = []
+        missing_specific = []
+
+        for metric in specific_metrics:
+            if metric in dataset.columns:
+                # Check if it's numeric and not in excluded patterns
+                if pd.api.types.is_numeric_dtype(dataset[metric]):
+                    # Check for excluded patterns
+                    excluded_pattern = None
+                    for pattern in excluded_patterns:
+                        if pattern in metric:
+                            excluded_pattern = pattern
+                            break
+
+                    if excluded_pattern:
+                        print(f"  ⚠️  Skipping {metric}: matches excluded pattern '{excluded_pattern}'")
+                        missing_specific.append(f"{metric} (excluded pattern: {excluded_pattern})")
+                    else:
+                        available_specific.append(metric)
+                else:
+                    print(f"  ⚠️  Skipping {metric}: not numeric (dtype: {dataset[metric].dtype})")
+                    missing_specific.append(f"{metric} (non-numeric)")
+            else:
+                print(f"  ⚠️  Skipping {metric}: not found in dataset")
+                missing_specific.append(f"{metric} (not in dataset)")
+
+        if available_specific:
+            metric_cols = available_specific
+            print(f"✅ Found {len(available_specific)} requested metrics in dataset: {available_specific}")
+        else:
+            print(f"❌ None of the requested metrics are valid!")
+
+        if missing_specific:
+            print(f"⚠️  Issues with requested metrics: {missing_specific}")
+
+        if not available_specific:
+            print(f"⚠️  No valid metrics to process. Exiting...")
+            return  # If in test mode, limit to first 5 metrics for faster debugging
+    if test_mode and not specific_metrics:  # Don't limit if specific metrics were requested
         original_count = len(metric_cols)
         metric_cols = metric_cols[:5]
         print(f"🧪 TEST MODE: Limited to {len(metric_cols)}/{original_count} metrics for faster processing")
@@ -992,14 +1040,16 @@ def main(overwrite=True, test_mode=False):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Generate Mann-Whitney U test jitterboxplots for all metrics",
+        description="Generate Mann-Whitney U test jitterboxplots for all metrics or specific metrics",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_mannwhitney_all_metrics.py                    # Overwrite existing plots
-  python run_mannwhitney_all_metrics.py --no-overwrite     # Skip existing plots
+  python run_mannwhitney_all_metrics.py                    # Process all metrics, overwrite existing plots
+  python run_mannwhitney_all_metrics.py --no-overwrite     # Process all metrics, skip existing plots
   python run_mannwhitney_all_metrics.py --test            # Run in test mode (faster debugging)
   python run_mannwhitney_all_metrics.py --test --no-overwrite  # Test mode without overwriting
+  python run_mannwhitney_all_metrics.py --metrics nb_events max_event  # Process only specific metrics
+  python run_mannwhitney_all_metrics.py --metrics has_finished --no-overwrite  # Process one metric, skip if exists
         """,
     )
     parser.add_argument(
@@ -1012,8 +1062,14 @@ Examples:
         action="store_true",
         help="Run in test mode with limited metrics and samples for faster debugging",
     )
+    parser.add_argument(
+        "--metrics",
+        nargs="+",
+        type=str,
+        help="Process only specific metrics (space-separated list). Example: --metrics nb_events max_event has_finished",
+    )
 
     args = parser.parse_args()
 
-    # Run main function with overwrite and test_mode parameters
-    main(overwrite=not args.no_overwrite, test_mode=args.test)
+    # Run main function with overwrite, test_mode, and specific_metrics parameters
+    main(overwrite=not args.no_overwrite, test_mode=args.test, specific_metrics=args.metrics)

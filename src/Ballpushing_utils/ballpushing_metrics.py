@@ -252,7 +252,12 @@ class BallPushingMetrics:
 
         for fly_idx, ball_dict in self.tracking_data.interaction_events.items():
             for ball_idx, events in ball_dict.items():
-                key = f"fly_{fly_idx}_ball_{ball_idx}"
+                # Generate key with ball identity if available
+                ball_identity = self.tracking_data.get_ball_identity(ball_idx)
+                if ball_identity:
+                    key = f"fly_{fly_idx}_ball_{ball_identity}"
+                else:
+                    key = f"fly_{fly_idx}_ball_{ball_idx}"
 
                 # Define metrics and their corresponding methods
                 metrics = {
@@ -317,10 +322,11 @@ class BallPushingMetrics:
                     or self.is_metric_enabled("distance_ratio")
                     or self.is_metric_enabled("interaction_proportion")
                     or self.is_metric_enabled("interaction_persistence")
-                    or self.is_metric_enabled("number_of_pauses")
+                    or self.is_metric_enabled("nb_pauses")
                     or self.is_metric_enabled("total_pause_duration")
                     or self.is_metric_enabled("nb_long_pauses")
                     or self.is_metric_enabled("median_long_pause_duration")
+                    or self.is_metric_enabled("raw_pauses")
                 ):
                     final_event = metrics["final_event"]()
                     if final_event is None:
@@ -396,12 +402,16 @@ class BallPushingMetrics:
                     if isinstance(val, dict):
                         insight_effect = val
 
-                pause_metrics = {"number_of_pauses": 0, "total_pause_duration": 0.0}
-                if self.is_metric_enabled("number_of_pauses") or self.is_metric_enabled("total_pause_duration"):
+                pause_metrics = {"nb_pauses": 0, "median_pause_duration": np.nan, "total_pause_duration": 0.0}
+                if (
+                    self.is_metric_enabled("nb_pauses")
+                    or self.is_metric_enabled("median_pause_duration")
+                    or self.is_metric_enabled("total_pause_duration")
+                ):
                     pause_metrics = safe_call(
                         self.compute_pause_metrics,
                         fly_idx,
-                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
+                        default=pause_metrics,
                     )
 
                 long_pause_metrics = {"nb_long_pauses": 0, "median_long_pause_duration": np.nan}
@@ -411,6 +421,11 @@ class BallPushingMetrics:
                         fly_idx,
                         default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
                     )
+
+                # Raw pauses - the unfiltered list of pauses detected
+                raw_pauses = []
+                if self.is_metric_enabled("raw_pauses"):
+                    raw_pauses = safe_call(self.get_raw_pauses, fly_idx, default=[])
 
                 interaction_persistence = np.nan
                 if self.is_metric_enabled("interaction_persistence"):
@@ -482,13 +497,18 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("time_chamber_beginning"):
                     time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
 
-                median_freeze_duration = np.nan
-                if self.is_metric_enabled("median_freeze_duration"):
-                    median_freeze_duration = safe_call(self.compute_median_freeze_duration, fly_idx, default=np.nan)
+                median_stop_duration = np.nan
+                if self.is_metric_enabled("median_stop_duration"):
+                    median_stop_duration = safe_call(self.compute_median_stop_duration, fly_idx, default=np.nan)
 
-                nb_freeze = 0
-                if self.is_metric_enabled("nb_freeze"):
-                    nb_freeze = safe_call(self.compute_nb_freeze, fly_idx, default=0)
+                # Stop metrics
+                stop_metrics = {"nb_stops": 0, "median_stop_duration": np.nan, "total_stop_duration": 0.0}
+                if (
+                    self.is_metric_enabled("nb_stops")
+                    or self.is_metric_enabled("median_stop_duration")
+                    or self.is_metric_enabled("total_stop_duration")
+                ):
+                    stop_metrics = safe_call(self.compute_stop_metrics, fly_idx, default=stop_metrics)
 
                 # Skeleton metrics - batch computation optimization
                 skeleton_metrics_results = {}
@@ -537,6 +557,15 @@ class BallPushingMetrics:
 
                 # Store metrics in the dictionary - only compute enabled metrics
                 metrics_dict = {}
+
+                # Add identification information
+                metrics_dict["fly_idx"] = fly_idx
+                metrics_dict["ball_idx"] = ball_idx
+                if ball_identity:
+                    metrics_dict["ball_identity"] = ball_identity
+                else:
+                    # For backward compatibility, set to None/unknown for regular experiments
+                    metrics_dict["ball_identity"] = None
 
                 # Basic event metrics
                 if self.is_metric_enabled("nb_events"):
@@ -624,20 +653,25 @@ class BallPushingMetrics:
                     metrics_dict["chamber_exit_time"] = self.tracking_data.chamber_exit_times[fly_idx]
 
                 # Pause metrics
-                if self.is_metric_enabled("number_of_pauses"):
-                    metrics_dict["number_of_pauses"] = safe_call(
+                pause_metrics = {"nb_pauses": 0, "median_pause_duration": np.nan, "total_pause_duration": 0.0}
+                if (
+                    self.is_metric_enabled("nb_pauses")
+                    or self.is_metric_enabled("median_pause_duration")
+                    or self.is_metric_enabled("total_pause_duration")
+                ):
+                    pause_metrics = safe_call(
                         self.compute_pause_metrics,
                         fly_idx,
                         subset=filtered_events,
-                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
-                    )["number_of_pauses"]
+                        default=pause_metrics,
+                    )
+
+                if self.is_metric_enabled("nb_pauses"):
+                    metrics_dict["nb_pauses"] = pause_metrics["nb_pauses"]
+                if self.is_metric_enabled("median_pause_duration"):
+                    metrics_dict["median_pause_duration"] = pause_metrics["median_pause_duration"]
                 if self.is_metric_enabled("total_pause_duration"):
-                    metrics_dict["total_pause_duration"] = safe_call(
-                        self.compute_pause_metrics,
-                        fly_idx,
-                        subset=filtered_events,
-                        default={"number_of_pauses": 0, "total_pause_duration": 0.0},
-                    )["total_pause_duration"]
+                    metrics_dict["total_pause_duration"] = pause_metrics["total_pause_duration"]
 
                 # Long pause metrics
                 if self.is_metric_enabled("nb_long_pauses"):
@@ -714,14 +748,21 @@ class BallPushingMetrics:
                     metrics_dict["fly_distance_moved"] = fly_distance_moved
                 if self.is_metric_enabled("time_chamber_beginning"):
                     metrics_dict["time_chamber_beginning"] = time_chamber_beginning
-                if self.is_metric_enabled("median_freeze_duration"):
-                    metrics_dict["median_freeze_duration"] = median_freeze_duration
-                if self.is_metric_enabled("nb_freeze"):
-                    metrics_dict["nb_freeze"] = nb_freeze
+                if self.is_metric_enabled("nb_stops"):
+                    metrics_dict["nb_stops"] = stop_metrics["nb_stops"]
+                if self.is_metric_enabled("median_stop_duration"):
+                    metrics_dict["median_stop_duration"] = stop_metrics["median_stop_duration"]
+                if self.is_metric_enabled("total_stop_duration"):
+                    metrics_dict["total_stop_duration"] = stop_metrics["total_stop_duration"]
                 if self.is_metric_enabled("nb_long_pauses"):
                     metrics_dict["nb_long_pauses"] = long_pause_metrics["nb_long_pauses"]
                 if self.is_metric_enabled("median_long_pause_duration"):
                     metrics_dict["median_long_pause_duration"] = long_pause_metrics["median_long_pause_duration"]
+                if self.is_metric_enabled("total_long_pause_duration"):
+                    metrics_dict["total_long_pause_duration"] = long_pause_metrics["total_long_pause_duration"]
+
+                if self.is_metric_enabled("raw_pauses"):
+                    metrics_dict["raw_pauses"] = raw_pauses
                 if self.is_metric_enabled("fraction_not_facing_ball"):
                     metrics_dict["fraction_not_facing_ball"] = fraction_not_facing_ball
                 if self.is_metric_enabled("flailing"):
@@ -732,6 +773,145 @@ class BallPushingMetrics:
                     metrics_dict["leg_visibility_ratio"] = leg_visibility_ratio
 
                 self.metrics[key] = metrics_dict
+
+    def get_metrics_by_identity(self, fly_idx, ball_identity):
+        """
+        Get metrics for a specific fly and ball identity (e.g., 'training', 'test').
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_identity : str
+            Ball identity ('training', 'test', etc.)
+
+        Returns
+        -------
+        dict or None
+            Metrics dictionary if found, None otherwise.
+        """
+        # First try with identity-based key
+        key = f"fly_{fly_idx}_ball_{ball_identity}"
+        if key in self.metrics:
+            return self.metrics[key]
+
+        # Fallback: search through all metrics to find matching ball_identity
+        for metric_key, metrics_dict in self.metrics.items():
+            if metrics_dict.get("fly_idx") == fly_idx and metrics_dict.get("ball_identity") == ball_identity:
+                return metrics_dict
+
+        return None
+
+    def get_training_ball_metrics(self, fly_idx):
+        """
+        Get metrics for the training ball.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        dict or None
+            Training ball metrics if found, None otherwise.
+        """
+        return self.get_metrics_by_identity(fly_idx, "training")
+
+    def get_test_ball_metrics(self, fly_idx):
+        """
+        Get metrics for the test ball.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        dict or None
+            Test ball metrics if found, None otherwise.
+        """
+        return self.get_metrics_by_identity(fly_idx, "test")
+
+    def get_all_ball_identities(self, fly_idx):
+        """
+        Get all available ball identities for a given fly.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+
+        Returns
+        -------
+        list
+            List of available ball identities for the fly.
+        """
+        identities = []
+        for metric_key, metrics_dict in self.metrics.items():
+            if metrics_dict.get("fly_idx") == fly_idx:
+                identity = metrics_dict.get("ball_identity")
+                if identity and identity not in identities:
+                    identities.append(identity)
+        return identities
+
+    def has_ball_identity(self, fly_idx, ball_identity):
+        """
+        Check if metrics exist for a specific fly and ball identity.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_identity : str
+            Ball identity to check for.
+
+        Returns
+        -------
+        bool
+            True if metrics exist for the specified identity, False otherwise.
+        """
+        return self.get_metrics_by_identity(fly_idx, ball_identity) is not None
+
+    def _get_appropriate_final_event_threshold(self, fly_idx, ball_idx):
+        """
+        Determine the appropriate final event threshold based on ball identity for F1 experiments.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            The appropriate final event threshold.
+        """
+        # Check if we have ball identity information (F1 experiment)
+        if (
+            hasattr(self.tracking_data, "ball_identities")
+            and self.tracking_data.ball_identities is not None
+            and ball_idx in self.tracking_data.ball_identities
+        ):
+
+            ball_identity = self.tracking_data.ball_identities[ball_idx]
+
+            if ball_identity == "test":
+                # Test ball uses F1 threshold (shorter corridor)
+                return self.fly.config.final_event_F1_threshold
+            elif ball_identity == "training":
+                # Training ball uses regular threshold (longer corridor)
+                return self.fly.config.final_event_threshold
+
+        # Fallback: use the existing position-based logic for backwards compatibility
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
+            return self.fly.config.final_event_threshold
+        else:
+            return self.fly.config.final_event_F1_threshold
 
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
         """
@@ -860,7 +1040,8 @@ class BallPushingMetrics:
     def find_event_by_distance(self, fly_idx, ball_idx, threshold, distance_type="max"):
         """
         Find the event at which the ball has been moved a given amount of pixels for a given fly and ball.
-        Threshold is the distance threshold to check, whereas max is the maximum distance reached by the ball for this particular fly and ball.
+        Uses median smoothed coordinates at event start/end to determine if ball crossed threshold,
+        which is more robust against tracking errors.
 
         Parameters
         ----------
@@ -880,14 +1061,51 @@ class BallPushingMetrics:
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        if distance_type == "max":
-            max_distance = ball_data["euclidean_distance"].max() - threshold
+        # Get ball initial position using median coordinates for robustness
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(
+            ball_data, start_idx=0, window=10, keypoint="centre"
+        )
 
-            distance_check = (
-                lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= max_distance
-            )
+        if distance_type == "max":
+            # For max distance type, first calculate the actual max distance reached
+            # using median coordinates at the end of all events
+            max_distance_reached = 0
+            for event in self.tracking_data.interaction_events[fly_idx][ball_idx]:
+                start_idx, end_idx = event[0], event[1]
+                _, _, end_x, end_y = self._calculate_median_coordinates(
+                    ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+                )
+                if end_x is not None and end_y is not None:
+                    distance_from_initial = Processing.calculate_euclidian_distance(end_x, end_y, initial_x, initial_y)
+                    max_distance_reached = max(max_distance_reached, distance_from_initial)
+
+            target_distance = max_distance_reached - threshold
+
+            def distance_check(event):
+                start_idx, end_idx = event[0], event[1]
+                _, _, end_x, end_y = self._calculate_median_coordinates(
+                    ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+                )
+                if end_x is None or end_y is None:
+                    return False
+                distance_from_initial = Processing.calculate_euclidian_distance(end_x, end_y, initial_x, initial_y)
+                return distance_from_initial >= target_distance
+
         elif distance_type == "threshold":
-            distance_check = lambda event: ball_data.loc[event[0] : event[1], "euclidean_distance"].max() >= threshold
+
+            def distance_check(event):
+                start_idx, end_idx = event[0], event[1]
+                # Get median coordinates at event start and end
+                start_x, start_y, end_x, end_y = self._calculate_median_coordinates(
+                    ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+                )
+                if start_x is None or start_y is None or end_x is None or end_y is None:
+                    return False
+
+                # Check if ball moved at least threshold distance from initial position by event end
+                distance_from_initial = Processing.calculate_euclidian_distance(end_x, end_y, initial_x, initial_y)
+                return distance_from_initial >= threshold
+
         else:
             raise ValueError("Invalid distance_type. Use 'max' or 'threshold'.")
 
@@ -1067,10 +1285,7 @@ class BallPushingMetrics:
 
         # Determine the appropriate threshold
         if threshold is None:
-            if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                threshold = self.fly.config.final_event_threshold
-            else:
-                threshold = self.fly.config.final_event_F1_threshold
+            threshold = self._get_appropriate_final_event_threshold(fly_idx, ball_idx)
         if self.fly.config.debugging:
             print(f"Threshold for fly {fly_idx}, ball {ball_idx}: {threshold}")
 
@@ -1087,14 +1302,19 @@ class BallPushingMetrics:
 
         # Calculate the time and end time of the final event
         if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            final_event_time = final_event[0] / self.fly.experiment.fps
+            final_event_start_time = final_event[0] / self.fly.experiment.fps
+            final_event_time = final_event[0] / self.fly.experiment.fps  # Use START time for final event
             final_event_end = final_event[1] / self.fly.experiment.fps
 
             if chamber_exit_time is not None:
+                final_event_start_time -= chamber_exit_time
                 final_event_time -= chamber_exit_time
                 final_event_end -= chamber_exit_time
         else:
-            final_event_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+            final_event_start_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
+            final_event_time = (
+                final_event[0] / self.fly.experiment.fps
+            ) - self.tracking_data.exit_time  # Use START time
             final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
 
         return final_event_idx, final_event_time, final_event_end
@@ -1648,9 +1868,39 @@ class BallPushingMetrics:
 
         return pauses_timestamps
 
-    def compute_pause_metrics(self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2):
+    def get_raw_pauses(self, fly_idx, threshold=None, window=None, minimum_duration=None):
         """
-        Compute the number of pauses and total duration of pauses for a given fly, optionally within a subset of frames.
+        Get the raw list of pauses detected by detect_pauses without any time threshold filtering.
+        This returns the complete list of pauses as detected by the algorithm, allowing for
+        post-processing analysis of pause distributions, durations, and filtering strategies.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause. If None, uses default from config.
+        window : int, optional
+            Number of frames to use for calculating movement. If None, uses default from config.
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for a pause to be considered valid.
+            If None, uses default from config. Set to 0 to get all pauses regardless of duration.
+
+        Returns
+        -------
+        list of tuple
+            List of pauses, where each pause is represented as a tuple (start_time, end_time, duration).
+            Times are in seconds from the start of the experiment.
+        """
+        return self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=1)
+
+    def compute_pause_metrics(self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2.0):
+        """
+        Compute the number of pauses and total duration of pauses for a given fly.
+        Uses consistent detection parameters across all pause-related metrics.
+
+        Pauses represent general movement cessation events ≥2s duration.
+        For comparison with stops (≥2s) and long pauses (≥10s).
         """
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
@@ -1671,24 +1921,31 @@ class BallPushingMetrics:
 
         if not pauses:
             return {
-                "number_of_pauses": 0,
+                "nb_pauses": 0,
+                "median_pause_duration": np.nan,
                 "total_pause_duration": 0.0,
             }
 
-        number_of_pauses = len(pauses)
-        total_pause_duration = sum(pause[2] for pause in pauses)
+        nb_pauses = len(pauses)
+        pause_durations = [pause[2] for pause in pauses]
+        median_pause_duration = np.median(pause_durations)
+        total_pause_duration = sum(pause_durations)
 
         return {
-            "number_of_pauses": number_of_pauses,
+            "nb_pauses": nb_pauses,
+            "median_pause_duration": median_pause_duration,
             "total_pause_duration": total_pause_duration,
         }
 
     def compute_long_pause_metrics(
-        self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2, long_pause_threshold=15.0
+        self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2.0, long_pause_threshold=10.0
     ):
         """
-        Compute the number of long pauses and median long pause duration for a given fly.
-        Long pauses are defined as pauses that are longer than long_pause_threshold (default 15s).
+        Compute the number of long pauses using a fixed duration threshold and median long pause duration.
+        Long pauses are defined as pauses that are >= long_pause_threshold seconds (default 10s).
+
+        Uses consistent detection parameters with other pause metrics for fair comparison.
+        The 10s threshold captures phenotypes where flies show extended freezing behavior.
 
         Parameters
         ----------
@@ -1703,12 +1960,13 @@ class BallPushingMetrics:
         minimum_duration : float, optional
             Minimum duration (in seconds) for a pause to be considered valid (default is 2).
         long_pause_threshold : float, optional
-            Minimum duration (in seconds) for a pause to be considered a long pause (default is 15.0).
+            Duration threshold (in seconds) for defining long pauses (default is 10.0).
+            Pauses >= this threshold are considered "long".
 
         Returns
         -------
         dict
-            Dictionary containing 'nb_long_pauses' and 'median_long_pause_duration'.
+            Dictionary containing 'nb_long_pauses', 'median_long_pause_duration', and 'total_long_pause_duration'.
         """
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
@@ -1727,55 +1985,94 @@ class BallPushingMetrics:
                     filtered_pauses.append(pause)
             pauses = filtered_pauses
 
-        # Filter for long pauses only
+        if not pauses:
+            return {
+                "nb_long_pauses": 0,
+                "median_long_pause_duration": np.nan,
+                "total_long_pause_duration": 0.0,
+            }
+
+        # Filter for long pauses using fixed threshold
         long_pauses = [pause for pause in pauses if pause[2] >= long_pause_threshold]
 
         if not long_pauses:
             return {
                 "nb_long_pauses": 0,
                 "median_long_pause_duration": np.nan,
+                "total_long_pause_duration": 0.0,
             }
 
         nb_long_pauses = len(long_pauses)
         long_pause_durations = [pause[2] for pause in long_pauses]
         median_long_pause_duration = np.median(long_pause_durations)
+        total_time_in_long_pauses = sum(long_pause_durations)
 
         return {
             "nb_long_pauses": nb_long_pauses,
             "median_long_pause_duration": median_long_pause_duration,
+            "total_long_pause_duration": total_time_in_long_pauses,
         }
 
-    def compute_nb_freeze(self, fly_idx, freeze_threshold=2.0, threshold=5, window=5):
+    def compute_stop_metrics(self, fly_idx, stop_threshold=2.0, threshold=5, window=5, minimum_duration=2.0):
         """
-        Compute the number of freeze events (pauses longer than freeze_threshold) for a given fly.
+        Compute comprehensive stop metrics for a given fly.
+        Uses the same base detection parameters as other pause metrics for fair comparison.
+        Stops represent short-term movement cessation events ≥2s duration.
 
         Parameters
         ----------
         fly_idx : int
             Index of the fly.
-        freeze_threshold : float, optional
-            Minimum duration (in seconds) for a pause to be considered a freeze (default is 2.0).
+        stop_threshold : float, optional
+            Minimum duration (in seconds) for a pause to be considered a stop (default is 2.0).
         threshold : float, optional
             Movement threshold in pixels to consider as a pause (default is 5).
         window : int, optional
             Number of frames to use for calculating movement (default is 5).
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for any pause to be detected (default is 2.0).
+            For consistency with other pause metrics.
 
         Returns
         -------
-        int
-            Number of freeze events (pauses longer than freeze_threshold).
+        dict
+            Dictionary containing 'nb_stops', 'median_stop_duration', and 'total_stop_duration'.
         """
-        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=0.0)
+        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
-        # Count pauses that are longer than the freeze threshold
-        freeze_events = [pause for pause in pauses if pause[2] >= freeze_threshold]
+        # Filter pauses that are longer than the stop threshold
+        stop_events = [pause for pause in pauses if pause[2] >= stop_threshold]
 
         if self.fly.config.debugging:
             print(
-                f"Freeze events for fly {fly_idx} (threshold={freeze_threshold}s): {len(freeze_events)} out of {len(pauses)} total pauses"
+                f"Stop events for fly {fly_idx} (threshold={stop_threshold}s): {len(stop_events)} out of {len(pauses)} total pauses"
             )
 
-        return len(freeze_events)
+        if not stop_events:
+            return {
+                "nb_stops": 0,
+                "median_stop_duration": np.nan,
+                "total_stop_duration": 0.0,
+            }
+
+        nb_stops = len(stop_events)
+        stop_durations = [pause[2] for pause in stop_events]
+        median_stop_duration = np.median(stop_durations)
+        total_stop_duration = sum(stop_durations)
+
+        return {
+            "nb_stops": nb_stops,
+            "median_stop_duration": median_stop_duration,
+            "total_stop_duration": total_stop_duration,
+        }
+
+    def compute_nb_stops(self, fly_idx, stop_threshold=2.0, threshold=5, window=5, minimum_duration=2.0):
+        """
+        Backward compatibility method that returns only the number of stops.
+        Use compute_stop_metrics() for comprehensive metrics.
+        """
+        stop_metrics = self.compute_stop_metrics(fly_idx, stop_threshold, threshold, window, minimum_duration)
+        return stop_metrics["nb_stops"]
 
     def compute_interaction_persistence(self, fly_idx, ball_idx, subset=None):
         """
@@ -2379,9 +2676,10 @@ class BallPushingMetrics:
 
         return time_in_chamber
 
-    def compute_median_freeze_duration(self, fly_idx):
+    def compute_median_stop_duration(self, fly_idx):
         """
-        Compute the median duration of pause events for a given fly.
+        Compute the median duration of stop events for a given fly.
+        Uses the same detection parameters as other pause metrics for consistency.
 
         Parameters
         ----------
@@ -2391,10 +2689,11 @@ class BallPushingMetrics:
         Returns
         -------
         float
-            Median duration of pause events in seconds.
+            Median duration of stop events in seconds.
         """
         # Get pause metrics which include individual pause durations
-        pauses = self.detect_pauses(fly_idx)
+        # Use consistent parameters with other metrics (minimum_duration=2.0)
+        pauses = self.detect_pauses(fly_idx, minimum_duration=2.0)
 
         if not pauses:
             return np.nan

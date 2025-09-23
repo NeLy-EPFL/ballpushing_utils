@@ -54,6 +54,10 @@ class FlyTrackingData:
         if self.valid_data or self.keep_idle:
 
             self.start_x, self.start_y = self.get_initial_position()
+
+            # Assign ball identities based on position relative to fly
+            self.assign_ball_identities()
+
             self.calculate_relative_positions()
 
             time_range_start = self.fly.config.time_range[0] if self.fly.config.time_range else None
@@ -77,7 +81,9 @@ class FlyTrackingData:
                 self.filter_tracking_data(self.fly.config.time_range)
 
             # Compute duration as the difference between last and first time
-            times = self.balltrack.objects[0].dataset["time"]
+            # Use training ball if available, otherwise use first ball
+            ball_idx = self.training_ball_idx if self.training_ball_idx is not None else 0
+            times = self.balltrack.objects[ball_idx].dataset["time"]
             if not times.empty:
                 self.duration = times.iloc[-1] - times.iloc[0]
 
@@ -273,6 +279,283 @@ class FlyTrackingData:
             # Also add an alias column for learning experiments
             ball_data[f"distance_ball_{ball_idx}"] = ball_data["euclidean_distance"]
 
+    def assign_ball_identities(self):
+        """
+        Assign ball identities based on available SLEAP track names.
+
+        Behavior:
+        1. Single ball (regular experiments): No identity system needed, use ball_idx as before
+        2. Multiple balls + track names: Use track names as identities
+        3. Multiple balls + no track names: Issue warning, proceed without identities
+
+        This method updates the balltrack objects to include ball identity information
+        and creates mapping dictionaries for easy access when applicable.
+        """
+        if self.balltrack is None:
+            print(f"Cannot assign ball identities for {self.fly.metadata.name}: missing balltrack")
+            return
+
+        # Initialize ball identity mappings
+        self.training_ball_idx = None
+        self.test_ball_idx = None
+        self.ball_identities = {}  # Maps ball_idx -> identity
+        self.identity_to_idx = {}  # Maps identity -> ball_idx
+
+        num_balls = len(self.balltrack.objects)
+
+        # Check for track names regardless of number of balls
+        # This is important for F1 control experiments which have single test_ball
+        has_track_names = (
+            hasattr(self.balltrack, "track_names")
+            and self.balltrack.track_names
+            and len(self.balltrack.track_names) > 0
+        )
+
+        if not has_track_names:
+            # No track names - handle based on number of balls
+            if num_balls == 1:
+                # Single ball without track names - regular experiment
+                self.training_ball_idx = 0
+                if self.fly.config.debugging:
+                    print(
+                        f"Single ball experiment for {self.fly.metadata.name}: using ball_idx=0 as training (no identity system)"
+                    )
+                return
+            else:
+                # Multiple balls without track names - issue warning
+                print(
+                    f"⚠️  WARNING: Multiple balls ({num_balls}) detected for {self.fly.metadata.name} but no SLEAP track names found!"
+                )
+                print(
+                    f"   For F1 experiments, please ensure SLEAP tracking includes track names (e.g., 'training', 'test')"
+                )
+                print(f"   Proceeding without ball identity assignment - using ball indices for analysis")
+
+                # Set first ball as training for basic compatibility but warn about it
+                self.training_ball_idx = 0
+                if self.fly.config.debugging:
+                    print(f"   Defaulting to ball_idx=0 as training ball for basic compatibility")
+                return
+
+        # Has track names - use track names as identities (works for single or multiple balls)
+        if self.fly.config.debugging:
+            print(f"Using SLEAP track names for {self.fly.metadata.name}: {self.balltrack.track_names}")
+
+        for ball_idx in range(num_balls):
+            if ball_idx < len(self.balltrack.track_names):
+                track_name = self.balltrack.track_names[ball_idx]
+                track_name_lower = track_name.lower()
+
+                # Map common track names to standard identities
+                if track_name_lower in ["training", "train", "training_ball"]:
+                    identity = "training"
+                    self.training_ball_idx = ball_idx
+                    self.identity_to_idx["training"] = ball_idx
+                elif track_name_lower in ["test", "testing", "test_ball"]:
+                    identity = "test"
+                    self.test_ball_idx = ball_idx
+                    self.identity_to_idx["test"] = ball_idx
+                else:
+                    # Use the track name directly as identity
+                    identity = track_name_lower
+
+                    # For F1 experiments with generic track names, assign training/test roles
+                    if num_balls == 2:
+                        if ball_idx == 0 and self.training_ball_idx is None:
+                            # First ball becomes training
+                            self.training_ball_idx = ball_idx
+                            self.identity_to_idx["training"] = ball_idx
+                        elif ball_idx == 1 and self.test_ball_idx is None:
+                            # Second ball becomes test
+                            self.test_ball_idx = ball_idx
+                            self.identity_to_idx["test"] = ball_idx
+                    else:
+                        # For other cases, use the original logic
+                        if self.training_ball_idx is None and ball_idx == 0:
+                            self.training_ball_idx = ball_idx
+                            self.identity_to_idx["training"] = ball_idx
+
+                self.ball_identities[ball_idx] = identity
+
+                # Add identity to ball dataset
+                ball_data = self.balltrack.objects[ball_idx].dataset
+                ball_data["ball_identity"] = identity
+                ball_data["track_name"] = track_name
+
+                if self.fly.config.debugging:
+                    print(f"  Ball {ball_idx}: '{track_name}' → identity '{identity}'")
+            else:
+                # More balls than track names - use generic naming with warning
+                identity = f"unnamed_ball_{ball_idx}"
+                self.ball_identities[ball_idx] = identity
+
+                ball_data = self.balltrack.objects[ball_idx].dataset
+                ball_data["ball_identity"] = identity
+
+                print(f"⚠️  WARNING: Ball {ball_idx} has no track name, assigned generic identity '{identity}'")
+
+        # Ensure we have a training ball for backward compatibility
+        if self.training_ball_idx is None and num_balls > 0:
+            # Assign first ball as training if no explicit training ball found
+            self.training_ball_idx = 0
+            if "training" not in self.identity_to_idx:
+                self.identity_to_idx["training"] = 0
+            if self.fly.config.debugging:
+                print(f"  No explicit training ball found, using ball 0 as training for compatibility")
+
+        if self.fly.config.debugging:
+            print(f"Ball identity assignment summary for {self.fly.metadata.name}:")
+            print(f"  Training ball: {self.training_ball_idx}")
+            print(f"  Test ball: {self.test_ball_idx}")
+            print(f"  All identities: {self.ball_identities}")
+            print(f"  Identity→Index mappings: {self.identity_to_idx}")
+
+    def get_ball_by_identity(self, identity):
+        """
+        Get ball index by identity ('training' or 'test').
+
+        Args:
+            identity (str): 'training' or 'test'
+
+        Returns:
+            int or None: Ball index if found, None otherwise
+        """
+        return self.identity_to_idx.get(identity, None)
+
+    def get_training_ball_data(self):
+        """
+        Get the dataset for the training ball.
+
+        Returns:
+            DataFrame or None: Training ball dataset if available
+        """
+        if self.training_ball_idx is not None and self.balltrack is not None:
+            return self.balltrack.objects[self.training_ball_idx].dataset
+        return None
+
+    def get_test_ball_data(self):
+        """
+        Get the dataset for the test ball.
+
+        Returns:
+            DataFrame or None: Test ball dataset if available
+        """
+        if self.test_ball_idx is not None and self.balltrack is not None:
+            return self.balltrack.objects[self.test_ball_idx].dataset
+        return None
+
+    def has_training_ball(self):
+        """Check if a training ball is available."""
+        return self.training_ball_idx is not None
+
+    def has_test_ball(self):
+        """Check if a test ball is available."""
+        return self.test_ball_idx is not None
+
+    def get_ball_identity(self, ball_idx):
+        """
+        Get the identity of a ball by its index.
+
+        Args:
+            ball_idx (int): Ball index
+
+        Returns:
+            str or None: Ball identity ('training', 'test', etc.) or None if not found
+        """
+        return self.ball_identities.get(ball_idx, None)
+
+    def get_all_ball_identities(self):
+        """
+        Get all available ball identities.
+
+        Returns:
+            list: List of all ball identities (e.g., ['training', 'test'] or custom track names)
+        """
+        return list(self.ball_identities.values())
+
+    def get_balls_by_identity_pattern(self, pattern):
+        """
+        Get ball indices that match a pattern in their identity.
+
+        Args:
+            pattern (str): Pattern to match (e.g., 'training', 'test', 'ball')
+
+        Returns:
+            list: List of ball indices whose identities contain the pattern
+        """
+        matching_balls = []
+        for ball_idx, identity in self.ball_identities.items():
+            if pattern.lower() in identity.lower():
+                matching_balls.append(ball_idx)
+        return matching_balls
+
+    def has_identity(self, identity):
+        """
+        Check if a specific identity exists.
+
+        Args:
+            identity (str): Identity to check for
+
+        Returns:
+            bool: True if the identity exists
+        """
+        return identity in self.identity_to_idx or identity in self.ball_identities.values()
+
+    def get_interactions_with_training_ball(self, fly_idx=0):
+        """
+        Get interaction events with the training ball specifically.
+
+        Args:
+            fly_idx (int): Fly index (default 0)
+
+        Returns:
+            list: List of interaction events with training ball
+        """
+        if (
+            self.training_ball_idx is not None
+            and hasattr(self, "_interaction_events")
+            and self.interaction_events is not None
+        ):
+            if fly_idx in self.interaction_events and self.training_ball_idx in self.interaction_events[fly_idx]:
+                return self.interaction_events[fly_idx][self.training_ball_idx]
+        return []
+
+    def get_interactions_with_test_ball(self, fly_idx=0):
+        """
+        Get interaction events with the test ball specifically.
+
+        Args:
+            fly_idx (int): Fly index (default 0)
+
+        Returns:
+            list: List of interaction events with test ball
+        """
+        if (
+            self.test_ball_idx is not None
+            and hasattr(self, "_interaction_events")
+            and self.interaction_events is not None
+        ):
+            if fly_idx in self.interaction_events and self.test_ball_idx in self.interaction_events[fly_idx]:
+                return self.interaction_events[fly_idx][self.test_ball_idx]
+        return []
+
+    def get_interactions_by_identity(self, identity="training", fly_idx=0):
+        """
+        Get interaction events with a ball by its identity.
+
+        Args:
+            identity (str): Ball identity ('training' or 'test')
+            fly_idx (int): Fly index (default 0)
+
+        Returns:
+            list: List of interaction events with specified ball identity
+        """
+        ball_idx = self.get_ball_by_identity(identity)
+        if ball_idx is not None and hasattr(self, "_interaction_events") and self.interaction_events is not None:
+            if fly_idx in self.interaction_events and ball_idx in self.interaction_events[fly_idx]:
+                return self.interaction_events[fly_idx][ball_idx]
+        return []
+
     def _determine_success_cutoff(self):
         """
         Calculate success cutoff based on the final event using ball-pushing metrics.
@@ -293,10 +576,24 @@ class FlyTrackingData:
 
         ballpushing_metrics = BallPushingMetrics(self, compute_metrics_on_init=False)
 
-        # TODO F1 adaptation
-        final_event = ballpushing_metrics.get_final_event(0, 0)
+        # Use test ball for final event detection (prioritize test ball over training ball)
+        # For control experiments with only test ball, this will work correctly
+        # For F1 experiments, we want the test ball's final event for success cutoff
+        if self.test_ball_idx is not None:
+            ball_idx = self.test_ball_idx
+        elif self.training_ball_idx is not None:
+            ball_idx = self.training_ball_idx
+        else:
+            ball_idx = 0  # Fallback to first ball
+
+        final_event = ballpushing_metrics.get_final_event(0, ball_idx)
         if self.fly.config.debugging:
-            print(f"Final event for {self.fly.metadata.name}: {final_event}")
+            ball_type = (
+                "test"
+                if ball_idx == self.test_ball_idx
+                else ("training" if ball_idx == self.training_ball_idx else f"ball_{ball_idx}")
+            )
+            print(f"Final event for {self.fly.metadata.name} using {ball_type} ball (idx={ball_idx}): {final_event}")
         # Check if the final event is valid
         if final_event is not None and final_event[2] is not None:
             if self.fly.config.debugging:
@@ -894,13 +1191,14 @@ class FlyTrackingData:
 
         raise ValueError(f"No valid position data found for {self.fly.metadata.name}.")
 
-    def check_yball_variation(self, event, threshold=None):
+    def check_yball_variation(self, event, threshold=None, ball_identity="training"):
         """
         Check if the yball value varies more than a given threshold during an event.
 
         Args:
             event (list): A list containing the start and end indices of the event.
             threshold (float): The maximum allowed variation in yball value.
+            ball_identity (str): Which ball to use ('training' or 'test'). Defaults to 'training'.
 
         Returns:
             tuple: A boolean indicating if the variation exceeds the threshold, and the actual variation.
@@ -910,12 +1208,18 @@ class FlyTrackingData:
             return False, 0
 
         # Set threshold using config
-
         if threshold is None:
             threshold = self.fly.config.significant_threshold
 
-        # Get the ball data
-        ball_data = self.balltrack.objects[0].dataset
+        # Get the appropriate ball data
+        ball_idx = self.get_ball_by_identity(ball_identity)
+        if ball_idx is None:
+            # Fallback to first ball if identity not found
+            ball_idx = 0
+            if self.fly.config.debugging:
+                print(f"Ball identity '{ball_identity}' not found, using ball_idx=0")
+
+        ball_data = self.balltrack.objects[ball_idx].dataset
 
         # Ensure the event indices are within the bounds of the dataset
         start_idx, end_idx = event

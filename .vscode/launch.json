@@ -862,6 +862,362 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Python: F1 Experiment Test (Full)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--test",
+                "comprehensive",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Experiment Test (Limited)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--test",
+                "comprehensive",
+                "--max-flies",
+                "5",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Experiment Test (Validation Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--test",
+                "validation",
+                "--max-flies",
+                "10"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: F1 Experiment Test (Custom)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/f1_metrics_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "${input:f1ExperimentPath}",
+                "--test",
+                "${input:f1TestType}",
+                "--max-flies",
+                "${input:f1MaxFlies}",
+                "--save-results"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: FlyTrackingData Test (Both)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/fly_trackingdata_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--test-type",
+                "both",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: FlyTrackingData Test (Regular Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/fly_trackingdata_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--test-type",
+                "regular",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: FlyTrackingData Test (F1 Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/fly_trackingdata_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--test-type",
+                "f1",
+                "--debug"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: FlyTrackingData Test (No Debug)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/fly_trackingdata_test.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--test-type",
+                "both"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Test (Single Fly)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--metrics",
+                "basic_metrics",
+                "--test-f1",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Test (Ball Identity Only)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--metrics",
+                "basic_fast",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Test (Regular vs F1 Comparison)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--metrics",
+                "basic_metrics",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Experiment Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--metrics",
+                "new_metrics",
+                "--test-f1",
+                "--max-experiment-flies",
+                "5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Test (Comprehensive)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--metrics",
+                "comprehensive",
+                "--test-f1",
+                "--test-ball-identity",
+                "--table-style",
+                "detailed"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Ballpushing Metrics F1 Test (Custom Path)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/ballpushing_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--path",
+                "${input:f1FlyPath}",
+                "--metrics",
+                "basic_metrics",
+                "--test-f1",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Dataset Summary Integration Test (F1 Single Fly)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_summary_integration.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "fly",
+                "--fly-path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Dataset Summary Integration Test (F1 Experiment)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_summary_integration.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--experiment-path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--max-flies",
+                "5",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Dataset Summary Integration Test (Regular Experiment)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_summary_integration.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "experiment",
+                "--experiment-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked",
+                "--max-flies",
+                "5"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Dataset Summary Integration Test (F1 vs Regular Comparison)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_summary_integration.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--f1-experiment-path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+                "--regular-experiment-path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked",
+                "--max-flies",
+                "3",
+                "--compare-datasets",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Dataset Summary Integration Test (Custom Paths)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_dataset_summary_integration.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--mode",
+                "${input:datasetTestMode}",
+                "--fly-path",
+                "${input:flyPath}",
+                "--experiment-path",
+                "${input:experimentPath}",
+                "--max-flies",
+                "5",
+                "--test-ball-identity"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ],
     "inputs": [
@@ -935,6 +1291,42 @@
             "description": "Path to F1 fly directory",
             "default": "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
             "type": "promptString"
+        },
+        {
+            "id": "f1ExperimentPath",
+            "description": "Path to F1 experiment directory",
+            "default": "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked",
+            "type": "promptString"
+        },
+        {
+            "id": "f1TestType",
+            "description": "Type of F1 test to run",
+            "default": "comprehensive",
+            "type": "pickString",
+            "options": [
+                "comprehensive",
+                "validation",
+                "initialization",
+                "metrics",
+                "f1_features"
+            ]
+        },
+        {
+            "id": "f1MaxFlies",
+            "description": "Maximum number of flies to process (leave empty for all)",
+            "default": "10",
+            "type": "promptString"
+        },
+        {
+            "id": "datasetTestMode",
+            "description": "Mode for dataset summary integration test",
+            "default": "experiment",
+            "type": "pickString",
+            "options": [
+                "fly",
+                "experiment",
+                "both"
+            ]
         }
     ]
 }

@@ -6,8 +6,9 @@ Test script for F1 experiments with dual-ball learning paradigm.
 Based on the ballpushing_metrics.py test framework but adapted for F1-specific metrics.
 
 Usage:
-    python f1_metrics_test.py --mode fly --path /path/to/f1/fly --metrics all
-    python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --metrics f1_specific
+    python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test comprehensive
+    python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test comprehensive
+    python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test metrics --max-flies 10
 """
 
 import argparse
@@ -386,6 +387,13 @@ def test_f1_metrics_computation(fly_path):
 
         print(f"🔬 Computing F1-specific metrics...")
 
+        # Check flyball_positions columns first
+        if f1_fly.flyball_positions is not None:
+            print(f"   Flyball columns: {list(f1_fly.flyball_positions.columns)}")
+            print(f"   Flyball shape: {f1_fly.flyball_positions.shape}")
+        else:
+            print(f"   Flyball positions is None")
+
         # Test F1 metrics
         try:
             start_time = time.time()
@@ -463,13 +471,14 @@ def test_f1_metrics_computation(fly_path):
             )
 
             # Check for overlapping data requirements
-            f1_requires_dual_balls = "training_ball_distances" in results["f1_metrics"]["metrics"]
+            f1_metrics_dict = results["f1_metrics"]["metrics"]
+            f1_requires_dual_balls = isinstance(f1_metrics_dict, dict) and "training_ball_distances" in f1_metrics_dict
             bp_works_with_dual = results["ballpushing_metrics"]["success"]
 
             compatibility["f1_dual_ball_support"] = f1_requires_dual_balls
             compatibility["bp_dual_ball_tolerance"] = bp_works_with_dual
 
-            if f1_requires_dual_balls and bp_works_with_dual:
+            if bp_works_with_dual:  # F1 works regardless of single/dual ball setup
                 results["compatibility"]["success"] = True
                 print(f"✅ F1 and standard ballpushing metrics are compatible")
             else:
@@ -761,6 +770,210 @@ def save_test_results(results, output_dir=None):
     return output_file
 
 
+def process_f1_experiment(experiment_path, test_type="comprehensive", max_flies=None, save_results=True):
+    """
+    Process an entire F1 experiment with multiple flies.
+
+    Parameters:
+    -----------
+    experiment_path : Path
+        Path to the F1 experiment directory
+    test_type : str
+        Type of test to run on each fly
+    max_flies : int, optional
+        Maximum number of flies to process
+    save_results : bool
+        Whether to save individual fly results
+
+    Returns:
+    --------
+    dict: Experiment-wide results
+    """
+    print(f"\n{'='*80}")
+    print(f"🧪 F1 EXPERIMENT PROCESSING")
+    print(f"{'='*80}")
+    print(f"📁 Experiment path: {experiment_path}")
+    print(f"🔬 Test type: {test_type}")
+
+    experiment_results = {
+        "experiment_info": {
+            "experiment_path": str(experiment_path),
+            "test_type": test_type,
+            "start_time": datetime.now().isoformat(),
+        },
+        "fly_results": {},
+        "experiment_summary": {},
+        "overall_success": False,
+    }
+
+    # Find all fly directories in the experiment
+    fly_directories = []
+
+    # F1 experiments can have two structures:
+    # 1. Direct fly directories: experiment_path/fly_name/
+    # 2. Arena-based structure: experiment_path/arena1/Left/, experiment_path/arena1/Right/
+
+    for item in experiment_path.iterdir():
+        if item.is_dir():
+            # Check if this is a direct fly directory (has tracking files)
+            if any(item.glob("*.slp")) or any(item.glob("*.mp4")):
+                fly_directories.append(item)
+            else:
+                # Check if this is an arena directory containing fly directories
+                for sub_item in item.iterdir():
+                    if sub_item.is_dir() and (any(sub_item.glob("*.slp")) or any(sub_item.glob("*.mp4"))):
+                        fly_directories.append(sub_item)
+
+    if not fly_directories:
+        print(f"❌ No fly directories found in experiment path")
+        experiment_results["error"] = "No fly directories found"
+        return experiment_results
+
+    # Limit number of flies if specified
+    if max_flies:
+        fly_directories = fly_directories[:max_flies]
+
+    print(f"🐛 Found {len(fly_directories)} flies to process")
+    if max_flies and len(fly_directories) == max_flies:
+        print(f"   (Limited to first {max_flies} flies)")
+
+    # Process each fly
+    successful_flies = 0
+    failed_flies = 0
+
+    for i, fly_dir in enumerate(fly_directories, 1):
+        fly_name = fly_dir.name
+        print(f"\n" + "-" * 60)
+        print(f"🐛 Processing fly {i}/{len(fly_directories)}: {fly_name}")
+        print(f"-" * 60)
+
+        try:
+            # Run the specified test on this fly
+            if test_type == "validation":
+                fly_results = {"validation": validate_f1_fly_directory(fly_dir)}
+            elif test_type == "initialization":
+                fly_results = {"initialization": test_f1_fly_initialization(fly_dir)}
+            elif test_type == "metrics":
+                fly_results = {"metrics": test_f1_metrics_computation(fly_dir)}
+            elif test_type == "f1_features":
+                fly_results = {"f1_features": test_f1_specific_features(fly_dir)}
+            else:  # comprehensive
+                fly_results = run_comprehensive_f1_test(fly_dir)
+
+            # Check if this fly was successful (depends on test type)
+            if test_type == "validation":
+                fly_success = fly_results.get("validation", {}).get("valid", False)
+            elif test_type == "initialization":
+                fly_success = fly_results.get("initialization", {}).get("initialization", {}).get("success", False)
+            elif test_type == "metrics":
+                fly_success = fly_results.get("metrics", {}).get("f1_metrics", {}).get("success", False)
+            elif test_type == "f1_features":
+                fly_success = fly_results.get("f1_features", {}).get("checkpoint_analysis", {}).get("success", False)
+            else:  # comprehensive
+                fly_success = fly_results.get("overall_success", False)
+
+            if fly_success:
+                successful_flies += 1
+                print(f"✅ Fly {fly_name}: SUCCESS")
+            else:
+                failed_flies += 1
+                print(f"❌ Fly {fly_name}: FAILED")
+
+            experiment_results["fly_results"][fly_name] = fly_results
+
+            # Save individual fly results if requested
+            if save_results and test_type == "comprehensive":
+                # Only save individual results for comprehensive tests (they have test_info)
+                save_test_results(fly_results)
+
+        except Exception as e:
+            print(f"❌ Error processing fly {fly_name}: {e}")
+            failed_flies += 1
+            experiment_results["fly_results"][fly_name] = {"error": str(e), "overall_success": False}
+
+    # Generate experiment summary
+    print(f"\n{'='*80}")
+    print(f"📊 F1 EXPERIMENT SUMMARY")
+    print(f"{'='*80}")
+
+    experiment_summary = experiment_results["experiment_summary"]
+    experiment_summary["total_flies"] = len(fly_directories)
+    experiment_summary["successful_flies"] = successful_flies
+    experiment_summary["failed_flies"] = failed_flies
+    experiment_summary["success_rate"] = successful_flies / len(fly_directories) if fly_directories else 0
+
+    print(f"🐛 Total flies processed: {len(fly_directories)}")
+    print(f"✅ Successful flies: {successful_flies}")
+    print(f"❌ Failed flies: {failed_flies}")
+    print(f"📈 Success rate: {experiment_summary['success_rate']:.1%}")
+
+    # Overall experiment success (>80% flies successful)
+    experiment_results["overall_success"] = experiment_summary["success_rate"] >= 0.8
+
+    # Analyze common patterns in successful/failed flies
+    if experiment_results["fly_results"]:
+        print(f"\n🔍 DETAILED ANALYSIS:")
+        print(f"-" * 40)
+
+        # Count specific test successes across all flies
+        if test_type == "comprehensive":
+            test_categories = ["validation", "initialization", "f1_metrics", "ballpushing_metrics"]
+            for category in test_categories:
+                success_count = 0
+                total_count = 0
+                for fly_name, fly_result in experiment_results["fly_results"].items():
+                    if not fly_result.get("error"):
+                        total_count += 1
+                        # Check if this specific test passed
+                        if category == "f1_metrics":
+                            success = (
+                                fly_result.get("metrics_computation", {}).get("f1_metrics", {}).get("success", False)
+                            )
+                        elif category == "ballpushing_metrics":
+                            success = (
+                                fly_result.get("metrics_computation", {})
+                                .get("ballpushing_metrics", {})
+                                .get("success", False)
+                            )
+                        else:
+                            success = fly_result.get(category, {}).get(
+                                "valid" if category == "validation" else "success", False
+                            )
+
+                        if success:
+                            success_count += 1
+
+                if total_count > 0:
+                    print(
+                        f"   {category.replace('_', ' ').title()}: {success_count}/{total_count} ({success_count/total_count:.1%})"
+                    )
+
+        # Identify flies with common issues
+        common_errors = {}
+        for fly_name, fly_result in experiment_results["fly_results"].items():
+            if fly_result.get("error"):
+                error_msg = fly_result["error"]
+                if error_msg not in common_errors:
+                    common_errors[error_msg] = []
+                common_errors[error_msg].append(fly_name)
+
+        if common_errors:
+            print(f"\n⚠️  Common Issues:")
+            for error, flies in common_errors.items():
+                print(f"   '{error}': {len(flies)} flies")
+                if len(flies) <= 3:
+                    print(f"     Flies: {', '.join(flies)}")
+
+    # Set experiment end time
+    experiment_results["experiment_info"]["end_time"] = datetime.now().isoformat()
+    experiment_results["experiment_info"]["duration_seconds"] = (
+        datetime.fromisoformat(experiment_results["experiment_info"]["end_time"])
+        - datetime.fromisoformat(experiment_results["experiment_info"]["start_time"])
+    ).total_seconds()
+
+    return experiment_results
+
+
 def main():
     """Main function for F1 metrics testing."""
     parser = argparse.ArgumentParser(
@@ -771,10 +984,13 @@ Examples:
     # Test a single F1 fly with comprehensive analysis
     python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test comprehensive
 
-    # Test F1-specific metrics only
-    python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test f1_features
+    # Test entire F1 experiment with all flies
+    python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test comprehensive
 
-    # Quick validation test
+    # Test F1-specific metrics only on experiment (first 10 flies)
+    python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test metrics --max-flies 10
+
+    # Quick validation test on single fly
     python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test validation
         """,
     )
@@ -795,6 +1011,10 @@ Examples:
         help="Type of test to run (default: comprehensive).",
     )
 
+    parser.add_argument(
+        "--max-flies", type=int, help="Maximum number of flies to process in experiment mode (default: all flies)."
+    )
+
     parser.add_argument("--output-dir", help="Directory to save test results (default: tests/integration/outputs).")
 
     parser.add_argument("--save-results", action="store_true", help="Save detailed test results to JSON file.")
@@ -809,6 +1029,8 @@ Examples:
     print(f"Mode: {args.mode}")
     print(f"Path: {data_path}")
     print(f"Test type: {args.test}")
+    if args.mode == "experiment" and args.max_flies:
+        print(f"Max flies: {args.max_flies}")
     print(f"{'='*80}")
 
     # Initialize results variable
@@ -828,24 +1050,28 @@ Examples:
             results = run_comprehensive_f1_test(data_path)
 
     elif args.mode == "experiment":
-        print(f"⚠️  Experiment mode not yet implemented - testing first fly only")
-        # For now, test the first fly in the experiment
-        first_fly = None
-        for item in data_path.iterdir():
-            if item.is_dir():
-                first_fly = item
-                break
-
-        if first_fly:
-            print(f"📁 Testing first fly found: {first_fly}")
-            results = run_comprehensive_f1_test(first_fly)
-        else:
-            print(f"❌ No fly directories found in experiment path")
-            return 1
+        results = process_f1_experiment(
+            data_path, test_type=args.test, max_flies=args.max_flies, save_results=args.save_results
+        )
 
     # Save results if requested
     if args.save_results and results:
-        save_test_results(results, args.output_dir)
+        if args.mode == "experiment":
+            # Save experiment-wide results
+            output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).parent / "outputs"
+            output_dir.mkdir(exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            exp_name = data_path.name
+            filename = f"f1_experiment_results_{exp_name}_{timestamp}.json"
+
+            output_file = output_dir / filename
+            with open(output_file, "w") as f:
+                json.dump(results, f, indent=2, default=str)
+
+            print(f"\n💾 Experiment results saved to: {output_file}")
+        else:
+            save_test_results(results, args.output_dir)
 
     # Return appropriate exit code
     if results and results.get("overall_success", False):
