@@ -26,7 +26,64 @@ These are metrics that are used as tools to generate the summary metrics.
 
 ## Temporal Metrics
 
+These metrics capture how behavior changes over time:
+
 ### Event Counts and Timing
+
+#### `fly_distance_moved`
+
+**Description**: Total distance traveled by fly throughout experiment
+**Calculation**: Sum of frame-to-frame Euclidean distances for fly position
+**Units**: millimeters
+# Ball Pushing Metrics Documentation
+
+This document provides a comprehensive explanation of all metrics computed by the `BallPushingMetrics` class for analyzing fly-ball interaction behavior.
+
+## Overview
+
+The Ball Pushing Metrics system analyzes behavioral data from experiments where flies interact with balls in controlled environments. Each metric captures different aspects of the fly's learning and motor behavior during ball manipulation tasks.
+
+**Pixel-to-millimeter conversion**: All thresholds are given in both pixels and millimeters. The conversion factor is 1 pixel = 0.06 mm (based on 30 mm = 500 pixels).
+
+## Core Event Definitions
+
+### Basic Event Types
+
+These are metrics that are used as tools to generate the summary metrics.
+
+- **Interaction Event**: A period where the fly is in close proximity to the ball and potentially manipulating it
+
+  - *Close proximity threshold*: ≤ 45 pixels (2.7 mm) distance between fly and ball
+
+- **Significant Event**: An interaction event that results in significant ball displacement
+
+  - *Threshold*: > 5 pixels (0.3 mm) ball displacement
+
+- **First Major Event**: The first significant event that crosses a higher threshold, often considered the "aha moment"
+
+  - *Threshold*: ≥ 20 pixels (1.2 mm) ball displacement
+
+- **Final Event**: The last interaction event that achieves the final distance threshold before task completion
+
+  - *Threshold*: 170 pixels (10.2 mm) for standard experiments, 100 pixels (6.0 mm) for F1 experiments
+
+  - *Note*: This represents the last significant interaction that moves the ball toward the task goal
+
+## Temporal Metrics
+
+These metrics capture how behavior changes over time:
+
+### Event Counts and Timing
+
+#### `fly_distance_moved`
+
+**Description**: Total distance traveled by fly throughout experiment
+
+**Calculation**: Sum of frame-to-frame Euclidean distances for fly position
+
+**Units**: millimeters
+
+**Interpretation**: Overall locomotor activity and exploration behavior
 
 #### `nb_events`
 
@@ -50,13 +107,23 @@ These are metrics that are used as tools to generate the summary metrics.
 
 #### `persistence_at_end`
 
-**Description**: Fraction of time spent at corridor end (goal area, 170 px from fly starting position / 10.2mm)
+**Description**: Fraction of time spent at corridor end (goal area)
 
 **Calculation**: Proportion of frames where fly is at or beyond corridor end threshold distance
 
 **Range**: 0.0 to 1.0
 
 **Interpretation**: Goal-directed persistence; higher values indicate staying near task completion area
+
+#### `interaction_proportion`
+
+**Description**: Fraction of time spent interacting with ball
+
+**Calculation**: Total interaction duration / experiment duration
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Task engagement level
 
 #### `nb_significant_events`
 
@@ -102,6 +169,16 @@ These are metrics that are used as tools to generate the summary metrics.
 
 **Interpretation**: Indicates when peak performance was reached
 
+#### `first_significant_event` / `first_significant_event_time`
+
+**Description**: First successful ball manipulation
+
+**Calculation**: Index and timestamp of first event exceeding displacement threshold
+
+**Units**: Index / seconds
+
+**Interpretation**: Learning onset time - how quickly the fly discovers the task
+
 #### `first_major_event` / `first_major_event_time`
 
 **Description**: The "aha moment" - first major breakthrough event
@@ -111,6 +188,48 @@ These are metrics that are used as tools to generate the summary metrics.
 **Units**: Index / seconds
 
 **Interpretation**: Moment of behavioral insight or strategy change
+
+#### `final_event` / `final_event_time`
+
+**Description**: Last significant interaction before task completion
+
+**Calculation**: Final event achieving distance threshold (170 pixels / 10.2 mm for standard experiments, 100 pixels / 6.0 mm for F1 experiments) before fly exits chamber
+
+**Units**: Index / seconds
+
+**Interpretation**: Task completion time and final achievement level
+
+### Temporal Dynamics
+
+#### `binned_slope_[0-11]`
+
+**Description**: Ball position slope in 12 time bins
+
+**Calculation**: Linear regression slope of ball Y-position within each time bin
+
+**Units**: pixels/second
+
+**Interpretation**: Captures learning dynamics - how manipulation strategy evolves over time
+
+#### `interaction_rate_bin_[0-11]`
+
+**Description**: Interaction frequency in 12 time bins
+
+**Calculation**: Number of interaction events per second within each time bin
+
+**Units**: events/second
+
+**Interpretation**: Shows activity patterns - when the fly is most/least active
+
+#### `binned_auc_[0-11]`
+
+**Description**: Area under ball position curve in 12 time bins
+
+**Calculation**: Integral of ball Y-position over time within each bin
+
+**Units**: pixel·seconds
+
+**Interpretation**: Cumulative displacement progress over time
 
 ## Spatial Metrics
 
@@ -172,6 +291,18 @@ These metrics describe the spatial aspects of ball manipulation:
 
 **Interpretation**: 0.5 = balanced, > 0.5 = pulling more often than pushing, < 0.5 = pushing more often than pulling.
 
+#### `success_direction`
+
+**Description**: Primary successful manipulation direction
+
+*Note*: This metric is particularly relevant for F1 experiments where the task can be achieved by pulling the ball as well as pushing it.
+
+**Values**: "push", "pull", "both", or None
+
+**Calculation**: Direction that achieved threshold displacement (25 pixels / 1.5 mm)
+
+**Interpretation**: Identifies the fly's successful strategy
+
 ## Movement and Locomotion Metrics
 
 ### Velocity Analysis
@@ -206,7 +337,27 @@ These metrics describe the spatial aspects of ball manipulation:
 
 **Interpretation**: Positive = accelerating, negative = decelerating over session
 
+#### `fly_distance_moved`
+
+**Description**: Total distance traveled by fly throughout experiment
+
+**Calculation**: Sum of frame-to-frame Euclidean distances for fly position
+
+**Units**: millimeters
+
+**Interpretation**: Overall locomotor activity and exploration behavior
+
 ### Spatial Distribution
+
+#### `chamber_time` / `chamber_ratio`
+
+**Description**: Time spent in starting chamber area
+
+**Calculation**: Duration within defined radius of start position / total time
+
+**Units**: seconds / ratio (0.0-1.0)
+
+**Interpretation**: Higher values indicate more conservative exploration
 
 #### `time_chamber_beginning`
 
@@ -217,6 +368,26 @@ These metrics describe the spatial aspects of ball manipulation:
 **Units**: seconds
 
 **Interpretation**: Early chamber attachment behavior; higher values suggest reluctance to explore
+
+#### `persistence_at_end`
+
+**Description**: Fraction of time spent at corridor end (goal area)
+
+**Calculation**: Proportion of frames where fly is at or beyond corridor end threshold distance
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Goal-directed persistence; higher values indicate staying near task completion area
+
+#### `interaction_proportion`
+
+**Description**: Fraction of time spent interacting with ball
+
+**Calculation**: Total interaction duration / experiment duration
+
+**Range**: 0.0 to 1.0
+
+**Interpretation**: Task engagement level
 
 ### Freeze and Pause Behavior
 
