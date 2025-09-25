@@ -106,6 +106,8 @@ def create_simple_consistency_plot(
     nickname_mapping=None,
     simplified_to_region=None,
     color_dict=None,
+    consistency_column="Overall_Consistency",
+    consistency_label="Overall",
 ):
     """
     Create a simple plot showing genotype consistency scores
@@ -118,11 +120,13 @@ def create_simple_consistency_plot(
         nickname_mapping: Dictionary mapping nicknames to simplified nicknames
         simplified_to_region: Dictionary mapping simplified nicknames to brain regions
         color_dict: Dictionary mapping brain regions to colors
+        consistency_column: Which consistency column to use for plotting
+        consistency_label: Label for the consistency type (for plot titles)
     """
-    print(f"🎨 Creating simple consistency plot with {threshold*100}% threshold{suffix}...")
+    print(f"🎨 Creating simple consistency plot ({consistency_label}) with {threshold*100}% threshold{suffix}...")
 
-    # Sort by consistency score (descending)
-    sorted_df = consistency_df.sort_values("Overall_Consistency", ascending=True).copy()
+    # Sort by consistency score (descending) - use specified column
+    sorted_df = consistency_df.sort_values(consistency_column, ascending=True).copy()
 
     # Apply simplified nicknames if available
     if nickname_mapping:
@@ -133,8 +137,8 @@ def create_simple_consistency_plot(
     # Create figure
     fig, ax = plt.subplots(figsize=(14, max(8, len(sorted_df) * 0.3)))
 
-    # Create color map based on consistency scores
-    consistency_scores = sorted_df["Overall_Consistency"].values
+    # Create color map based on consistency scores - use specified column
+    consistency_scores = sorted_df[consistency_column].values
     cmap = plt.colormaps.get_cmap("RdYlBu_r")  # Red-Yellow-Blue reversed (red=high, blue=low)
     colors = cmap(consistency_scores)
 
@@ -164,10 +168,10 @@ def create_simple_consistency_plot(
             ax.axhspan(pos - 0.4, pos + 0.4, alpha=0.2, color="green", zorder=1)
 
     # Formatting
-    ax.set_xlabel("Overall Consistency Score", fontsize=12, fontweight="bold")
+    ax.set_xlabel(f"{consistency_label} Consistency Score", fontsize=12, fontweight="bold")
     ax.set_ylabel("Genotype", fontsize=12, fontweight="bold")
     ax.set_title(
-        f"Genotype Consistency Scores\n"
+        f"Genotype {consistency_label} Consistency Scores\n"
         f"{len(sorted_df)} genotypes tested | "
         f"{n_above} above {threshold*100}% threshold",
         fontsize=14,
@@ -251,16 +255,22 @@ def create_simple_consistency_plot(
     return output_file
 
 
-def create_threshold_comparison_plot(consistency_df, output_dir=".", thresholds=[0.5, 0.6, 0.7, 0.8, 0.9]):
+def create_threshold_comparison_plot(
+    consistency_df,
+    output_dir=".",
+    thresholds=[0.5, 0.6, 0.7, 0.8, 0.9],
+    consistency_column="Overall_Consistency",
+    consistency_label="Overall",
+):
     """
     Create a plot showing how many genotypes pass different threshold levels
     """
-    print(f"📈 Creating threshold comparison plot...")
+    print(f"📈 Creating threshold comparison plot ({consistency_label})...")
 
-    # Calculate counts for each threshold
+    # Calculate counts for each threshold - use specified column
     threshold_data = []
     for threshold in thresholds:
-        count = (consistency_df["Overall_Consistency"] >= threshold).sum()
+        count = (consistency_df[consistency_column] >= threshold).sum()
         percentage = count / len(consistency_df) * 100
         threshold_data.append(
             {"Threshold": f"{threshold:.0%}", "Count": count, "Percentage": percentage, "Threshold_Value": threshold}
@@ -275,7 +285,9 @@ def create_threshold_comparison_plot(consistency_df, output_dir=".", thresholds=
     bars1 = ax1.bar(threshold_df["Threshold"], threshold_df["Count"], color="steelblue", alpha=0.7, edgecolor="black")
     ax1.set_xlabel("Consistency Threshold", fontsize=12)
     ax1.set_ylabel("Number of Genotypes", fontsize=12)
-    ax1.set_title("Genotypes Above Different Consistency Thresholds", fontsize=13, fontweight="bold")
+    ax1.set_title(
+        f"Genotypes Above Different {consistency_label} Consistency Thresholds", fontsize=13, fontweight="bold"
+    )
     ax1.grid(True, axis="y", alpha=0.3)
 
     # Add value labels on bars
@@ -293,7 +305,7 @@ def create_threshold_comparison_plot(consistency_df, output_dir=".", thresholds=
     bars2 = ax2.bar(threshold_df["Threshold"], threshold_df["Percentage"], color="coral", alpha=0.7, edgecolor="black")
     ax2.set_xlabel("Consistency Threshold", fontsize=12)
     ax2.set_ylabel("Percentage of Genotypes (%)", fontsize=12)
-    ax2.set_title("Percentage of Genotypes Above Thresholds", fontsize=13, fontweight="bold")
+    ax2.set_title(f"Percentage Above {consistency_label} Thresholds", fontsize=13, fontweight="bold")
     ax2.grid(True, axis="y", alpha=0.3)
 
     # Add value labels on bars
@@ -326,6 +338,132 @@ def create_threshold_comparison_plot(consistency_df, output_dir=".", thresholds=
     return output_file
 
 
+def analyze_high_consistency_overlap(consistency_df, threshold=0.8, output_dir="."):
+    """
+    Analyze the overlap between high-consistency hits in combined vs optimized-only metrics
+
+    Args:
+        consistency_df: DataFrame with consistency data
+        threshold: Consistency threshold to consider (default: 0.8 = 80%)
+        output_dir: Directory to save analysis text file
+    """
+    print(f"\n🔍 ANALYZING HIGH-CONSISTENCY OVERLAP (>{threshold*100}% threshold)")
+    print("=" * 70)
+
+    # Check if both consistency columns exist
+    required_columns = ["Combined_Consistency", "Optimized_Only_Consistency"]
+    missing_columns = [col for col in required_columns if col not in consistency_df.columns]
+
+    if missing_columns:
+        print(f"⚠️  Cannot perform overlap analysis - missing columns: {missing_columns}")
+        return None
+
+    # Get high-consistency hits for each metric
+    combined_high = set(consistency_df[consistency_df["Combined_Consistency"] >= threshold]["Genotype"])
+    optimized_high = set(consistency_df[consistency_df["Optimized_Only_Consistency"] >= threshold]["Genotype"])
+
+    # Calculate overlaps
+    in_both = combined_high & optimized_high
+    only_combined = combined_high - optimized_high
+    only_optimized = optimized_high - combined_high
+
+    # Print summary
+    print(f"📊 HIGH-CONSISTENCY HITS ANALYSIS (>{threshold*100}% threshold):")
+    print(f"   Combined consistency ≥{threshold*100}%:     {len(combined_high):3d} genotypes")
+    print(f"   Optimized-only consistency ≥{threshold*100}%: {len(optimized_high):3d} genotypes")
+    print(f"   Found in BOTH:                    {len(in_both):3d} genotypes")
+    print(f"   Only in Combined:                 {len(only_combined):3d} genotypes")
+    print(f"   Only in Optimized:                {len(only_optimized):3d} genotypes")
+
+    # Detailed listings
+    if in_both:
+        print(f"\n✅ GENOTYPES HIGH IN BOTH METRICS ({len(in_both)}):")
+        for genotype in sorted(in_both):
+            combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+            optimized_score = consistency_df[consistency_df["Genotype"] == genotype]["Optimized_Only_Consistency"].iloc[
+                0
+            ]
+            print(f"   {genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}")
+
+    if only_combined:
+        print(f"\n🌟 GENOTYPES HIGH ONLY IN COMBINED ({len(only_combined)}):")
+        print("    (These are robust hits that don't show up as strongly in optimization alone)")
+        for genotype in sorted(only_combined):
+            combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+            optimized_score = consistency_df[consistency_df["Genotype"] == genotype]["Optimized_Only_Consistency"].iloc[
+                0
+            ]
+            print(f"   {genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}")
+
+    if only_optimized:
+        print(f"\n⚖️  GENOTYPES HIGH ONLY IN OPTIMIZED ({len(only_optimized)}):")
+        print("    (These may be optimization-dependent artifacts)")
+        for genotype in sorted(only_optimized):
+            combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+            optimized_score = consistency_df[consistency_df["Genotype"] == genotype]["Optimized_Only_Consistency"].iloc[
+                0
+            ]
+            print(f"   {genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}")
+
+    # Save detailed analysis to file
+    analysis_file = os.path.join(output_dir, f"high_consistency_overlap_analysis_{threshold:.0%}.txt")
+    with open(analysis_file, "w") as f:
+        f.write(f"HIGH-CONSISTENCY OVERLAP ANALYSIS (>{threshold*100}% threshold)\n")
+        f.write("=" * 70 + "\n\n")
+
+        f.write(f"SUMMARY:\n")
+        f.write(f"Combined consistency ≥{threshold*100}%:     {len(combined_high)} genotypes\n")
+        f.write(f"Optimized-only consistency ≥{threshold*100}%: {len(optimized_high)} genotypes\n")
+        f.write(f"Found in BOTH:                    {len(in_both)} genotypes\n")
+        f.write(f"Only in Combined:                 {len(only_combined)} genotypes\n")
+        f.write(f"Only in Optimized:                {len(only_optimized)} genotypes\n\n")
+
+        if in_both:
+            f.write(f"GENOTYPES HIGH IN BOTH METRICS ({len(in_both)}):\n")
+            f.write("-" * 50 + "\n")
+            for genotype in sorted(in_both):
+                combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+                optimized_score = consistency_df[consistency_df["Genotype"] == genotype][
+                    "Optimized_Only_Consistency"
+                ].iloc[0]
+                f.write(f"{genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}\n")
+            f.write("\n")
+
+        if only_combined:
+            f.write(f"GENOTYPES HIGH ONLY IN COMBINED ({len(only_combined)}):\n")
+            f.write("(Robust hits that don't show up as strongly in optimization alone)\n")
+            f.write("-" * 50 + "\n")
+            for genotype in sorted(only_combined):
+                combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+                optimized_score = consistency_df[consistency_df["Genotype"] == genotype][
+                    "Optimized_Only_Consistency"
+                ].iloc[0]
+                f.write(f"{genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}\n")
+            f.write("\n")
+
+        if only_optimized:
+            f.write(f"GENOTYPES HIGH ONLY IN OPTIMIZED ({len(only_optimized)}):\n")
+            f.write("(These may be optimization-dependent artifacts)\n")
+            f.write("-" * 50 + "\n")
+            for genotype in sorted(only_optimized):
+                combined_score = consistency_df[consistency_df["Genotype"] == genotype]["Combined_Consistency"].iloc[0]
+                optimized_score = consistency_df[consistency_df["Genotype"] == genotype][
+                    "Optimized_Only_Consistency"
+                ].iloc[0]
+                f.write(f"{genotype:<35} | Combined: {combined_score:.1%} | Optimized: {optimized_score:.1%}\n")
+
+    print(f"\n💾 Detailed analysis saved to: {analysis_file}")
+
+    return {
+        "combined_high": combined_high,
+        "optimized_high": optimized_high,
+        "in_both": in_both,
+        "only_combined": only_combined,
+        "only_optimized": only_optimized,
+        "analysis_file": analysis_file,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="Create simple consistency score visualization")
     parser.add_argument("analysis_dir", help="Directory containing consistency analysis results")
@@ -338,7 +476,38 @@ def main():
         "--with-hits-only", action="store_true", help="Also create version with only genotypes that have >0 consistency"
     )
 
+    # NEW: Consistency type selection
+    consistency_group = parser.add_mutually_exclusive_group()
+    consistency_group.add_argument(
+        "--combined",
+        action="store_true",
+        default=True,
+        help="Use combined consistency (optimized + edge cases) - DEFAULT",
+    )
+    consistency_group.add_argument(
+        "--optimized-only", action="store_true", help="Use optimized-only consistency (ignores edge cases)"
+    )
+    consistency_group.add_argument(
+        "--overall", action="store_true", help="Use overall consistency (legacy compatibility)"
+    )
+
     args = parser.parse_args()
+
+    # Determine consistency type
+    if args.optimized_only:
+        consistency_column = "Optimized_Only_Consistency"
+        consistency_label = "Optimized-Only"
+        file_suffix = "_optimized_only"
+    elif args.overall:
+        consistency_column = "Overall_Consistency"
+        consistency_label = "Overall"
+        file_suffix = "_overall"
+    else:  # combined (default)
+        consistency_column = "Combined_Consistency"
+        consistency_label = "Combined"
+        file_suffix = "_combined"
+
+    print(f"📊 Using {consistency_label} consistency metric")
 
     # Check if analysis directory exists
     if not os.path.exists(args.analysis_dir):
@@ -354,6 +523,12 @@ def main():
     consistency_df = pd.read_csv(consistency_file)
     print(f"📊 Loaded consistency data: {len(consistency_df)} genotypes")
 
+    # Check if the selected consistency column exists
+    if consistency_column not in consistency_df.columns:
+        print(f"❌ Consistency column '{consistency_column}' not found in data")
+        print(f"Available columns: {list(consistency_df.columns)}")
+        return 1
+
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
     print(f"🎯 Output directory: {args.output}")
@@ -367,23 +542,25 @@ def main():
         created_plots = []
 
         # Create main consistency plot (all genotypes)
-        print(f"\n🎨 Creating plot with ALL genotypes...")
+        print(f"\n🎨 Creating plot with ALL genotypes ({consistency_label} consistency)...")
         main_plot = create_simple_consistency_plot(
             consistency_df,
             output_dir=args.output,
             threshold=args.threshold,
-            suffix="_all_genotypes",
+            suffix=f"_all_genotypes{file_suffix}",
             nickname_mapping=nickname_mapping,
             simplified_to_region=simplified_to_region,
             color_dict=color_dict,
+            consistency_column=consistency_column,
+            consistency_label=consistency_label,
         )
-        created_plots.append(("All genotypes", main_plot))
+        created_plots.append((f"All genotypes ({consistency_label})", main_plot))
 
         # Create with-hits-only plot if requested or if there are many genotypes
-        with_hits_df = consistency_df[consistency_df["Overall_Consistency"] > 0]
+        with_hits_df = consistency_df[consistency_df[consistency_column] > 0]
 
         if args.with_hits_only or len(consistency_df) > 50:  # Auto-create if too many genotypes
-            print(f"\n🎨 Creating plot with genotypes that have HITS (>0% consistency)...")
+            print(f"\n🎨 Creating plot with genotypes that have HITS (>0% {consistency_label.lower()} consistency)...")
             print(f"   Filtering {len(consistency_df)} → {len(with_hits_df)} genotypes")
 
             if len(with_hits_df) > 0:
@@ -391,21 +568,37 @@ def main():
                     with_hits_df,
                     output_dir=args.output,
                     threshold=args.threshold,
-                    suffix="_with_hits_only",
+                    suffix=f"_with_hits_only{file_suffix}",
                     nickname_mapping=nickname_mapping,
                     simplified_to_region=simplified_to_region,
                     color_dict=color_dict,
+                    consistency_column=consistency_column,
+                    consistency_label=consistency_label,
                 )
-                created_plots.append(("With hits only", hits_plot))
+                created_plots.append((f"With hits only ({consistency_label})", hits_plot))
             else:
-                print(f"   ⚠️  No genotypes with >0% consistency - skipping with-hits-only plot")
+                print(
+                    f"   ⚠️  No genotypes with >0% {consistency_label.lower()} consistency - skipping with-hits-only plot"
+                )
 
         # Create threshold comparison plot
         comparison_plot = None
         if not args.no_comparison:
-            comparison_plot = create_threshold_comparison_plot(consistency_df, output_dir=args.output)
+            comparison_plot = create_threshold_comparison_plot(
+                consistency_df,
+                output_dir=args.output,
+                consistency_column=consistency_column,
+                consistency_label=consistency_label,
+            )
             if comparison_plot:
                 created_plots.append(("Threshold comparison", comparison_plot))
+
+        # NEW: Analyze high-consistency overlap between metrics
+        overlap_analysis = analyze_high_consistency_overlap(
+            consistency_df, threshold=args.threshold, output_dir=args.output
+        )
+        if overlap_analysis and overlap_analysis["analysis_file"]:
+            created_plots.append(("High-consistency overlap analysis", overlap_analysis["analysis_file"]))
 
         # Report results
         print(f"\n💾 PLOTS CREATED:")

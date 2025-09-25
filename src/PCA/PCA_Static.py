@@ -21,26 +21,70 @@ import scipy.stats as stats
 import json
 from pathlib import Path
 import warnings
+import argparse
 
 warnings.filterwarnings("ignore")
 
 # === CONFIGURATION ===
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
 CONFIGS_PATH = "multi_condition_pca_optimization/top_configurations.json"
-FULL_METRICS_PATH = "/home/matthias/ballpushing_utils/src/PCA/full_metrics_pca.txt"
+FULL_METRICS_PATH = "metric_lists/full_metrics_pca.txt"
 
-# Edge case testing parameters
-EDGE_CASE_COMPONENTS = [10, 15]  # Fixed component counts to test
-INCLUDE_EDGE_CASES = False  # Enable/disable edge case testing
+# Edge case testing parameters - BALANCED APPROACH
+# Edge cases: 4 best+full + 2 default+full + 3 default+optimized = 9 total
+INCLUDE_EDGE_CASES = True  # Enable/disable edge case testing
 
-# Output directory
-if len(sys.argv) > 1:
-    OUTPUT_DIR = sys.argv[1]
-else:
-    OUTPUT_DIR = "consistency_analysis_with_edges"
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Enhanced Consistency Analysis with Edge Cases",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Statistical Testing Modes:
+  --triple-test (default): Requires Mann-Whitney + Permutation + Mahalanobis (very conservative)
+  --multivariate-only:     Requires only Permutation + Mahalanobis (more sensitive, better for edge cases)
+
+Examples:
+  python PCA_Static.py output_dir                    # Triple test mode
+  python PCA_Static.py output_dir --multivariate-only  # Dual test mode
+        """,
+    )
+
+    parser.add_argument(
+        "output_dir",
+        nargs="?",
+        default="consistency_analysis_with_edges",
+        help="Output directory for results (default: consistency_analysis_with_edges)",
+    )
+
+    # Statistical testing mode
+    stat_group = parser.add_mutually_exclusive_group()
+    stat_group.add_argument(
+        "--triple-test",
+        action="store_true",
+        default=True,
+        help="Use all 3 tests: Mann-Whitney + Permutation + Mahalanobis (default, very conservative)",
+    )
+    stat_group.add_argument(
+        "--multivariate-only",
+        action="store_true",
+        help="Use only multivariate tests: Permutation + Mahalanobis (more sensitive, better for edge cases)",
+    )
+
+    return parser.parse_args()
+
+
+# Parse arguments
+args = parse_arguments()
+OUTPUT_DIR = args.output_dir
+USE_TRIPLE_TEST = args.triple_test if not args.multivariate_only else False
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 print(f"🎯 Output directory: {OUTPUT_DIR}")
+print(
+    f"📊 Statistical testing mode: {'Triple test (conservative)' if USE_TRIPLE_TEST else 'Multivariate only (sensitive)'}"
+)
 
 
 def load_metrics_list(path):
@@ -55,86 +99,105 @@ def load_metrics_list(path):
 
 def generate_edge_case_configs(optimized_configs, full_metrics_list):
     """
-    Generate edge case configurations for supplementary analysis
+    Generate BALANCED edge case configurations for robustness analysis
 
-    Edge cases include:
-    1. Fixed components (10, 15) with optimized metric lists
-    2. Fixed components (10, 15) with full unfiltered metrics
-    3. Both scenarios for PCA and SparsePCA
+    New balanced approach (9 edge cases total):
+    1. 4 best combinations but with full metrics (instead of optimized metrics)
+    2. 2 default parameter configs with full metrics (PCA + SparsePCA)
+    3. 3 default parameter configs with different metric lists (10 components each)
 
-    Returns: Dictionary of edge case configurations
+    This gives a more balanced 4 optimized vs 9 edge cases comparison.
     """
-    print("\n🔧 Generating edge case configurations...")
+    print("\n🔧 Generating BALANCED edge case configurations...")
 
     edge_configs = {}
-
-    # Get unique conditions and methods from optimized configs
-    unique_conditions = set()
-    unique_methods = set()
-
-    for config_key, config_data in optimized_configs.items():
-        unique_conditions.add(config_data["condition"])
-        unique_methods.add(config_data["method"])
-
-    print(f"   Found conditions: {list(unique_conditions)}")
-    print(f"   Found methods: {list(unique_methods)}")
-
     edge_case_counter = 1
 
-    for condition in unique_conditions:
-        # Get the original metrics for this condition
-        original_metrics = None
-        for config_data in optimized_configs.values():
-            if config_data["condition"] == condition:
-                original_metrics = config_data["metrics"]
-                break
+    # Get the best configuration for each condition/method combination
+    best_configs = {}
+    for config_key, config_data in optimized_configs.items():
+        condition = config_data["condition"]
+        method = config_data["method"]
+        combo_key = f"{condition}_{method}"
 
-        if not original_metrics:
-            continue
+        # Get the best parameters (first in top_params list)
+        if config_data["top_params"]:
+            best_configs[combo_key] = {
+                "condition": condition,
+                "method": method,
+                "metrics": config_data["metrics"],
+                "best_params": config_data["top_params"][0]["params"],
+            }
 
-        for method in unique_methods:
-            for n_comp in EDGE_CASE_COMPONENTS:
-                # Edge case 1: Fixed components with optimized metrics
-                edge_key = f"EdgeCase_{edge_case_counter:02d}_{condition}_{method}_fixed{n_comp}comp"
+    print(f"   Found {len(best_configs)} best optimized configurations")
 
-                # Basic parameters for the method
-                if method == "PCA":
-                    base_params = {"n_components": n_comp}
-                else:  # SparsePCA
-                    # Use reasonable default SparsePCA parameters
-                    base_params = {
-                        "n_components": n_comp,
-                        "alpha": 1.0,  # Moderate sparsity
-                        "ridge_alpha": 0.1,
-                        "method": "lars",
-                        "max_iter": 2000,
-                        "tol": 1e-4,
-                    }
+    # === EDGE CASE TYPE 1: Best parameters + Full metrics ===
+    for combo_key, config in best_configs.items():
+        edge_key = f"EdgeCase_{edge_case_counter:02d}_Best_{combo_key}_FullMetrics"
 
-                edge_configs[edge_key] = {
-                    "condition": f"{condition}_fixed{n_comp}",
-                    "method": method,
-                    "metrics": original_metrics,  # Use optimized metrics
-                    "top_params": [{"params": base_params}],
-                    "edge_case_type": "fixed_components_optimized_metrics",
-                    "description": f"Fixed {n_comp} components with {condition} optimized metrics",
-                }
-                edge_case_counter += 1
+        edge_configs[edge_key] = {
+            "condition": f"{config['condition']}_FullMetrics",
+            "method": config["method"],
+            "metrics": full_metrics_list,  # Use FULL metrics instead of optimized
+            "top_params": [{"params": config["best_params"]}],
+            "edge_case_type": "best_params_full_metrics",
+            "description": f"Best {config['method']} parameters with ALL {len(full_metrics_list)} metrics",
+        }
+        edge_case_counter += 1
 
-                # Edge case 2: Fixed components with full metrics (no filtering)
-                edge_key = f"EdgeCase_{edge_case_counter:02d}_FullMetrics_{method}_fixed{n_comp}comp"
+    # === EDGE CASE TYPE 2: Default parameters + Full metrics ===
+    for method in ["PCA", "SparsePCA"]:
+        edge_key = f"EdgeCase_{edge_case_counter:02d}_Default_{method}_FullMetrics"
 
-                edge_configs[edge_key] = {
-                    "condition": f"FullMetrics_fixed{n_comp}",
-                    "method": method,
-                    "metrics": full_metrics_list,  # Use ALL metrics
-                    "top_params": [{"params": base_params}],
-                    "edge_case_type": "fixed_components_full_metrics",
-                    "description": f"Fixed {n_comp} components with ALL metrics ({len(full_metrics_list)} total)",
-                }
-                edge_case_counter += 1
+        if method == "PCA":
+            default_params = {"n_components": 10}
+        else:  # SparsePCA
+            default_params = {
+                "n_components": 10,
+                "alpha": 0.1,  # Moderate sparsity
+                "ridge_alpha": 0.01,
+                "method": "lars",
+                "max_iter": 1000,
+                "tol": 1e-4,
+            }
 
-    print(f"   ✅ Generated {len(edge_configs)} edge case configurations")
+        edge_configs[edge_key] = {
+            "condition": f"Default_{method}_FullMetrics",
+            "method": method,
+            "metrics": full_metrics_list,
+            "top_params": [{"params": default_params}],
+            "edge_case_type": "default_params_full_metrics",
+            "description": f"Default {method} (10 comp) with ALL {len(full_metrics_list)} metrics",
+        }
+        edge_case_counter += 1
+
+    # === EDGE CASE TYPE 3: Default parameters + Different metric lists ===
+    # Get unique metric lists from optimized configs
+    unique_metric_lists = {}
+    for config_key, config_data in optimized_configs.items():
+        condition = config_data["condition"]
+        if condition not in unique_metric_lists:
+            unique_metric_lists[condition] = config_data["metrics"]
+
+    for condition, metrics in unique_metric_lists.items():
+        edge_key = f"EdgeCase_{edge_case_counter:02d}_Default_PCA_{condition}_10comp"
+
+        edge_configs[edge_key] = {
+            "condition": f"Default_{condition}_10comp",
+            "method": "PCA",
+            "metrics": metrics,
+            "top_params": [{"params": {"n_components": 10}}],
+            "edge_case_type": "default_params_optimized_metrics",
+            "description": f"Default PCA (10 comp) with {condition} metrics ({len(metrics)} total)",
+        }
+        edge_case_counter += 1
+
+    print(f"   ✅ Generated {len(edge_configs)} BALANCED edge case configurations")
+    print(f"   📊 Breakdown:")
+    print(f"      - Best params + full metrics: {len(best_configs)}")
+    print(f"      - Default params + full metrics: 2")
+    print(f"      - Default params + optimized metrics: {len(unique_metric_lists)}")
+    print(f"   📈 Total: 4 optimized + {len(edge_configs)} edge cases")
 
     return edge_configs
 
@@ -145,6 +208,8 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
     Enhanced to handle edge cases with different filtering approaches
     """
     print(f"  🔬 Running {config_id}: {condition_name}_{method_type}")
+    if is_edge_case:
+        print(f"       🔧 EDGE CASE: params={params}")
 
     try:
         # Filter metrics that exist in dataset
@@ -202,6 +267,12 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
         scaler = RobustScaler()
         static_data_scaled = scaler.fit_transform(static_data)
 
+        # Debug output for edge cases
+        if is_edge_case:
+            print(
+                f"       🔧 Edge case debug: {len(static_metrics)} static metrics, {static_data_scaled.shape[0]} rows"
+            )
+
         # Validate component count vs available metrics
         n_components = params["n_components"]
         max_components = min(static_data_scaled.shape[0] - 1, len(static_metrics))
@@ -211,6 +282,9 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
             params = params.copy()
             params["n_components"] = max_components
             n_components = max_components
+
+        if is_edge_case:
+            print(f"       🔧 Edge case using {n_components} components (max possible: {max_components})")
 
         # Run PCA with specific parameters
         if method_type == "PCA":
@@ -308,14 +382,33 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
             rejected, pvals_corrected, _, _ = multipletests(results_df[col], alpha=0.05, method="fdr_bh")
             results_df[col.replace("_pval", "_FDR_significant")] = rejected
 
-        # Extract significant hits
-        all_methods_significant = results_df[
-            (results_df["MannWhitney_any_dim_significant"])
-            & (results_df["Permutation_FDR_significant"])
-            & (results_df["Mahalanobis_FDR_significant"])
-        ]
+        # Extract significant hits - Use different criteria based on testing mode
+        if USE_TRIPLE_TEST:
+            # Conservative: Require ALL three tests to be significant
+            all_methods_significant = results_df[
+                (results_df["MannWhitney_any_dim_significant"])
+                & (results_df["Permutation_FDR_significant"])
+                & (results_df["Mahalanobis_FDR_significant"])
+            ]
+        else:
+            # Sensitive: Require only the two multivariate tests to be significant
+            all_methods_significant = results_df[
+                (results_df["Permutation_FDR_significant"]) & (results_df["Mahalanobis_FDR_significant"])
+            ]
 
         significant_genotypes = all_methods_significant["Nickname"].tolist()
+
+        # Debug output for edge cases
+        if is_edge_case:
+            print(f"       🔧 Edge case statistical results:")
+            print(f"          - Total genotypes tested: {len(results_df)}")
+            print(f"          - Mann-Whitney significant: {results_df['MannWhitney_any_dim_significant'].sum()}")
+            print(f"          - Permutation FDR significant: {results_df['Permutation_FDR_significant'].sum()}")
+            print(f"          - Mahalanobis FDR significant: {results_df['Mahalanobis_FDR_significant'].sum()}")
+            if USE_TRIPLE_TEST:
+                print(f"          - All three tests significant: {len(significant_genotypes)}")
+            else:
+                print(f"          - Both multivariate tests significant: {len(significant_genotypes)}")
 
         print(f"    ✅ Found {len(significant_genotypes)} significant hits")
 
@@ -574,30 +667,45 @@ def main():
         optimized_consistency = optimized_count / successful_optimized if successful_optimized > 0 else 0
         edge_case_consistency = edge_case_count / successful_edge_cases if successful_edge_cases > 0 else 0
 
+        # NEW: Two separate consistency metrics
+        # 1. Optimized-only consistency (ignores edge cases completely)
+        optimized_only_consistency = optimized_consistency
+
+        # 2. Combined consistency (optimized + edge cases, weighted by their contribution)
+        combined_consistency = consistency_score  # This is already the combined metric
+
         all_consistency_data.append(
             {
                 "Genotype": genotype,
                 "Total_Hit_Count": count,
                 "Total_Configs": successful_configs,
-                "Overall_Consistency": consistency_score,
+                "Overall_Consistency": consistency_score,  # Keep for backward compatibility
+                # === NEW: Dual Consistency Metrics ===
+                "Optimized_Only_Consistency": optimized_only_consistency,  # Pure optimization performance
+                "Combined_Consistency": combined_consistency,  # Robustness across all conditions
+                # === Detailed breakdown ===
                 "Optimized_Hit_Count": optimized_count,
                 "Optimized_Configs": successful_optimized,
-                "Optimized_Consistency": optimized_consistency,
+                "Optimized_Consistency": optimized_consistency,  # Keep existing for detailed analysis
                 "Edge_Case_Hit_Count": edge_case_count,
                 "Edge_Case_Configs": successful_edge_cases,
                 "Edge_Case_Consistency": edge_case_consistency,
+                # === Classification ===
                 "Found_In_Both": (optimized_count > 0) and (edge_case_count > 0),
                 "Optimized_Only": (optimized_count > 0) and (edge_case_count == 0),
                 "Edge_Case_Only": (optimized_count == 0) and (edge_case_count > 0),
+                # === NEW: Robustness metrics ===
+                "Is_Robust": (optimized_count > 0) and (edge_case_count > 0),  # Found in both
+                "Optimization_Dependent": (optimized_count > 0) and (edge_case_count == 0),  # Only in optimized
             }
         )
 
     consistency_df = pd.DataFrame(all_consistency_data)
-    consistency_df = consistency_df.sort_values("Overall_Consistency", ascending=False)
+    consistency_df = consistency_df.sort_values("Combined_Consistency", ascending=False)  # Sort by combined metric
 
-    # === COMPARATIVE ANALYSIS ===
-    print(f"\n📈 COMPARATIVE ANALYSIS:")
-    print("-" * 40)
+    # === ENHANCED COMPARATIVE ANALYSIS ===
+    print(f"\n📈 DUAL CONSISTENCY ANALYSIS:")
+    print("-" * 50)
 
     found_in_both = consistency_df[consistency_df["Found_In_Both"]]
     optimized_only = consistency_df[consistency_df["Optimized_Only"]]
@@ -607,21 +715,75 @@ def main():
     print(f"   Hits found ONLY in optimized configs:      {len(optimized_only):3d}")
     print(f"   Hits found ONLY in edge cases:             {len(edge_case_only):3d}")
 
-    # Top consistent hits
-    print(f"\n🏆 TOP 10 OVERALL CONSISTENT HITS:")
-    print("-" * 50)
-    top_10 = consistency_df.head(10)
-    for _, row in top_10.iterrows():
-        opt_pct = row["Optimized_Consistency"] * 100
-        edge_pct = row["Edge_Case_Consistency"] * 100
-        both_marker = "✓" if row["Found_In_Both"] else " "
-        print(f"{row['Genotype']:<30}: Opt={opt_pct:5.1f}% | Edge={edge_pct:5.1f}% | Both={both_marker}")
+    # === NEW: Dual Rankings ===
+    print(f"\n🏆 TOP 10 BY OPTIMIZED-ONLY CONSISTENCY:")
+    print("-" * 55)
+    optimized_ranking = consistency_df.sort_values("Optimized_Only_Consistency", ascending=False).head(10)
+    for _, row in optimized_ranking.iterrows():
+        opt_pct = row["Optimized_Only_Consistency"] * 100
+        robust_marker = "✓" if row["Is_Robust"] else " "
+        print(f"{row['Genotype']:<30}: {opt_pct:5.1f}% | Robust={robust_marker}")
 
-    # === SAVE ENHANCED RESULTS ===
+    print(f"\n🌟 TOP 10 BY COMBINED CONSISTENCY (Most Robust):")
+    print("-" * 55)
+    combined_ranking = consistency_df.sort_values("Combined_Consistency", ascending=False).head(10)
+    for _, row in combined_ranking.iterrows():
+        combined_pct = row["Combined_Consistency"] * 100
+        opt_pct = row["Optimized_Only_Consistency"] * 100
+        robust_marker = "✓" if row["Is_Robust"] else " "
+        print(f"{row['Genotype']:<30}: {combined_pct:5.1f}% (Opt:{opt_pct:4.1f}%) | Robust={robust_marker}")
 
-    # 1. Comprehensive consistency results
+    # === NEW: Robustness Analysis ===
+    robust_hits = consistency_df[consistency_df["Is_Robust"]]
+    optimization_dependent = consistency_df[consistency_df["Optimization_Dependent"]]
+
+    print(f"\n🔬 ROBUSTNESS ANALYSIS:")
+    print("-" * 40)
+    print(f"   Truly robust hits (found in both):           {len(robust_hits):3d}")
+    print(f"   Optimization-dependent hits (optimized only): {len(optimization_dependent):3d}")
+
+    if len(robust_hits) > 0:
+        avg_robust_consistency = robust_hits["Combined_Consistency"].mean()
+        print(f"   Average consistency of robust hits:           {avg_robust_consistency*100:5.1f}%")
+
+    if len(optimization_dependent) > 0:
+        avg_opt_dependent = optimization_dependent["Optimized_Only_Consistency"].mean()
+        print(f"   Average consistency of opt-dependent hits:    {avg_opt_dependent*100:5.1f}%")
+
+    # === SAVE ENHANCED RESULTS WITH DUAL CONSISTENCY METRICS ===
+
+    # 1. Comprehensive consistency results with dual metrics
     consistency_file = os.path.join(OUTPUT_DIR, "enhanced_consistency_scores.csv")
     consistency_df.to_csv(consistency_file, index=False)
+
+    # 2. NEW: Separate rankings for different use cases
+    optimized_only_ranking = consistency_df.sort_values("Optimized_Only_Consistency", ascending=False)
+    combined_ranking = consistency_df.sort_values("Combined_Consistency", ascending=False)
+
+    optimized_file = os.path.join(OUTPUT_DIR, "optimized_only_consistency_ranking.csv")
+    combined_file = os.path.join(OUTPUT_DIR, "combined_consistency_ranking.csv")
+
+    optimized_only_ranking.to_csv(optimized_file, index=False)
+    combined_ranking.to_csv(combined_file, index=False)
+
+    # 3. NEW: Robustness analysis file
+    robust_hits = consistency_df[consistency_df["Is_Robust"]]
+    optimization_dependent = consistency_df[consistency_df["Optimization_Dependent"]]
+
+    robustness_file = os.path.join(OUTPUT_DIR, "robustness_analysis.csv")
+    with open(robustness_file, "w") as f:
+        f.write("# ROBUSTNESS ANALYSIS SUMMARY\n")
+        f.write(f"# Total genotypes tested: {len(consistency_df)}\n")
+        f.write(f"# Truly robust hits: {len(robust_hits)}\n")
+        f.write(f"# Optimization-dependent hits: {len(optimization_dependent)}\n")
+        f.write("\n# ROBUST HITS (found in both optimized and edge cases):\n")
+        robust_hits[["Genotype", "Combined_Consistency", "Optimized_Only_Consistency", "Edge_Case_Consistency"]].to_csv(
+            f, index=False
+        )
+        f.write("\n# OPTIMIZATION-DEPENDENT HITS (found only in optimized configs):\n")
+        optimization_dependent[
+            ["Genotype", "Optimized_Only_Consistency", "Optimized_Hit_Count", "Optimized_Configs"]
+        ].to_csv(f, index=False)
 
     # 2. Configuration summary with edge case info
     config_summary = []
@@ -735,15 +897,32 @@ def main():
     plt.show()
 
     print(f"\n💾 ENHANCED FILES SAVED:")
-    print(f"   📊 {consistency_file}")
-    print(f"   ⚙️  {config_file}")
+    print(f"   📊 Comprehensive results: {consistency_file}")
+    print(f"   🏆 Optimized-only ranking: {optimized_file}")
+    print(f"   🌟 Combined robustness ranking: {combined_file}")
+    print(f"   🔬 Robustness analysis: {robustness_file}")
+    print(f"   ⚙️  Configuration summary: {config_file}")
     if len(edge_case_summary) > 0:
-        print(f"   🔧 {edge_case_file}")
-    print(f"   📈 {plot_file}")
+        edge_case_file = os.path.join(OUTPUT_DIR, "edge_case_analysis.csv")
+        print(f"   🔧 Edge case analysis: {edge_case_file}")
+    print(f"   📈 Plots: {plot_file}")
 
     print(f"\n✅ ENHANCED CONSISTENCY ANALYSIS COMPLETE!")
-    print(f"🎯 Found {len(found_in_both)} genotypes consistent across BOTH optimized and edge cases")
-    print(f"🔧 Edge cases tested {len(edge_configs)} additional configurations")
+    print(f"🎯 Truly robust hits (both optimized & edge cases): {len(robust_hits)}")
+    print(f"🔧 Optimization-dependent hits (optimized only): {len(optimization_dependent)}")
+    print(
+        f"📊 Total configurations tested: {len(all_configs)} ({len(optimized_configs)} optimized + {len(edge_configs)} edge cases)"
+    )
+
+    if USE_TRIPLE_TEST:
+        print(f"⚖️  Statistical mode: Triple test (conservative)")
+    else:
+        print(f"⚖️  Statistical mode: Multivariate only (sensitive)")
+
+    print(f"\n📋 USE CASE GUIDE:")
+    print(f"   • For publication hits: Use '{combined_file}' (most robust)")
+    print(f"   • For optimization validation: Use '{optimized_file}' (optimization performance)")
+    print(f"   • For robustness insights: Use '{robustness_file}' (detailed breakdown)")
 
 
 if __name__ == "__main__":

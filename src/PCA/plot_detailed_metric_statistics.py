@@ -17,12 +17,12 @@ import sys
 import json
 import os
 from sklearn.preprocessing import RobustScaler
-from scipy.spatial import distance
 from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
 from scipy.spatial.distance import pdist, squareform
 import matplotlib.gridspec as gridspec
 from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list, set_link_color_palette
 from scipy.spatial.distance import pdist
+import textwrap
 
 warnings.filterwarnings("ignore")
 
@@ -91,53 +91,6 @@ def colour_y_ticklabels(ax, nickname_to_region, color_dict):
         region = nickname_to_region.get(tick.get_text(), None)
         if region in color_dict:
             tick.set_color(color_dict[region])
-
-
-def permutation_test(group1, group2, n_permutations=1000, random_state=None):
-    """Permutation test for multivariate difference"""
-    rng = np.random.default_rng(random_state)
-    observed = np.linalg.norm(group1.mean(axis=0) - group2.mean(axis=0))
-    combined = np.vstack([group1, group2])
-    n1 = len(group1)
-    count = 0
-    for _ in range(n_permutations):
-        rng.shuffle(combined)
-        perm_group1 = combined[:n1]
-        perm_group2 = combined[n1:]
-        stat = np.linalg.norm(perm_group1.mean(axis=0) - perm_group2.mean(axis=0))
-        if stat >= observed:
-            count += 1
-    pval = (count + 1) / (n_permutations + 1)
-    return observed, pval
-
-
-def mahalanobis_distance(group1, group2):
-    """Calculate Mahalanobis distance between two groups"""
-    mean1 = group1.mean(axis=0)
-    mean2 = group2.mean(axis=0)
-    pooled = np.vstack([group1, group2])
-    cov = np.cov(pooled, rowvar=False)
-    inv_cov = np.linalg.pinv(cov)
-    dist = distance.mahalanobis(mean1, mean2, inv_cov)
-    return dist
-
-
-def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_state=None):
-    """Permutation test using Mahalanobis distance"""
-    rng = np.random.default_rng(random_state)
-    observed = mahalanobis_distance(group1, group2)
-    combined = np.vstack([group1, group2])
-    n1 = len(group1)
-    count = 0
-    for _ in range(n_permutations):
-        rng.shuffle(combined)
-        perm_group1 = combined[:n1]
-        perm_group2 = combined[n1:]
-        stat = mahalanobis_distance(perm_group1, perm_group2)
-        if stat >= observed:
-            count += 1
-    pval = (count + 1) / (n_permutations + 1)
-    return observed, pval
 
 
 def load_consistency_results():
@@ -324,7 +277,8 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             continue
         control_name = control_names[0]
 
-        # Mann-Whitney U per metric + FDR
+        # Mann-Whitney U per metric + FDR correction
+        # This is the main analysis - no need for multivariate tests since hits are pre-selected
         mannwhitney_pvals = []
         metrics_tested = []
         directions = {}
@@ -351,26 +305,14 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             significant_metrics = []
             pvals_corr = []
 
-        # Multivariate tests
-        group_matrix = subset[subset["Nickname"] == nickname][valid_metrics].values
-        control_matrix = subset[subset["Nickname"] == control_name][valid_metrics].values
-
-        if group_matrix.size == 0 or control_matrix.size == 0:
-            continue
-
-        perm_stat, perm_pval = permutation_test(group_matrix, control_matrix, random_state=42)
-        maha_stat, maha_pval = mahalanobis_permutation_test(group_matrix, control_matrix, random_state=42)
-
-        # Build result with metric-specific information
+        # Build result with metric-specific information (no multivariate tests needed)
         result_dict = {
             "genotype": nickname,
             "control": control_name,
             "MannWhitney_any_metric_significant": mannwhitney_any,
             "MannWhitney_significant_metrics": significant_metrics,
             "num_significant_metrics": len(significant_metrics),
-            "Permutation_pval": perm_pval,
-            "Mahalanobis_pval": maha_pval,
-            "significant": perm_pval < 0.05,  # Use permutation test as main criterion
+            "significant": mannwhitney_any,  # Use Mann-Whitney results as main criterion
         }
 
         # Add metric-specific results
@@ -1132,14 +1074,13 @@ def plot_simple_metric_heatmap(
     brain_region_mapping = simplified_to_region if simplified_to_region else {}
 
     # Create a DataFrame for sorting
-    genotype_df = pd.DataFrame({
-        'genotype': M.index,
-        'brain_region': [brain_region_mapping.get(g, 'Unknown') for g in M.index]
-    })
+    genotype_df = pd.DataFrame(
+        {"genotype": M.index, "brain_region": [brain_region_mapping.get(g, "Unknown") for g in M.index]}
+    )
 
     # Sort by brain region, then by genotype name
-    genotype_df_sorted = genotype_df.sort_values(['brain_region', 'genotype'])
-    row_order = genotype_df_sorted['genotype'].tolist()
+    genotype_df_sorted = genotype_df.sort_values(["brain_region", "genotype"])
+    row_order = genotype_df_sorted["genotype"].tolist()
 
     # 3) Sort metrics by correlation similarity (hierarchical clustering)
     corr_subset = correlation_matrix.loc[metric_names, metric_names]
@@ -1158,7 +1099,7 @@ def plot_simple_metric_heatmap(
         if not np.all(np.isfinite(col_distances)):
             col_distances = np.where(np.isfinite(col_distances), col_distances, 1.0)
 
-        col_Z = linkage(col_distances, method='ward')
+        col_Z = linkage(col_distances, method="ward")
         col_order_idx = leaves_list(col_Z)
         col_order = [metric_names[i] for i in col_order_idx]
     else:
@@ -1169,11 +1110,12 @@ def plot_simple_metric_heatmap(
 
     # 5) Create the plot
     plt.style.use("default")
-    fig, (ax_main, ax_cbar) = plt.subplots(1, 2, figsize=fig_size,
-                                           gridspec_kw={'width_ratios': [20, 1], 'wspace': 0.05})
+    fig, (ax_main, ax_cbar) = plt.subplots(
+        1, 2, figsize=fig_size, gridspec_kw={"width_ratios": [20, 1], "wspace": 0.05}
+    )
 
     # 6) Create heatmap
-    if HAS_SEABORN and 'sns' in globals():
+    if HAS_SEABORN and "sns" in globals():
         sns.heatmap(
             M_ordered,
             ax=ax_main,
@@ -1197,8 +1139,9 @@ def plot_simple_metric_heatmap(
         ax_main.set_yticklabels(M_ordered.index)
 
     # 7) Customize labels and appearance
-    ax_main.set_xticklabels(ax_main.get_xticklabels(), rotation=metric_label_rotation, ha="right",
-                           fontsize=col_label_fontsize)
+    ax_main.set_xticklabels(
+        ax_main.get_xticklabels(), rotation=metric_label_rotation, ha="right", fontsize=col_label_fontsize
+    )
     ax_main.set_yticklabels(ax_main.get_yticklabels(), rotation=0, fontsize=row_label_fontsize)
 
     # 8) Color genotype labels by brain region
@@ -1216,6 +1159,7 @@ def plot_simple_metric_heatmap(
 
     # 9) Add colorbar
     from matplotlib.colors import Normalize
+
     norm = Normalize(vmin=vmin, vmax=vmax)
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plt.get_cmap(cmap)), cax=ax_cbar)
 
@@ -1244,8 +1188,7 @@ def plot_simple_metric_heatmap(
 
     # 10) Set title and labels
     ax_main.set_title(
-        f"Metric Analysis - Simple Heatmap\n"
-        f"(Genotypes sorted by brain region, Metrics by correlation)",
+        f"Metric Analysis - Simple Heatmap\n" f"(Genotypes sorted by brain region, Metrics by correlation)",
         fontsize=14,
         fontweight="bold",
         pad=20,

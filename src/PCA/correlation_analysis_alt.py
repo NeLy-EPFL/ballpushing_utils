@@ -27,6 +27,8 @@ FAMILY_KEYWORDS = {
         "exit_time",
         "first_major_event",
         "first_significant_event",
+        "stop",
+        "pause",
     ],
     "intensity": [
         "nb_",
@@ -68,8 +70,6 @@ FAMILY_KEYWORDS = {
         "facing",
         "flailing",
         "head",
-        "freeze",
-        "pause",
     ],
 }
 
@@ -165,7 +165,7 @@ def identify_metric_columns(dataset):
         "interaction_rate",
         "finished",
         "chamber",
-        "freeze",
+        "stop",
         "facing",
         "flailing",
         "head",
@@ -914,7 +914,7 @@ def save_correlation_analysis(correlation_matrix, high_corr_pairs, metric_column
 
 
 def main():
-    DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+    DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
     CORRELATION_THRESHOLD = 0.8
     NAN_THRESHOLD = 0.05
     print("🔍 BALLPUSHING METRICS CORRELATION ANALYSIS\n" + "=" * 50)

@@ -24,11 +24,11 @@ warnings.filterwarnings("ignore")
 import Config
 
 # === CONFIGURATION ===
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
 
 # Two metric lists to compare
-METRICS_LIST_1_PATH = "final_metrics_for_pca.txt"  # Your correlation-based selection
-METRICS_LIST_2_PATH = "final_metrics_for_pca_alt.txt"  # Your family-based selection
+METRICS_LIST_1_PATH = "metric_lists/final_metrics_for_pca.txt"  # Your correlation-based selection
+METRICS_LIST_2_PATH = "metric_lists/final_metrics_for_pca_alt.txt"  # Your family-based selection
 
 # BIC penalty weight (0.0 = no penalty, higher values = stronger penalty for complexity)
 BIC_PENALTY_WEIGHT = 0.15  # Adjust this value to control complexity penalty
