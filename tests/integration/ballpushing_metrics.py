@@ -8,7 +8,8 @@ from Ballpushing_utils import Fly, Experiment, BallPushingMetrics
 from utils_behavior import Utils
 import inspect
 import warnings
-warnings.filterwarnings('ignore')
+
+warnings.filterwarnings("ignore")
 
 
 def convert_to_serializable(obj):
@@ -37,7 +38,7 @@ def format_metric_value(value, max_width=15, verbose_dicts=True):
         elif "Skipped" in value:
             return "⏩ SKIP"
         elif len(value) > max_width:
-            return value[:max_width-3] + "..."
+            return value[: max_width - 3] + "..."
         else:
             return value
     elif isinstance(value, bool):
@@ -59,7 +60,7 @@ def format_metric_value(value, max_width=15, verbose_dicts=True):
         if len(value) == 0:
             return "[]"
         elif len(value) <= 3:
-            formatted_items = [format_metric_value(item, max_width//len(value), verbose_dicts) for item in value]
+            formatted_items = [format_metric_value(item, max_width // len(value), verbose_dicts) for item in value]
             return f"[{', '.join(formatted_items)}]"
         else:
             return f"[{len(value)} items]"
@@ -108,7 +109,7 @@ def format_metric_value(value, max_width=15, verbose_dicts=True):
     else:
         str_val = str(value)
         if len(str_val) > max_width:
-            return str_val[:max_width-3] + "..."
+            return str_val[: max_width - 3] + "..."
         return str_val
 
 
@@ -168,25 +169,39 @@ def create_metrics_table(results, fly_name, table_style="summary"):
         else:
             status = "✅ OK"
 
-        data.append({
-            'Metric': metric_name,
-            'Category': category,
-            'Value': formatted_value,
-            'Status': status,
-            'Raw_Value': value
-        })
+        data.append(
+            {
+                "Metric": metric_name,
+                "Category": category,
+                "Value": formatted_value,
+                "Status": status,
+                "Raw_Value": value,
+            }
+        )
 
     df = pd.DataFrame(data)
 
     if table_style == "summary":
         # Summary table with key metrics highlighted
-        summary_df = df[['Metric', 'Value', 'Status']].copy()
+        summary_df = df[["Metric", "Value", "Status"]].copy()
 
         # Prioritize key metrics
         key_metrics = [
-            'nb_events', 'max_event', 'final_event', 'chamber_time', 'chamber_ratio',
-            'nb_long_pauses', 'pauses_persistence', 'compute_nb_freeze',
-            'has_finished', 'has_major', 'has_significant'
+            "nb_events",
+            "max_event",
+            "final_event",
+            "chamber_time",
+            "chamber_ratio",
+            "nb_stops",
+            "nb_pauses",
+            "nb_long_pauses",
+            "has_long_pauses",
+            "median_stop_duration",
+            "median_pause_duration",
+            "median_long_pause_duration",
+            "has_finished",
+            "has_major",
+            "has_significant",
         ]
 
         # Sort: key metrics first, then alphabetically
@@ -196,8 +211,8 @@ def create_metrics_table(results, fly_name, table_style="summary"):
             else:
                 return (1, metric)
 
-        summary_df['sort_key'] = summary_df['Metric'].apply(metric_priority)
-        summary_df = summary_df.sort_values('sort_key').drop('sort_key', axis=1)
+        summary_df["sort_key"] = summary_df["Metric"].apply(metric_priority)
+        summary_df = summary_df.sort_values("sort_key").drop("sort_key", axis=1)
 
         output = f"""
 {'='*80}
@@ -226,10 +241,11 @@ def create_metrics_table(results, fly_name, table_style="summary"):
 
     elif table_style == "categorical":
         # Group by category
-        category_summary = df.groupby('Category').agg({
-            'Status': lambda x: f"{len(x[x == '✅ OK'])}/{len(x)} OK",
-            'Metric': 'count'
-        }).rename(columns={'Metric': 'Count'})
+        category_summary = (
+            df.groupby("Category")
+            .agg({"Status": lambda x: f"{len(x[x == '✅ OK'])}/{len(x)} OK", "Metric": "count"})
+            .rename(columns={"Metric": "Count"})
+        )
 
         output = f"""
 {'='*80}
@@ -240,8 +256,8 @@ def create_metrics_table(results, fly_name, table_style="summary"):
 """
 
         # Show details for each category
-        for category in df['Category'].unique():
-            cat_df = df[df['Category'] == category][['Metric', 'Value', 'Status']]
+        for category in df["Category"].unique():
+            cat_df = df[df["Category"] == category][["Metric", "Value", "Status"]]
             output += f"""
 🏷️  {category.upper()} METRICS:
 {'-'*60}
@@ -252,8 +268,8 @@ def create_metrics_table(results, fly_name, table_style="summary"):
 
     elif table_style == "detailed":
         # Full detailed table
-        detailed_df = df[['Metric', 'Category', 'Value', 'Status']].copy()
-        detailed_df = detailed_df.sort_values(['Category', 'Metric'])
+        detailed_df = df[["Metric", "Category", "Value", "Status"]].copy()
+        detailed_df = detailed_df.sort_values(["Category", "Metric"])
 
         output = f"""
 {'='*80}
@@ -289,39 +305,89 @@ def create_metrics_table(results, fly_name, table_style="summary"):
 def categorize_metric(metric_name):
     """Categorize metrics into logical groups."""
     behavioral_metrics = [
-        'nb_events', 'max_event', 'final_event', 'has_finished', 'has_major', 'has_significant',
-        'get_max_event', 'get_final_event', 'get_major_event'
+        "nb_events",
+        "max_event",
+        "final_event",
+        "has_finished",
+        "has_major",
+        "has_significant",
+        "get_max_event",
+        "get_final_event",
+        "get_major_event",
     ]
 
     movement_metrics = [
-        'distance_moved', 'distance_ratio', 'max_distance', 'compute_fly_distance_moved',
-        'get_distance_moved', 'get_max_distance'
+        "distance_moved",
+        "distance_ratio",
+        "max_distance",
+        "compute_fly_distance_moved",
+        "get_distance_moved",
+        "get_max_distance",
     ]
 
     timing_metrics = [
-        'chamber_time', 'chamber_ratio', 'chamber_exit_time', 'max_event_time', 'final_event_time',
-        'first_significant_event_time', 'get_chamber_time', 'get_time_chamber_beginning'
+        "chamber_time",
+        "chamber_ratio",
+        "chamber_exit_time",
+        "max_event_time",
+        "final_event_time",
+        "first_significant_event_time",
+        "get_chamber_time",
+        "get_time_chamber_beginning",
     ]
 
     pause_metrics = [
-        'compute_pause_metrics', 'compute_median_freeze_duration', 'compute_nb_freeze',
-        'compute_long_pause_metrics', 'pauses_persistence', 'compute_pauses_persistence',
-        'nb_long_pauses', 'median_long_pause_duration'
+        "compute_pause_metrics",
+        "compute_stop_metrics",
+        "compute_long_pause_metrics",
+        "nb_pauses",
+        "median_pause_duration",
+        "total_pause_duration",
+        "nb_stops",
+        "median_stop_duration",
+        "total_stop_duration",
+        "nb_long_pauses",
+        "median_long_pause_duration",
+        "total_long_pause_duration",
+        "has_long_pauses",
+        "compute_nb_stops",
+        "compute_median_freeze_duration",
+        "compute_nb_freeze",
+        "pauses_persistence",
+        "compute_pauses_persistence",
     ]
 
     orientation_metrics = [
-        'compute_fraction_not_facing_ball', 'compute_flailing', 'compute_head_pushing_ratio',
-        'compute_leg_visibility_ratio', 'compute_median_head_ball_distance', 'compute_mean_head_ball_distance'
+        "compute_fraction_not_facing_ball",
+        "compute_flailing",
+        "compute_head_pushing_ratio",
+        "compute_leg_visibility_ratio",
+        "compute_median_head_ball_distance",
+        "compute_mean_head_ball_distance",
     ]
 
     learning_metrics = [
-        'learning_slope', 'learning_slope_r2', 'logistic_L', 'logistic_k', 'logistic_t0', 'logistic_r2',
-        'compute_learning_slope', 'compute_logistic_features'
+        "learning_slope",
+        "learning_slope_r2",
+        "logistic_L",
+        "logistic_k",
+        "logistic_t0",
+        "logistic_r2",
+        "compute_learning_slope",
+        "compute_logistic_features",
     ]
 
     advanced_metrics = [
-        'binned_slope_0', 'binned_slope_1', 'binned_slope_2', 'interaction_rate_bin_0', 'interaction_rate_bin_1',
-        'binned_auc_0', 'binned_auc_1', 'compute_binned_slope', 'compute_binned_auc', 'compute_interaction_rate_by_bin'
+        "binned_slope_0",
+        "binned_slope_1",
+        "binned_slope_2",
+        "interaction_rate_bin_0",
+        "interaction_rate_bin_1",
+        "binned_auc_0",
+        "binned_auc_1",
+        "compute_binned_slope",
+        "compute_binned_auc",
+        "compute_interaction_rate_by_bin",
     ]
 
     if metric_name in behavioral_metrics:
@@ -366,10 +432,19 @@ def create_experiment_metrics_table(all_results, metrics_to_summarize=None, max_
     # Default key metrics if not specified
     if metrics_to_summarize is None:
         metrics_to_summarize = [
-            'nb_events', 'max_event', 'final_event', 'chamber_time', 'chamber_ratio',
-            'nb_long_pauses', 'pauses_persistence', 'compute_nb_freeze',
-            'has_finished', 'has_major', 'has_significant',
-            'compute_median_freeze_duration', 'compute_head_pushing_ratio'
+            "nb_events",
+            "max_event",
+            "final_event",
+            "chamber_time",
+            "chamber_ratio",
+            "nb_long_pauses",
+            "pauses_persistence",
+            "compute_nb_freeze",
+            "has_finished",
+            "has_major",
+            "has_significant",
+            "compute_median_freeze_duration",
+            "compute_head_pushing_ratio",
         ]
 
     # Filter metrics that actually exist in the data
@@ -387,7 +462,7 @@ def create_experiment_metrics_table(all_results, metrics_to_summarize=None, max_
         fly_names = fly_names[:max_flies]
 
     for fly_name in fly_names:
-        row = {'Fly': fly_name}
+        row = {"Fly": fly_name}
         fly_results = all_results[fly_name]
 
         for metric in available_metrics:
@@ -403,26 +478,30 @@ def create_experiment_metrics_table(all_results, metrics_to_summarize=None, max_
     numeric_data = []
     for fly_name in fly_names:
         fly_results = all_results[fly_name]
-        row = {'Fly': fly_name}
+        row = {"Fly": fly_name}
         for metric in available_metrics:
             value = fly_results.get(metric, np.nan)
             # Convert to numeric if possible
-            if isinstance(value, (int, float)) and not (isinstance(value, float) and (np.isnan(value) or np.isinf(value))):
+            if isinstance(value, (int, float)) and not (
+                isinstance(value, float) and (np.isnan(value) or np.isinf(value))
+            ):
                 row[metric] = float(value)
             else:
                 row[metric] = np.nan
         numeric_data.append(row)
 
-    numeric_df = pd.DataFrame(numeric_data).set_index('Fly')
+    numeric_df = pd.DataFrame(numeric_data).set_index("Fly")
 
     # Calculate summary statistics
-    summary_stats = pd.DataFrame({
-        'Mean': numeric_df.mean(),
-        'Std': numeric_df.std(),
-        'Min': numeric_df.min(),
-        'Max': numeric_df.max(),
-        'Count': numeric_df.count()
-    }).round(3)
+    summary_stats = pd.DataFrame(
+        {
+            "Mean": numeric_df.mean(),
+            "Std": numeric_df.std(),
+            "Min": numeric_df.min(),
+            "Max": numeric_df.max(),
+            "Count": numeric_df.count(),
+        }
+    ).round(3)
 
     output = f"""
 {'='*100}
@@ -443,9 +522,13 @@ Metrics: {len(available_metrics)}
     # Add success rate information
     success_info = []
     for metric in available_metrics:
-        success_count = sum(1 for fly_name in fly_names
-                          if not (isinstance(all_results[fly_name].get(metric), str) and
-                                 "Error" in str(all_results[fly_name].get(metric))))
+        success_count = sum(
+            1
+            for fly_name in fly_names
+            if not (
+                isinstance(all_results[fly_name].get(metric), str) and "Error" in str(all_results[fly_name].get(metric))
+            )
+        )
         success_rate = (success_count / len(fly_names)) * 100
         success_info.append(f"{metric}: {success_rate:.0f}%")
 
@@ -471,9 +554,13 @@ def get_predefined_metric_sets():
             "final_event_time",
             "chamber_time",
             "chamber_ratio",
+            "nb_stops",
+            "nb_pauses",
             "nb_long_pauses",
+            "has_long_pauses",
+            "median_stop_duration",
+            "median_pause_duration",
             "median_long_pause_duration",
-            "pauses_persistence",
         ],
         "core_analysis": [
             "nb_events",
@@ -522,10 +609,10 @@ def get_predefined_metric_sets():
             "compute_persistence_at_end",
             "compute_fly_distance_moved",
             "get_time_chamber_beginning",
-            "compute_median_freeze_duration",
-            "compute_nb_freeze",
+            "compute_stop_metrics",
+            "compute_pause_metrics",
             "compute_long_pause_metrics",
-            "compute_pauses_persistence",
+            "has_long_pauses",
         ],
         "orientation_metrics": [
             "compute_fraction_not_facing_ball",
@@ -551,11 +638,10 @@ def get_predefined_metric_sets():
             "compute_leg_visibility_ratio",
             "compute_median_head_ball_distance",
             "compute_mean_head_ball_distance",
+            "compute_stop_metrics",
             "compute_pause_metrics",
-            "compute_median_freeze_duration",
-            "compute_nb_freeze",
             "compute_long_pause_metrics",
-            "compute_pauses_persistence",
+            "has_long_pauses",
         ],
         "comprehensive": [
             # Core behavioral metrics
@@ -586,6 +672,22 @@ def get_predefined_metric_sets():
             "compute_interaction_persistence",
             "get_distance_ratio",
             "get_max_distance",
+        ],
+        "pause_metrics_focus": [
+            # Updated pause metrics with non-overlapping ranges
+            "compute_stop_metrics",
+            "compute_pause_metrics",
+            "compute_long_pause_metrics",
+            "has_long_pauses",
+            "nb_stops",
+            "median_stop_duration",
+            "total_stop_duration",
+            "nb_pauses",
+            "median_pause_duration",
+            "total_pause_duration",
+            "nb_long_pauses",
+            "median_long_pause_duration",
+            "total_long_pause_duration",
         ],
     }
 
@@ -859,22 +961,22 @@ def test_ball_identity_functionality(fly_path):
         print(f"   ❌ No tracking data available")
         return False
 
-    if hasattr(tracking_data, 'balltrack') and tracking_data.balltrack is not None:
+    if hasattr(tracking_data, "balltrack") and tracking_data.balltrack is not None:
         # Check if it's a SLEAP tracks object or regular tracking data
-        if hasattr(tracking_data.balltrack, 'objects'):
+        if hasattr(tracking_data.balltrack, "objects"):
             print(f"   Number of balls: {len(tracking_data.balltrack.objects)}")
-        elif hasattr(tracking_data.balltrack, 'nb_objects'):
+        elif hasattr(tracking_data.balltrack, "nb_objects"):
             print(f"   Number of balls: {tracking_data.balltrack.nb_objects}")
         else:
             print(f"   Number of balls: Unknown (no objects attribute)")
 
         # Get SLEAP track names if available
-        if hasattr(tracking_data.balltrack, 'track_names'):
+        if hasattr(tracking_data.balltrack, "track_names"):
             track_names = tracking_data.balltrack.track_names
             print(f"   SLEAP track names: {track_names}")
-        elif hasattr(tracking_data.balltrack, 'sleap_tracks') and tracking_data.balltrack.sleap_tracks is not None:
+        elif hasattr(tracking_data.balltrack, "sleap_tracks") and tracking_data.balltrack.sleap_tracks is not None:
             sleap_tracks = tracking_data.balltrack.sleap_tracks
-            if hasattr(sleap_tracks, 'track_names'):
+            if hasattr(sleap_tracks, "track_names"):
                 track_names = sleap_tracks.track_names
                 print(f"   SLEAP track names: {track_names}")
             else:
@@ -932,21 +1034,21 @@ def test_ball_identity_functionality(fly_path):
         # Show metrics structure for each ball
         for key, metric_dict in metrics.metrics.items():
             print(f"   Key: {key}")
-            if 'ball_identity' in metric_dict:
+            if "ball_identity" in metric_dict:
                 print(f"     Ball identity: {metric_dict['ball_identity']}")
-            if 'fly_idx' in metric_dict:
+            if "fly_idx" in metric_dict:
                 print(f"     Fly idx: {metric_dict['fly_idx']}")
-            if 'ball_idx' in metric_dict:
+            if "ball_idx" in metric_dict:
                 print(f"     Ball idx: {metric_dict['ball_idx']}")
 
         # Test ball identity retrieval methods
         print(f"\n🎯 Ball Identity Retrieval:")
 
         try:
-            get_by_identity = getattr(metrics, 'get_metrics_by_ball_identity', None)
+            get_by_identity = getattr(metrics, "get_metrics_by_ball_identity", None)
             if get_by_identity is not None:
                 if tracking_data.has_training_ball():
-                    training_metrics = get_by_identity('training')
+                    training_metrics = get_by_identity("training")
                     if training_metrics:
                         print(f"   Training ball metrics: {len(training_metrics)} entries")
                         sample_keys = list(training_metrics.keys())[:3]
@@ -955,7 +1057,7 @@ def test_ball_identity_functionality(fly_path):
                         print(f"   No training ball metrics found")
 
                 if tracking_data.has_test_ball():
-                    test_metrics = get_by_identity('test')
+                    test_metrics = get_by_identity("test")
                     if test_metrics:
                         print(f"   Test ball metrics: {len(test_metrics)} entries")
                         sample_keys = list(test_metrics.keys())[:3]
@@ -969,7 +1071,7 @@ def test_ball_identity_functionality(fly_path):
 
             # Test get_all_metrics_with_identity
             try:
-                all_with_identity = getattr(metrics, 'get_all_metrics_with_identity', None)
+                all_with_identity = getattr(metrics, "get_all_metrics_with_identity", None)
                 if all_with_identity is not None:
                     result = all_with_identity()
                     if result:
@@ -992,7 +1094,9 @@ def test_ball_identity_functionality(fly_path):
     return True
 
 
-def process_fly(fly_path, metrics_to_test, table_style="summary", show_json=False, test_f1=False, test_ball_identity=False):
+def process_fly(
+    fly_path, metrics_to_test, table_style="summary", show_json=False, test_f1=False, test_ball_identity=False
+):
     """Process a single fly with comprehensive conditional processing tests."""
 
     # Test ball identity functionality if requested
@@ -1050,8 +1154,24 @@ def process_fly(fly_path, metrics_to_test, table_style="summary", show_json=Fals
         if metrics_to_test == ["harmonized_test"]:
             return
 
+    # Test updated pause metrics if requested
+    if "updated_pause_test" in metrics_to_test:
+        updated_pause_results = test_updated_pause_metrics(fly_path)
+
+        # If only testing updated pause metrics, return here
+        if metrics_to_test == ["updated_pause_test"]:
+            return
+
     # Continue with standard metric testing if other metrics are specified
-    standard_metrics = [m for m in metrics_to_test if m not in ["conditional_test", "performance_test", "harmonized_test"]] if metrics_to_test else []
+    standard_metrics = (
+        [
+            m
+            for m in metrics_to_test
+            if m not in ["conditional_test", "performance_test", "harmonized_test", "updated_pause_test"]
+        ]
+        if metrics_to_test
+        else []
+    )
     if standard_metrics:
         print(f"\n{'='*60}")
         print("📊 STANDARD METRICS TESTING")
@@ -1066,7 +1186,15 @@ def process_fly(fly_path, metrics_to_test, table_style="summary", show_json=Fals
         test_metrics(metrics, standard_metrics, ExampleFly.metadata.name, table_style=table_style, show_json=show_json)
 
 
-def process_experiment(experiment_path, metrics_to_test, table_style="summary", show_json=False, max_flies=20, test_f1=False, test_ball_identity=False):
+def process_experiment(
+    experiment_path,
+    metrics_to_test,
+    table_style="summary",
+    show_json=False,
+    max_flies=20,
+    test_f1=False,
+    test_ball_identity=False,
+):
     """Process an experiment with optional conditional processing tests."""
 
     # Load the experiment
@@ -1086,7 +1214,7 @@ def process_experiment(experiment_path, metrics_to_test, table_style="summary", 
         print(f"{'='*80}")
 
         # Test on first few flies to see ball identity patterns
-        test_flies = ExampleExperiment.flies[:min(3, len(ExampleExperiment.flies))]
+        test_flies = ExampleExperiment.flies[: min(3, len(ExampleExperiment.flies))]
 
         for i, fly in enumerate(test_flies):
             print(f"\n🐛 Testing ball identity on fly {i+1}/{len(test_flies)}: {fly.metadata.name}")
@@ -1103,7 +1231,7 @@ def process_experiment(experiment_path, metrics_to_test, table_style="summary", 
         print(f"{'='*80}")
 
         # Test harmonized metrics on a subset of flies (first 3 or all if less than 3)
-        test_flies = ExampleExperiment.flies[:min(3, len(ExampleExperiment.flies))]
+        test_flies = ExampleExperiment.flies[: min(3, len(ExampleExperiment.flies))]
 
         for i, fly in enumerate(test_flies):
             print(f"\n🐛 Testing harmonized metrics on fly {i+1}/{len(test_flies)}: {fly.metadata.name}")
@@ -1111,6 +1239,23 @@ def process_experiment(experiment_path, metrics_to_test, table_style="summary", 
 
         # If only testing harmonized metrics, return here
         if metrics_to_test == ["harmonized_test"]:
+            return
+
+    # Handle updated pause metrics tests for experiments
+    if "updated_pause_test" in metrics_to_test:
+        print(f"\n{'='*80}")
+        print("🧪 EXPERIMENT-WIDE UPDATED PAUSE METRICS TESTS")
+        print(f"{'='*80}")
+
+        # Test updated pause metrics on a subset of flies (first 3 or all if less than 3)
+        test_flies = ExampleExperiment.flies[: min(3, len(ExampleExperiment.flies))]
+
+        for i, fly in enumerate(test_flies):
+            print(f"\n🐛 Testing updated pause metrics on fly {i+1}/{len(test_flies)}: {fly.metadata.name}")
+            test_updated_pause_metrics(fly.directory)
+
+        # If only testing updated pause metrics, return here
+        if metrics_to_test == ["updated_pause_test"]:
             return
 
     # Handle conditional processing tests for experiments
@@ -1178,7 +1323,11 @@ def process_experiment(experiment_path, metrics_to_test, table_style="summary", 
             return
 
     # Continue with standard processing
-    standard_metrics = [m for m in metrics_to_test if m not in ["conditional_test", "performance_test", "harmonized_test"]]
+    standard_metrics = [
+        m
+        for m in metrics_to_test
+        if m not in ["conditional_test", "performance_test", "harmonized_test", "updated_pause_test"]
+    ]
     if standard_metrics:
         print(f"\n{'='*60}")
         print("📊 STANDARD EXPERIMENT METRICS TESTING")
@@ -1236,7 +1385,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
         elif metric_name == "max_event" or metric_name == "get_max_event":
             try:
                 # Check for F1 experiment with ball identities
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1264,7 +1415,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
         elif metric_name == "final_event" or metric_name == "get_final_event":
             try:
                 # Check for F1 experiment with ball identities
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1292,7 +1445,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
         elif metric_name == "has_finished" or metric_name == "get_has_finished":
             try:
                 # Check for F1 experiment with ball identities
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1321,7 +1476,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
         elif metric_name == "has_major" or metric_name == "get_has_major":
             try:
                 # Check for F1 experiment with ball identities
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1349,7 +1506,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
         elif metric_name == "has_significant" or metric_name == "get_has_significant":
             try:
                 # Check for F1 experiment with ball identities
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1374,6 +1533,11 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
                     result = metrics.get_has_significant(0, 0)
             except Exception as e:
                 result = f"Error: {e}"
+        elif metric_name == "has_long_pauses":
+            try:
+                result = metrics.has_long_pauses(0)
+            except Exception as e:
+                result = f"Error: {e}"
         # Methods that need only fly_idx
         elif metric_name in [
             "compute_persistence_at_end",
@@ -1384,15 +1548,77 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
             "chamber_ratio",
             "get_chamber_time",
             "compute_pause_metrics",
+            "compute_stop_metrics",
             "compute_long_pause_metrics",
             "compute_pauses_persistence",
             "compute_velocity_trend",
+            "compute_median_stop_duration",
+            "compute_nb_stops",
         ]:
             try:
                 func = getattr(metrics, metric_name)
                 result = func(0)
             except Exception as e:
                 result = f"Error: {e}"
+
+        # Handle metrics that are derived from other computation methods (not standalone methods)
+        elif metric_name in [
+            "nb_stops",
+            "median_stop_duration",
+            "total_stop_duration",
+            "nb_pauses",
+            "median_pause_duration",
+            "total_pause_duration",
+            "nb_long_pauses",
+            "median_long_pause_duration",
+            "total_long_pause_duration",
+        ]:
+            try:
+                # These are not methods but results from compute_*_metrics methods
+                if metric_name in ["nb_stops", "median_stop_duration", "total_stop_duration"]:
+                    parent_result = metrics.compute_stop_metrics(0)
+                    result = parent_result.get(metric_name, "Not available")
+                elif metric_name in ["nb_pauses", "median_pause_duration", "total_pause_duration"]:
+                    parent_result = metrics.compute_pause_metrics(0)
+                    result = parent_result.get(metric_name, "Not available")
+                elif metric_name in ["nb_long_pauses", "median_long_pause_duration", "total_long_pause_duration"]:
+                    parent_result = metrics.compute_long_pause_metrics(0)
+                    result = parent_result.get(metric_name, "Not available")
+                else:
+                    result = "Unknown derived metric"
+            except Exception as e:
+                result = f"Error: {e}"
+
+        # Methods that need special handling (ball identity, multiple args, etc.)
+        elif metric_name in [
+            "get_all_ball_identities",
+            "get_metrics_by_identity",
+            "get_test_ball_metrics",
+            "get_training_ball_metrics",
+            "has_ball_identity",
+            "get_raw_pauses",
+            "is_metric_enabled",
+        ]:
+            try:
+                if metric_name == "get_all_ball_identities":
+                    result = "Skipped: Ball identity method, requires F1 experiment"
+                elif metric_name == "get_metrics_by_identity":
+                    result = "Skipped: Ball identity method, requires fly_idx and ball_identity args"
+                elif metric_name == "get_test_ball_metrics":
+                    result = "Skipped: Ball identity method, requires fly_idx"
+                elif metric_name == "get_training_ball_metrics":
+                    result = "Skipped: Ball identity method, requires fly_idx"
+                elif metric_name == "has_ball_identity":
+                    result = "Skipped: Ball identity method, requires fly_idx and ball_identity args"
+                elif metric_name == "get_raw_pauses":
+                    result = "Skipped: Raw pause method, requires fly_idx"
+                elif metric_name == "is_metric_enabled":
+                    result = "Skipped: Utility method, requires metric_name arg"
+                else:
+                    result = "Skipped: Special handling required"
+            except Exception as e:
+                result = f"Error: {e}"
+
         # Methods that need fly_idx and ball_idx
         elif metric_name in [
             "compute_auc",
@@ -1433,7 +1659,9 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
                 func = getattr(metrics, metric_name)
 
                 # Check if we have ball identities (F1 experiment)
-                if hasattr(metrics.tracking_data, 'has_training_ball') and hasattr(metrics.tracking_data, 'has_test_ball'):
+                if hasattr(metrics.tracking_data, "has_training_ball") and hasattr(
+                    metrics.tracking_data, "has_test_ball"
+                ):
                     training_ball = metrics.tracking_data.has_training_ball()
                     test_ball = metrics.tracking_data.has_test_ball()
 
@@ -1503,10 +1731,18 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
             # Highlight new/important metrics (unless detailed view already shows everything)
             if table_style != "detailed":
                 new_metrics = [
-                    "compute_fraction_not_facing_ball", "compute_flailing", "compute_head_pushing_ratio",
-                    "compute_median_head_ball_distance", "compute_mean_head_ball_distance",
-                    "compute_long_pause_metrics", "compute_pauses_persistence", "nb_long_pauses", "pauses_persistence",
-                    "has_finished", "has_major", "has_significant"
+                    "compute_fraction_not_facing_ball",
+                    "compute_flailing",
+                    "compute_head_pushing_ratio",
+                    "compute_median_head_ball_distance",
+                    "compute_mean_head_ball_distance",
+                    "compute_long_pause_metrics",
+                    "compute_pauses_persistence",
+                    "nb_long_pauses",
+                    "pauses_persistence",
+                    "has_finished",
+                    "has_major",
+                    "has_significant",
                 ]
 
                 tested_new_metrics = {k: v for k, v in serializable_results.items() if k in new_metrics}
@@ -1535,12 +1771,17 @@ def test_metrics(metrics, metrics_to_test, fly_name, return_results=False, table
             json.dump(serializable_results, f, indent=4)
 
         # Save CSV table for easy analysis
-        df_results = pd.DataFrame([{
-            'Metric': k,
-            'Value': format_metric_value(v, max_width=50),
-            'Raw_Value': v,
-            'Category': categorize_metric(k)
-        } for k, v in serializable_results.items()])
+        df_results = pd.DataFrame(
+            [
+                {
+                    "Metric": k,
+                    "Value": format_metric_value(v, max_width=50),
+                    "Raw_Value": v,
+                    "Category": categorize_metric(k),
+                }
+                for k, v in serializable_results.items()
+            ]
+        )
 
         csv_filename = f"metrics_table_{safe_fly_name}.csv"
         df_results.to_csv(output_dir / csv_filename, index=False)
@@ -1648,14 +1889,16 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test, m
     print("-" * 50)
 
     key_metrics = [
-        "compute_nb_freeze",
+        "compute_stop_metrics",
+        "compute_pause_metrics",
+        "compute_long_pause_metrics",
+        "has_long_pauses",
         "compute_leg_visibility_ratio",
         "compute_head_pushing_ratio",
         "compute_median_head_ball_distance",
         "compute_mean_head_ball_distance",
         "compute_fraction_not_facing_ball",
         "compute_flailing",
-        "compute_long_pause_metrics",
     ]
 
     for metric in key_metrics:
@@ -1726,10 +1969,12 @@ def generate_experiment_summary(all_results, experiment_path, metrics_to_test, m
         # Show a few key metric values for this fly
         key_values = []
         for key_metric in [
-            "compute_nb_freeze",
+            "compute_stop_metrics",
+            "compute_pause_metrics",
+            "compute_long_pause_metrics",
+            "has_long_pauses",
             "compute_leg_visibility_ratio",
             "compute_median_head_ball_distance",
-            "compute_long_pause_metrics",
             "has_finished",
             "has_major",
             "has_significant",
@@ -1761,9 +2006,9 @@ def test_harmonized_pause_metrics(fly_path):
 
     # Expected harmonized naming convention
     expected_metrics = {
-        'stops': ['nb_stops', 'median_stop_duration', 'total_stop_duration'],
-        'pauses': ['nb_pauses', 'median_pause_duration', 'total_pause_duration'],
-        'long_pauses': ['nb_long_pauses', 'median_long_pause_duration', 'total_long_pause_duration']
+        "stops": ["nb_stops", "median_stop_duration", "total_stop_duration"],
+        "pauses": ["nb_pauses", "median_pause_duration", "total_pause_duration"],
+        "long_pauses": ["nb_long_pauses", "median_long_pause_duration", "total_long_pause_duration"],
     }
 
     # Check if metrics exist in the computed results
@@ -1802,8 +2047,8 @@ def test_harmonized_pause_metrics(fly_path):
     print("-" * 40)
 
     # Check if stops and pauses are consistent (both should use ≥2s threshold)
-    stops_count = results['stops'].get('nb_stops')
-    pauses_count = results['pauses'].get('nb_pauses')
+    stops_count = results["stops"].get("nb_stops")
+    pauses_count = results["pauses"].get("nb_pauses")
 
     if stops_count is not None and pauses_count is not None:
         if abs(stops_count - pauses_count) < 0.1:  # Allow for small floating point differences
@@ -1833,13 +2078,13 @@ def test_harmonized_pause_metrics(fly_path):
     print(f"  - All use consistent naming: nb_metric, median_metric_duration, total_metric_duration")
 
     # Test that old inconsistent metrics are removed
-    old_metrics_to_check = ['pauses_persistence', 'compute_nb_freeze']
+    old_metrics_to_check = ["pauses_persistence", "compute_nb_freeze"]
     print(f"\n🧹 CLEANUP CHECK:")
     print("-" * 25)
 
     for old_metric in old_metrics_to_check:
         if old_metric in all_computed_metrics:
-            if old_metric == 'compute_nb_freeze':
+            if old_metric == "compute_nb_freeze":
                 print(f"⚠️  {old_metric}: Still present (should be renamed to nb_stops)")
             else:
                 print(f"⚠️  {old_metric}: Still present (should be removed)")
@@ -1847,6 +2092,130 @@ def test_harmonized_pause_metrics(fly_path):
             print(f"✅ {old_metric}: Correctly removed/renamed")
 
     print(f"\n✅ Harmonized pause metrics test completed!")
+    return results
+
+
+def test_updated_pause_metrics(fly_path):
+    """Test the updated non-overlapping pause metrics with has_long_pauses."""
+    print(f"\n{'='*80}")
+    print("🎯 UPDATED PAUSE METRICS TEST")
+    print(f"{'='*80}")
+
+    # Load a test fly
+    test_fly = Fly(fly_path, as_individual=True)
+    print(f"Testing fly: {test_fly.metadata.name}")
+
+    # Test the updated pause metrics with non-overlapping ranges
+    metrics = BallPushingMetrics(test_fly.tracking_data, compute_metrics_on_init=True)
+
+    print(f"\n📊 Testing Updated Pause Metrics Structure:")
+    print("-" * 60)
+
+    # Expected updated pause metrics
+    expected_metrics = {
+        "stops": {
+            "range": "2s ≤ duration < 5s",
+            "metrics": ["nb_stops", "median_stop_duration", "total_stop_duration"],
+        },
+        "pauses": {
+            "range": "5s ≤ duration < 10s",
+            "metrics": ["nb_pauses", "median_pause_duration", "total_pause_duration"],
+        },
+        "long_pauses": {
+            "range": "duration ≥ 10s",
+            "metrics": ["nb_long_pauses", "median_long_pause_duration", "total_long_pause_duration"],
+        },
+    }
+
+    # Check if metrics exist in the computed results
+    all_computed_metrics = set()
+    for key, metrics_dict in metrics.metrics.items():
+        if isinstance(metrics_dict, dict):
+            all_computed_metrics.update(metrics_dict.keys())
+
+    print(f"Total computed metrics: {len(all_computed_metrics)}")
+
+    # Test each updated metric category
+    results = {}
+    for category, config in expected_metrics.items():
+        print(f"\n{category.upper()} ({config['range']}):")
+        category_results = {}
+
+        for metric_name in config["metrics"]:
+            if metric_name in all_computed_metrics:
+                # Get the metric value from first available fly-ball pair
+                for metrics_dict in metrics.metrics.values():
+                    if isinstance(metrics_dict, dict) and metric_name in metrics_dict:
+                        value = metrics_dict[metric_name]
+                        category_results[metric_name] = value
+                        status = "✅" if value is not None else "❌"
+                        formatted_value = format_metric_value(value)
+                        print(f"  {status} {metric_name}: {formatted_value}")
+                        break
+            else:
+                category_results[metric_name] = "Missing"
+                print(f"  ❌ {metric_name}: Missing from computed metrics")
+
+        results[category] = category_results
+
+    # Test the new has_long_pauses metric
+    print(f"\n🔍 NEW BOOLEAN METRIC:")
+    print("-" * 30)
+
+    if "has_long_pauses" in all_computed_metrics:
+        # Get the metric value from first available fly
+        for metrics_dict in metrics.metrics.values():
+            if isinstance(metrics_dict, dict) and "has_long_pauses" in metrics_dict:
+                has_long_pauses_value = metrics_dict["has_long_pauses"]
+                results["has_long_pauses"] = has_long_pauses_value
+                status = "✅" if has_long_pauses_value is not None else "❌"
+                formatted_value = (
+                    "Yes"
+                    if has_long_pauses_value == 1
+                    else "No" if has_long_pauses_value == 0 else str(has_long_pauses_value)
+                )
+                print(f"  {status} has_long_pauses: {formatted_value}")
+                break
+    else:
+        results["has_long_pauses"] = "Missing"
+        print(f"  ❌ has_long_pauses: Missing from computed metrics")
+
+    print(f"\n🔍 NON-OVERLAPPING RANGE VALIDATION:")
+    print("-" * 40)
+
+    # Check that the ranges are truly non-overlapping by comparing counts
+    stops_count = results["stops"].get("nb_stops")
+    pauses_count = results["pauses"].get("nb_pauses")
+    long_pauses_count = results["long_pauses"].get("nb_long_pauses")
+
+    if all(isinstance(x, (int, float)) and not np.isnan(x) for x in [stops_count, pauses_count, long_pauses_count]):
+        total_categorized = stops_count + pauses_count + long_pauses_count
+        print(f"✅ Range validation:")
+        print(f"   Stops (2-5s): {stops_count}")
+        print(f"   Pauses (5-10s): {pauses_count}")
+        print(f"   Long pauses (≥10s): {long_pauses_count}")
+        print(f"   Total categorized events: {total_categorized}")
+
+        # Check if has_long_pauses is consistent with long_pauses_count
+        has_long_pauses_val = results.get("has_long_pauses")
+        if isinstance(has_long_pauses_val, (int, float)):
+            expected_has_long = 1 if long_pauses_count > 0 else 0
+            if has_long_pauses_val == expected_has_long:
+                print(f"✅ has_long_pauses consistency: {has_long_pauses_val} matches count > 0: {expected_has_long}")
+            else:
+                print(f"❌ has_long_pauses inconsistency: {has_long_pauses_val} != expected {expected_has_long}")
+
+    else:
+        print(f"⚠️  Cannot validate ranges (some counts are missing or NaN)")
+
+    print(f"\n📈 SUMMARY:")
+    print(f"  - Stops (2-5s): Short-term movement cessation")
+    print(f"  - Pauses (5-10s): Medium-term movement cessation")
+    print(f"  - Long pauses (≥10s): Extended freezing behavior")
+    print(f"  - has_long_pauses: Boolean indicator for presence of long pauses")
+    print(f"  - All ranges are now NON-OVERLAPPING")
+
+    print(f"\n✅ Updated pause metrics test completed!")
     return results
 
 
@@ -1875,6 +2244,7 @@ if __name__ == "__main__":
         - 'conditional_test': Run comprehensive conditional processing tests
         - 'performance_test': Run performance comparison tests
         - 'harmonized_test': Test harmonized pause metrics naming convention
+        - 'updated_pause_test': Test updated non-overlapping pause metrics with has_long_pauses
 
         PREDEFINED METRIC SETS:
         - 'basic_fast': Fast basic metrics only
@@ -1940,7 +2310,15 @@ if __name__ == "__main__":
     if args.mode == "fly":
         process_fly(data_path, args.metrics, args.table_style, args.show_json, args.test_f1, args.test_ball_identity)
     elif args.mode == "experiment":
-        process_experiment(data_path, args.metrics, args.table_style, args.show_json, args.max_experiment_flies, args.test_f1, args.test_ball_identity)
+        process_experiment(
+            data_path,
+            args.metrics,
+            args.table_style,
+            args.show_json,
+            args.max_experiment_flies,
+            args.test_f1,
+            args.test_ball_identity,
+        )
     else:
         raise ValueError(f"Invalid mode: {args.mode}. Must be 'fly' or 'experiment'.")
 

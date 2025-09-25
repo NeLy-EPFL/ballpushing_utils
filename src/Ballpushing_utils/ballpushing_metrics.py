@@ -485,6 +485,10 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("has_significant"):
                     has_significant = safe_call(self.get_has_significant, fly_idx, ball_idx, default=0)
 
+                has_long_pauses_flag = 0
+                if self.is_metric_enabled("has_long_pauses"):
+                    has_long_pauses_flag = safe_call(self.has_long_pauses, fly_idx, default=0)
+
                 persistence_at_end = np.nan
                 if self.is_metric_enabled("persistence_at_end"):
                     persistence_at_end = safe_call(self.compute_persistence_at_end, fly_idx, default=np.nan)
@@ -742,6 +746,8 @@ class BallPushingMetrics:
                     metrics_dict["has_major"] = has_major
                 if self.is_metric_enabled("has_significant"):
                     metrics_dict["has_significant"] = has_significant
+                if self.is_metric_enabled("has_long_pauses"):
+                    metrics_dict["has_long_pauses"] = has_long_pauses_flag
                 if self.is_metric_enabled("persistence_at_end"):
                     metrics_dict["persistence_at_end"] = persistence_at_end
                 if self.is_metric_enabled("fly_distance_moved"):
@@ -1894,13 +1900,22 @@ class BallPushingMetrics:
         """
         return self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=1)
 
-    def compute_pause_metrics(self, fly_idx, subset=None, threshold=5, window=5, minimum_duration=2.0):
+    def compute_pause_metrics(
+        self,
+        fly_idx,
+        subset=None,
+        threshold=5,
+        window=5,
+        minimum_duration=2.0,
+        pause_threshold=5.0,
+        pause_max_threshold=10.0,
+    ):
         """
         Compute the number of pauses and total duration of pauses for a given fly.
         Uses consistent detection parameters across all pause-related metrics.
 
-        Pauses represent general movement cessation events ≥2s duration.
-        For comparison with stops (≥2s) and long pauses (≥10s).
+        Pauses represent medium-term movement cessation events between 5s and 10s duration.
+        For comparison with stops (2-5s) and long pauses (≥10s).
         """
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
@@ -1919,15 +1934,18 @@ class BallPushingMetrics:
                     filtered_pauses.append(pause)
             pauses = filtered_pauses
 
-        if not pauses:
+        # Filter for pauses between pause_threshold and pause_max_threshold (exclusive upper bound)
+        pause_events = [pause for pause in pauses if pause_threshold <= pause[2] < pause_max_threshold]
+
+        if not pause_events:
             return {
                 "nb_pauses": 0,
                 "median_pause_duration": np.nan,
                 "total_pause_duration": 0.0,
             }
 
-        nb_pauses = len(pauses)
-        pause_durations = [pause[2] for pause in pauses]
+        nb_pauses = len(pause_events)
+        pause_durations = [pause[2] for pause in pause_events]
         median_pause_duration = np.median(pause_durations)
         total_pause_duration = sum(pause_durations)
 
@@ -1946,6 +1964,7 @@ class BallPushingMetrics:
 
         Uses consistent detection parameters with other pause metrics for fair comparison.
         The 10s threshold captures phenotypes where flies show extended freezing behavior.
+        For comparison with stops (2-5s) and pauses (5-10s).
 
         Parameters
         ----------
@@ -2013,11 +2032,42 @@ class BallPushingMetrics:
             "total_long_pause_duration": total_time_in_long_pauses,
         }
 
-    def compute_stop_metrics(self, fly_idx, stop_threshold=2.0, threshold=5, window=5, minimum_duration=2.0):
+    def has_long_pauses(self, fly_idx, threshold=5, window=5, minimum_duration=2.0, long_pause_threshold=10.0):
+        """
+        Check if a fly has at least one long pause (>= 10s).
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        threshold : float, optional
+            Movement threshold in pixels to consider as a pause (default is 5).
+        window : int, optional
+            Number of frames to use for calculating movement (default is 5).
+        minimum_duration : float, optional
+            Minimum duration (in seconds) for a pause to be detected (default is 2.0).
+        long_pause_threshold : float, optional
+            Duration threshold (in seconds) for defining long pauses (default is 10.0).
+
+        Returns
+        -------
+        int
+            1 if the fly has at least one long pause, 0 otherwise.
+        """
+        pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
+
+        # Check if any pause is >= long_pause_threshold
+        has_long = any(pause[2] >= long_pause_threshold for pause in pauses)
+
+        return 1 if has_long else 0
+
+    def compute_stop_metrics(
+        self, fly_idx, stop_threshold=2.0, stop_max_threshold=5.0, threshold=5, window=5, minimum_duration=2.0
+    ):
         """
         Compute comprehensive stop metrics for a given fly.
         Uses the same base detection parameters as other pause metrics for fair comparison.
-        Stops represent short-term movement cessation events ≥2s duration.
+        Stops represent short-term movement cessation events between 2s and 5s duration.
 
         Parameters
         ----------
@@ -2025,6 +2075,8 @@ class BallPushingMetrics:
             Index of the fly.
         stop_threshold : float, optional
             Minimum duration (in seconds) for a pause to be considered a stop (default is 2.0).
+        stop_max_threshold : float, optional
+            Maximum duration (in seconds) for a pause to be considered a stop (default is 5.0).
         threshold : float, optional
             Movement threshold in pixels to consider as a pause (default is 5).
         window : int, optional
@@ -2040,8 +2092,8 @@ class BallPushingMetrics:
         """
         pauses = self.detect_pauses(fly_idx, threshold=threshold, window=window, minimum_duration=minimum_duration)
 
-        # Filter pauses that are longer than the stop threshold
-        stop_events = [pause for pause in pauses if pause[2] >= stop_threshold]
+        # Filter pauses that are between stop_threshold and stop_max_threshold (exclusive upper bound)
+        stop_events = [pause for pause in pauses if stop_threshold <= pause[2] < stop_max_threshold]
 
         if self.fly.config.debugging:
             print(
@@ -2066,12 +2118,16 @@ class BallPushingMetrics:
             "total_stop_duration": total_stop_duration,
         }
 
-    def compute_nb_stops(self, fly_idx, stop_threshold=2.0, threshold=5, window=5, minimum_duration=2.0):
+    def compute_nb_stops(
+        self, fly_idx, stop_threshold=2.0, stop_max_threshold=5.0, threshold=5, window=5, minimum_duration=2.0
+    ):
         """
         Backward compatibility method that returns only the number of stops.
         Use compute_stop_metrics() for comprehensive metrics.
         """
-        stop_metrics = self.compute_stop_metrics(fly_idx, stop_threshold, threshold, window, minimum_duration)
+        stop_metrics = self.compute_stop_metrics(
+            fly_idx, stop_threshold, stop_max_threshold, threshold, window, minimum_duration
+        )
         return stop_metrics["nb_stops"]
 
     def compute_interaction_persistence(self, fly_idx, ball_idx, subset=None):
