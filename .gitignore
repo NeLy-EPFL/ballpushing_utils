@@ -793,3 +793,13 @@ src/PCA/correlation_heatmap.png
 src/PCA/high_consistency_overlap_analysis_80%.txt
 src/PCA/correlation_heatmap.png
 src/PCA/correlation_heatmap.png
+src/PCA/250926_PCA_Results.zip
+src/PCA/correlation_heatmap.png
+src/PCA/250926_PCA_Results/metric_high_consistency_heatmap.pdf
+src/PCA/250926_PCA_Results/metric_high_consistency_heatmap.png
+src/PCA/250926_PCA_Results/metric_two_way_dendrogram.pdf
+src/PCA/250926_PCA_Results/metric_two_way_dendrogram.png
+src/PCA/250926_PCA_Results/simple_consistency_scores_all_genotypes_combined.pdf
+src/PCA/250926_PCA_Results/simple_consistency_scores_all_genotypes_combined.png
+src/PCA/250926_PCA_Results/simple_consistency_scores_with_hits_only_combined.pdf
+src/PCA/250926_PCA_Results/simple_consistency_scores_with_hits_only_combined.png

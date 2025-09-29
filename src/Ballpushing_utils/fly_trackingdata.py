@@ -95,6 +95,13 @@ class FlyTrackingData:
             self.exit_time = self.get_exit_time()
             self.adjusted_time = self.compute_adjusted_time()
 
+            # Check for F1 premature exit (flies that exit before 55 minutes should be discarded)
+            if hasattr(self.fly.config, "experiment_type") and self.fly.config.experiment_type == "F1":
+                if self.check_f1_premature_exit():
+                    print(f"F1 premature exit detected for {self.fly.metadata.name}: exited before 55 minutes")
+                    self.valid_data = False
+                    return
+
             # Determine success cutoff reference
             if self.fly.config.success_cutoff:
                 self._determine_success_cutoff()
@@ -1158,6 +1165,42 @@ class FlyTrackingData:
 
         return False
 
+    def check_f1_premature_exit(self):
+        """
+        Check if the fly exits the first corridor before 55 minutes in F1 experiments.
+        Uses the existing exit_time calculation which detects when the fly moves 100px
+        in the x direction from its initial position.
+
+        Returns:
+            bool: True if fly exits before 55 minutes (should be discarded), False otherwise
+        """
+        # Only apply this check to F1 experiments
+        if not (hasattr(self.fly.config, "experiment_type") and self.fly.config.experiment_type == "F1"):
+            return False
+
+        # If no exit time detected, fly never left first corridor (valid)
+        if self.exit_time is None:
+            if self.fly.config.debugging:
+                print(f"F1 fly {self.fly.metadata.name} never exited first corridor - keeping")
+            return False
+
+        # Convert 55 minutes to seconds
+        premature_exit_threshold = 55 * 60  # 55 minutes in seconds
+
+        # Check if fly exited before threshold
+        if self.exit_time < premature_exit_threshold:
+            if self.fly.config.debugging:
+                print(
+                    f"F1 fly {self.fly.metadata.name} exited at {self.exit_time/60:.1f} minutes (before {premature_exit_threshold/60} min threshold)"
+                )
+            return True
+
+        if self.fly.config.debugging:
+            print(
+                f"F1 fly {self.fly.metadata.name} exited at {self.exit_time/60:.1f} minutes (after threshold) - keeping"
+            )
+        return False
+
     def get_initial_position(self):
         """
         Get the initial x and y positions of the fly. First, try to use the fly tracking data.
@@ -1258,9 +1301,11 @@ class FlyTrackingData:
     def get_exit_time(self):
         """
         Get the exit time, which is the first time at which the fly x position has been 100 px away from the initial fly x position.
+        Uses raw positions with sustained exit (2 seconds) requirement to reduce false positives from tracking errors.
+        The 2-second persistence requirement provides robustness without the computational overhead of median smoothing.
 
         Returns:
-            float: The exit time, or None if the fly did not move 100 px away from the initial position.
+            float: The exit time, or None if the fly did not move 100 px away from the initial position sustainedly.
         """
 
         if self.flytrack is None:
@@ -1268,28 +1313,79 @@ class FlyTrackingData:
 
         fly_data = self.flytrack.objects[0].dataset
 
-        # Get the initial x position of the fly
+        # Get the initial x position of the fly (already uses median of first 10 frames)
         initial_x = self.start_x
 
         if "x_thorax" not in fly_data.columns:
             warnings.warn(f"'x_thorax' missing for {self.fly.metadata.name}. Skipping exit time calculation.")
             return None
 
-        # Get the x position of the fly
-        x = fly_data["x_thorax"]
-
-        # Find the first time at which the fly x position has been 100 px away from the initial fly x position
         if initial_x is None:
             warnings.warn(f"Initial x position is None for {self.fly.metadata.name}. Skipping exit time calculation.")
             return None
 
-        exit_condition = x > initial_x + 100
+        # Use raw x positions (no smoothing) - the persistence check will handle noise
+        x_positions = fly_data["x_thorax"]
+
+        # Find frames where the fly x position is 100 px away from the initial position
+        exit_condition = x_positions > initial_x + 100
         if not exit_condition.any():
             return None
 
-        exit_time = x[exit_condition].index[0] / self.fly.experiment.fps
+        # Require sustained exit: fly must stay beyond threshold for at least 2 seconds (60 frames)
+        persistence_frames = int(2 * self.fly.experiment.fps)  # 2 seconds in frames
 
-        return exit_time
+        # Find consecutive sequences of frames where exit condition is True
+        exit_indices = np.where(exit_condition)[0]
+
+        if len(exit_indices) == 0:
+            return None
+
+        # Group consecutive indices
+        consecutive_groups = []
+        current_group = [exit_indices[0]]
+
+        for i in range(1, len(exit_indices)):
+            if exit_indices[i] == exit_indices[i - 1] + 1:
+                # Consecutive frame
+                current_group.append(exit_indices[i])
+            else:
+                # Gap found, start new group
+                consecutive_groups.append(current_group)
+                current_group = [exit_indices[i]]
+
+        # Don't forget the last group
+        consecutive_groups.append(current_group)
+
+        # Find the first group that meets persistence requirement
+        for group in consecutive_groups:
+            if len(group) >= persistence_frames:
+                # Found a sustained exit - use the first frame of this group
+                exit_frame_idx = group[0]
+                exit_time = fly_data.index[exit_frame_idx] / self.fly.experiment.fps
+
+                if self.fly.config.debugging:
+                    raw_x_at_exit = fly_data["x_thorax"].iloc[exit_frame_idx]
+                    sustained_duration = len(group) / self.fly.experiment.fps
+                    print(
+                        f"Sustained exit detected for {self.fly.metadata.name}: frame={exit_frame_idx}, time={exit_time:.1f}s"
+                    )
+                    print(f"  Initial x: {initial_x:.1f}, Raw x: {raw_x_at_exit:.1f}")
+                    print(
+                        f"  Sustained for: {sustained_duration:.1f}s ({len(group)} frames, required: {persistence_frames})"
+                    )
+
+                return exit_time
+
+        # No sustained exit found
+        if self.fly.config.debugging:
+            max_consecutive = max(len(group) for group in consecutive_groups) if consecutive_groups else 0
+            max_duration = max_consecutive / self.fly.experiment.fps
+            print(
+                f"No sustained exit for {self.fly.metadata.name}: max consecutive = {max_consecutive} frames ({max_duration:.1f}s), required: {persistence_frames} frames ({persistence_frames/self.fly.experiment.fps:.1f}s)"
+            )
+
+        return None
 
     def compute_adjusted_time(self):
         """

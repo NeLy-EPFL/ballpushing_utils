@@ -9,6 +9,7 @@ Usage:
     python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test comprehensive
     python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test comprehensive
     python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test metrics --max-flies 10
+    python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test premature_exit
 """
 
 import argparse
@@ -610,6 +611,169 @@ def test_f1_specific_features(fly_path):
         return results
 
 
+def test_f1_premature_exit_logic(fly_path):
+    """
+    Test F1 premature exit detection logic.
+
+    This test verifies that flies which exit the first corridor before 55 minutes
+    are properly detected and flagged for discard in F1 experiments.
+
+    Returns:
+        dict: Premature exit test results
+    """
+    print(f"\n🧪 Testing F1 Premature Exit Logic")
+    print(f"{'='*60}")
+
+    results = {
+        "exit_time_detection": {"success": False, "exit_time": None},
+        "premature_exit_check": {"success": False, "is_premature": None},
+        "threshold_verification": {"success": False, "threshold_correct": False},
+        "f1_experiment_detection": {"success": False, "is_f1": None},
+        "valid_data_handling": {"success": False, "details": {}},
+    }
+
+    try:
+        # Load fly with F1 configuration
+        print(f"📁 Loading F1 fly: {Path(fly_path).name}")
+        f1_fly = Fly(fly_path, as_individual=True)
+
+        # Verify this is properly detected as F1 experiment
+        is_f1_experiment = (
+            hasattr(f1_fly, "config")
+            and hasattr(f1_fly.config, "experiment_type")
+            and f1_fly.config.experiment_type == "F1"
+        )
+        results["f1_experiment_detection"]["is_f1"] = is_f1_experiment
+        results["f1_experiment_detection"]["success"] = True
+
+        if is_f1_experiment:
+            print(f"✅ F1 experiment type correctly detected")
+        else:
+            print(f"⚠️  F1 experiment type not detected - test may be running on non-F1 data")
+
+        # Test tracking data loading
+        tracking_data = f1_fly.tracking_data
+
+        if tracking_data is None:
+            print(f"❌ Tracking data failed to load")
+            results["valid_data_handling"]["success"] = False
+            results["valid_data_handling"]["error"] = "tracking_data is None"
+            return results
+
+        # Test exit time detection
+        print(f"🚪 Testing exit time detection...")
+        exit_time = tracking_data.exit_time
+        results["exit_time_detection"]["exit_time"] = exit_time
+
+        if exit_time is not None:
+            results["exit_time_detection"]["success"] = True
+            exit_time_minutes = exit_time / 60
+            print(f"✅ Exit time detected: {exit_time:.2f} seconds ({exit_time_minutes:.1f} minutes)")
+        else:
+            results["exit_time_detection"]["success"] = True  # Valid result - fly never exited
+            print(f"✅ No exit detected - fly remained in first corridor")
+
+        # Test premature exit check method
+        if hasattr(tracking_data, "check_f1_premature_exit"):
+            print(f"🔍 Testing premature exit check method...")
+
+            # Call the premature exit check method
+            is_premature = tracking_data.check_f1_premature_exit()
+            results["premature_exit_check"]["is_premature"] = is_premature
+            results["premature_exit_check"]["success"] = True
+
+            if is_premature:
+                print(f"⚠️  PREMATURE EXIT detected - fly should be discarded")
+                print(f"   Exit time: {exit_time/60:.1f} minutes (threshold: 55.0 minutes)")
+            else:
+                if exit_time is not None:
+                    print(f"✅ Normal exit timing - fly kept (exited at {exit_time/60:.1f} minutes)")
+                else:
+                    print(f"✅ No exit detected - fly kept")
+        else:
+            print(f"❌ check_f1_premature_exit method not found in tracking data")
+            results["premature_exit_check"]["success"] = False
+            results["premature_exit_check"]["error"] = "Method not found"
+
+        # Test threshold verification (55 minutes = 3300 seconds)
+        print(f"📏 Verifying threshold logic...")
+        expected_threshold = 55 * 60  # 55 minutes in seconds
+
+        if exit_time is not None:
+            manual_check = exit_time < expected_threshold
+            results["threshold_verification"]["manual_check"] = manual_check
+            results["threshold_verification"]["threshold_seconds"] = expected_threshold
+            results["threshold_verification"]["exit_time_seconds"] = exit_time
+
+            # Compare manual check with method result
+            if results["premature_exit_check"]["success"]:
+                method_result = results["premature_exit_check"]["is_premature"]
+                threshold_matches = manual_check == method_result
+                results["threshold_verification"]["threshold_correct"] = threshold_matches
+                results["threshold_verification"]["success"] = True
+
+                if threshold_matches:
+                    print(f"✅ Threshold logic correct: manual={manual_check}, method={method_result}")
+                else:
+                    print(f"❌ Threshold logic mismatch: manual={manual_check}, method={method_result}")
+            else:
+                print(f"⚠️  Cannot verify threshold - method check failed")
+        else:
+            # No exit time - should not be premature
+            results["threshold_verification"]["no_exit"] = True
+            results["threshold_verification"]["success"] = True
+
+            if results["premature_exit_check"]["success"]:
+                method_result = results["premature_exit_check"]["is_premature"]
+                if not method_result:  # Should be False when no exit
+                    print(f"✅ No-exit case handled correctly: method returned {method_result}")
+                    results["threshold_verification"]["threshold_correct"] = True
+                else:
+                    print(f"❌ No-exit case error: method returned {method_result} but should be False")
+                    results["threshold_verification"]["threshold_correct"] = False
+
+        # Test valid_data flag impact
+        print(f"📊 Testing impact on valid_data flag...")
+
+        valid_data_details = results["valid_data_handling"]["details"]
+        valid_data_details["initial_valid_data"] = tracking_data.valid_data
+
+        if hasattr(tracking_data, "valid_data"):
+            if tracking_data.valid_data and results["premature_exit_check"]["is_premature"]:
+                print(f"⚠️  Fly has valid_data=True but is flagged for premature exit")
+                print(f"   This may indicate the discard logic hasn't been applied yet")
+                valid_data_details["premature_but_valid"] = True
+            elif not tracking_data.valid_data and results["premature_exit_check"]["is_premature"]:
+                print(f"✅ Fly correctly marked as invalid due to premature exit")
+                valid_data_details["correctly_invalidated"] = True
+            elif tracking_data.valid_data and not results["premature_exit_check"]["is_premature"]:
+                print(f"✅ Fly correctly kept as valid (no premature exit)")
+                valid_data_details["correctly_valid"] = True
+
+            results["valid_data_handling"]["success"] = True
+        else:
+            print(f"❌ valid_data attribute not found")
+            results["valid_data_handling"]["success"] = False
+
+        # Print summary
+        print(f"\n📋 F1 Premature Exit Test Summary:")
+        print(f"   Exit time: {exit_time/60:.1f} min" if exit_time else "   Exit time: No exit detected")
+        print(f"   Premature exit: {'YES' if results['premature_exit_check']['is_premature'] else 'NO'}")
+        print(
+            f"   Threshold (55 min): {'PASSED' if results['threshold_verification']['threshold_correct'] else 'FAILED'}"
+        )
+        print(f"   Valid data: {tracking_data.valid_data if hasattr(tracking_data, 'valid_data') else 'Unknown'}")
+
+        return results
+
+    except Exception as e:
+        print(f"❌ Error during F1 premature exit testing: {e}")
+        for key in results:
+            if isinstance(results[key], dict):
+                results[key]["error"] = str(e)
+        return results
+
+
 def run_comprehensive_f1_test(fly_path):
     """
     Run a comprehensive test of F1 experiment processing.
@@ -634,6 +798,7 @@ def run_comprehensive_f1_test(fly_path):
         "initialization": {},
         "metrics_computation": {},
         "f1_features": {},
+        "premature_exit": {},
         "overall_success": False,
         "summary": {},
     }
@@ -685,6 +850,15 @@ def run_comprehensive_f1_test(fly_path):
             print(f"⚠️  Skipping F1 features test due to metrics computation failure")
             comprehensive_results["f1_features"] = {"skipped": True, "reason": "metrics_failed"}
 
+        # Step 5: F1 Premature Exit Logic
+        print(f"\n" + "=" * 60)
+        print(f"STEP 5: F1 Premature Exit Logic")
+        print(f"=" * 60)
+
+        # Run premature exit test regardless of previous failures (independent test)
+        premature_exit_results = test_f1_premature_exit_logic(fly_path)
+        comprehensive_results["premature_exit"] = premature_exit_results
+
         # Calculate test duration
         test_duration = time.time() - test_start_time
         comprehensive_results["test_info"]["test_duration"] = test_duration
@@ -712,6 +886,22 @@ def run_comprehensive_f1_test(fly_path):
             features = comprehensive_results["f1_features"]
             summary["checkpoint_analysis_passed"] = features.get("checkpoint_analysis", {}).get("success", False)
             summary["ball_classification_passed"] = features.get("ball_classification", {}).get("success", False)
+
+        # Add premature exit test results to summary
+        if "premature_exit" in comprehensive_results:
+            premature_exit = comprehensive_results["premature_exit"]
+            summary["premature_exit_detection_passed"] = premature_exit.get("exit_time_detection", {}).get(
+                "success", False
+            )
+            summary["premature_exit_check_passed"] = premature_exit.get("premature_exit_check", {}).get(
+                "success", False
+            )
+            summary["threshold_verification_passed"] = premature_exit.get("threshold_verification", {}).get(
+                "success", False
+            )
+            summary["f1_experiment_detection_passed"] = premature_exit.get("f1_experiment_detection", {}).get(
+                "success", False
+            )
 
         summary["test_duration_seconds"] = test_duration
         summary["overall_success"] = overall_success
@@ -857,6 +1047,8 @@ def process_f1_experiment(experiment_path, test_type="comprehensive", max_flies=
                 fly_results = {"metrics": test_f1_metrics_computation(fly_dir)}
             elif test_type == "f1_features":
                 fly_results = {"f1_features": test_f1_specific_features(fly_dir)}
+            elif test_type == "premature_exit":
+                fly_results = {"premature_exit": test_f1_premature_exit_logic(fly_dir)}
             else:  # comprehensive
                 fly_results = run_comprehensive_f1_test(fly_dir)
 
@@ -869,6 +1061,10 @@ def process_f1_experiment(experiment_path, test_type="comprehensive", max_flies=
                 fly_success = fly_results.get("metrics", {}).get("f1_metrics", {}).get("success", False)
             elif test_type == "f1_features":
                 fly_success = fly_results.get("f1_features", {}).get("checkpoint_analysis", {}).get("success", False)
+            elif test_type == "premature_exit":
+                fly_success = (
+                    fly_results.get("premature_exit", {}).get("premature_exit_check", {}).get("success", False)
+                )
             else:  # comprehensive
                 fly_success = fly_results.get("overall_success", False)
 
@@ -990,6 +1186,9 @@ Examples:
     # Test F1-specific metrics only on experiment (first 10 flies)
     python f1_metrics_test.py --mode experiment --path /path/to/f1/experiment --test metrics --max-flies 10
 
+    # Test F1 premature exit logic on single fly
+    python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test premature_exit
+
     # Quick validation test on single fly
     python f1_metrics_test.py --mode fly --path /path/to/f1/fly --test validation
         """,
@@ -1006,7 +1205,7 @@ Examples:
 
     parser.add_argument(
         "--test",
-        choices=["validation", "initialization", "metrics", "f1_features", "comprehensive"],
+        choices=["validation", "initialization", "metrics", "f1_features", "premature_exit", "comprehensive"],
         default="comprehensive",
         help="Type of test to run (default: comprehensive).",
     )
@@ -1046,6 +1245,8 @@ Examples:
             results = {"metrics": test_f1_metrics_computation(data_path)}
         elif args.test == "f1_features":
             results = {"f1_features": test_f1_specific_features(data_path)}
+        elif args.test == "premature_exit":
+            results = {"premature_exit": test_f1_premature_exit_logic(data_path)}
         else:  # comprehensive
             results = run_comprehensive_f1_test(data_path)
 
