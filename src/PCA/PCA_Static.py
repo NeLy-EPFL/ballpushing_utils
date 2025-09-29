@@ -26,7 +26,7 @@ import argparse
 warnings.filterwarnings("ignore")
 
 # === CONFIGURATION ===
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
+DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250924_14_summary_TNT_screen_Data/summary/pooled_summary.feather"
 CONFIGS_PATH = "multi_condition_pca_optimization/top_configurations.json"
 FULL_METRICS_PATH = "metric_lists/full_metrics_pca.txt"
 

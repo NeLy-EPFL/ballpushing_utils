@@ -16,6 +16,7 @@ from matplotlib.patches import Patch
 import sys
 import json
 import os
+import argparse
 from sklearn.preprocessing import RobustScaler
 from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
 from scipy.spatial.distance import pdist, squareform
@@ -40,21 +41,51 @@ sys.path.append("/home/matthias/ballpushing_utils")
 import Config
 
 # === CONFIGURATION ===
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-CONSISTENCY_DIR = "consistency_analysis"
-METRICS_PATH = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250924_14_summary_TNT_screen_Data/summary/pooled_summary.feather"
+CONSISTENCY_DIR = "/home/durrieu/ballpushing_utils/src/PCA/consistency_analysis_with_edges"
+METRICS_PATH = "metric_lists/final_metrics_for_pca.txt"
 
-# Consistency threshold for inclusion in detailed analysis
-MIN_CONSISTENCY_PERCENT = 80.0  # Only include hits with ≥80% consistency
+# Consistency threshold for inclusion in detailed analysis (fraction 0–1 on Combined_Consistency)
+MIN_COMBINED_CONSISTENCY = 0.80  # Only include hits with ≥80% combined consistency
 
-# Output directory
-if len(sys.argv) > 1:
-    OUTPUT_DIR = sys.argv[1]
-else:
-    OUTPUT_DIR = "best_metric_analysis"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-print(f"🎯 Output directory: {OUTPUT_DIR}")
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Detailed metric statistics for high combined-consistency hits")
+    parser.add_argument("--output-dir", default="best_metric_analysis", help="Directory for all outputs")
+    parser.add_argument(
+        "--consistency-dir", default=CONSISTENCY_DIR, help="Directory containing combined consistency CSVs"
+    )
+    parser.add_argument("--metrics-path", default=METRICS_PATH, help="Path to metrics list file")
+    parser.add_argument("--data-path", default=DATA_PATH, help="Feather dataset with pooled summary data")
+    parser.add_argument(
+        "--combined-threshold",
+        type=float,
+        default=MIN_COMBINED_CONSISTENCY,
+        help="Minimum Combined_Consistency (0-1) required to include a genotype (default: %(default)s)",
+    )
+    parser.add_argument(
+        "--max-hits",
+        type=int,
+        default=None,
+        help="Optionally cap number of high-consistency genotypes (after filtering) to top-N",
+    )
+    return parser.parse_args()
+
+
+# These globals will be overridden by CLI if provided
+OUTPUT_DIR = "best_metric_analysis"
+
+
+def _apply_args(args):
+    global OUTPUT_DIR, CONSISTENCY_DIR, METRICS_PATH, DATA_PATH, MIN_COMBINED_CONSISTENCY
+    OUTPUT_DIR = args.output_dir
+    CONSISTENCY_DIR = args.consistency_dir
+    METRICS_PATH = args.metrics_path
+    DATA_PATH = args.data_path
+    MIN_COMBINED_CONSISTENCY = args.combined_threshold
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print(f"🎯 Output directory: {OUTPUT_DIR}")
+
 
 # ------------------------------------------------------------------
 # Brain-region look-ups
@@ -93,32 +124,74 @@ def colour_y_ticklabels(ax, nickname_to_region, color_dict):
             tick.set_color(color_dict[region])
 
 
-def load_consistency_results():
-    """Load consistency analysis results and filter high-consistency hits"""
-    consistency_file = os.path.join(CONSISTENCY_DIR, "genotype_consistency_scores.csv")
+def load_consistency_results(threshold: float = MIN_COMBINED_CONSISTENCY, max_hits=None):
+    """Load combined consistency analysis results and return qualifying genotypes.
 
-    if not os.path.exists(consistency_file):
-        print(f"❌ Consistency file not found: {consistency_file}")
+    Priority order of sources:
+      1. combined_consistency_ranking.csv (preferred; must contain Combined_Consistency column)
+      2. enhanced_consistency_scores.csv (fallback; will attempt to derive Combined_Consistency if absent)
+
+    Parameters
+    ----------
+    threshold : float
+        Minimum Combined_Consistency (0–1) required to include a genotype.
+    max_hits : int | None
+        If provided, cap the number of returned genotypes (after filtering) to top-N by Combined_Consistency.
+    """
+    preferred_file = os.path.join(CONSISTENCY_DIR, "combined_consistency_ranking.csv")
+    fallback_file = os.path.join(CONSISTENCY_DIR, "enhanced_consistency_scores.csv")
+
+    if os.path.exists(preferred_file):
+        df = pd.read_csv(preferred_file)
+        source = os.path.basename(preferred_file)
+    elif os.path.exists(fallback_file):
+        df = pd.read_csv(fallback_file)
+        source = os.path.basename(fallback_file)
+    else:
+        print(
+            "❌ No consistency ranking file found (expected combined_consistency_ranking.csv or enhanced_consistency_scores.csv)"
+        )
         return []
 
-    consistency_df = pd.read_csv(consistency_file)
-    high_consistency = consistency_df[consistency_df["Consistency_Percent"] >= MIN_CONSISTENCY_PERCENT]
+    # Derive Combined_Consistency if missing and sufficient components exist
+    if "Combined_Consistency" not in df.columns:
+        if {"Overall_Consistency", "Optimized_Only_Consistency"}.issubset(df.columns):
+            print("⚠️  Combined_Consistency not present – deriving as mean of Overall_ & Optimized_Only_Consistencies")
+            df["Combined_Consistency"] = 0.5 * df["Overall_Consistency"] + 0.5 * df["Optimized_Only_Consistency"]
+        else:
+            print("❌ Could not find Combined_Consistency nor components to derive it – aborting consistency filter")
+            return []
 
-    print(f"📊 CONSISTENCY FILTERING:")
-    print(f"   Total genotypes in consistency analysis: {len(consistency_df)}")
-    print(f"   High-consistency hits (≥{MIN_CONSISTENCY_PERCENT}%): {len(high_consistency)}")
+    # Standardize column names for downstream printing (support both Genotype / genotype variations)
+    genotype_col = "Genotype" if "Genotype" in df.columns else ("genotype" if "genotype" in df.columns else None)
+    if genotype_col is None:
+        print("❌ No genotype column found in consistency file")
+        return []
 
-    if len(high_consistency) > 0:
-        print(f"\n🏆 HIGH-CONSISTENCY HITS:")
-        for _, row in high_consistency.head(20).iterrows():  # Show top 20
+    # Filter
+    filtered = df[df["Combined_Consistency"] >= threshold].copy()
+    filtered = filtered.sort_values("Combined_Consistency", ascending=False)
+    if max_hits is not None:
+        filtered = filtered.head(max_hits)
+
+    print("📊 CONSISTENCY FILTERING (Combined Consistency):")
+    print(f"   Source file: {source}")
+    print(f"   Total genotypes evaluated: {len(df)}")
+    print(f"   Threshold: ≥{threshold:.0%} Combined_Consistency")
+    print(f"   High-consistency hits: {len(filtered)}")
+
+    if not filtered.empty:
+        print("\n🏆 HIGH-CONSISTENCY HITS (top 20 shown):")
+        for _, row in filtered.head(20).iterrows():
+            hit_count = row.get("Total_Hit_Count", row.get("Hit_Count", "?"))
+            total_cfg = row.get("Total_Configs", row.get("Total_Config", "?"))
             print(
-                f"   {row['Genotype']:<25}: {row['Consistency_Percent']:5.1f}% ({row['Hit_Count']}/{row['Total_Configs']})"
+                f"   {row[genotype_col]:<30}  Combined={row['Combined_Consistency']:.1%}  (hits {hit_count}/{total_cfg})"
             )
+        if len(filtered) > 20:
+            print(f"   ... and {len(filtered) - 20} more")
 
-        if len(high_consistency) > 20:
-            print(f"   ... and {len(high_consistency) - 20} more")
-
-    return high_consistency["Genotype"].tolist()
+    return filtered[genotype_col].tolist()
 
 
 def load_metrics_list():
@@ -331,10 +404,7 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
 
     results_df = pd.DataFrame(results)
 
-    # Apply FDR correction to multivariate tests
-    for col in ["Permutation_pval", "Mahalanobis_pval"]:
-        rejected, pvals_corrected, _, _ = multipletests(results_df[col], alpha=0.05, method="fdr_bh")
-        results_df[col.replace("_pval", "_FDR_significant")] = rejected
+    # (Removed) Multivariate test FDR correction block (Permutation/Mahalanobis) no longer applicable.
 
     # Save results
     results_file = os.path.join(OUTPUT_DIR, f"metric_stats_results.csv")
@@ -475,7 +545,7 @@ def create_hits_heatmap(results_df, correlation_matrix, nickname_to_brainregion,
     cmap = ListedColormap(colors)
 
     # Create the heatmap
-    if HAS_SEABORN:
+    if HAS_SEABORN and "sns" in globals():
         sns.heatmap(
             sig_df,
             annot=annot_df,
@@ -504,7 +574,7 @@ def create_hits_heatmap(results_df, correlation_matrix, nickname_to_brainregion,
     # Customize the plot
     ax.set_title(
         f"High-Consistency Hits - Detailed Metric Analysis\n"
-        f"Individual Metrics (≥{MIN_CONSISTENCY_PERCENT}% consistency)\n"
+        f"Individual Metrics (≥{MIN_COMBINED_CONSISTENCY:.0%} combined consistency)\n"
         f"{len(genotype_names)} genotypes across {len(metric_names)} metrics",
         fontsize=14,
         fontweight="bold",
@@ -840,7 +910,7 @@ def plot_two_way_dendrogram_metrics(
     # 8) Create heatmap
     M_ord = M.iloc[row_order_idx, col_order_idx]
 
-    if HAS_SEABORN:
+    if HAS_SEABORN and "sns" in globals():
         sns.heatmap(
             M_ord,
             ax=ax_hm,
@@ -1225,14 +1295,17 @@ def plot_simple_metric_heatmap(
 
 
 def main():
+    # Parse CLI arguments once here (avoid side-effects if imported)
+    args = _parse_args()
+    _apply_args(args)
     """Main analysis function"""
     print("�🔬 DETAILED METRIC ANALYSIS")
     print("=" * 50)
-    print(f"Minimum consistency threshold: {MIN_CONSISTENCY_PERCENT}%")
+    print(f"Minimum combined consistency threshold: {MIN_COMBINED_CONSISTENCY:.0%}")
     print("=" * 50)
 
     # Step 1: Load high-consistency hits
-    high_consistency_hits = load_consistency_results()
+    high_consistency_hits = load_consistency_results(threshold=MIN_COMBINED_CONSISTENCY, max_hits=args.max_hits)
     if not high_consistency_hits:
         print("❌ No high-consistency hits found. Cannot proceed.")
         return
@@ -1322,10 +1395,10 @@ def main():
     with open(summary_file, "w") as f:
         f.write("DETAILED METRIC ANALYSIS SUMMARY\n")
         f.write("=" * 40 + "\n\n")
-        f.write(f"Consistency threshold: ≥{MIN_CONSISTENCY_PERCENT}%\n")
+        f.write(f"Combined consistency threshold: ≥{MIN_COMBINED_CONSISTENCY:.0%}\n")
         f.write(f"High-consistency hits identified: {len(high_consistency_hits)}\n")
         f.write(f"Metrics analyzed: {len(metrics_list)}\n\n")
-        f.write(f"RESULTS:\n")
+        f.write("RESULTS:\n")
         f.write(f"All genotypes displayed: {total_hits}\n")
         f.write(f"Statistically significant genotypes: {total_statistically_significant}\n")
         f.write(f"Total significant metrics: {total_metrics_significant}\n")
@@ -1335,7 +1408,7 @@ def main():
             else "No genotypes analyzed\n"
         )
 
-        f.write(f"\nALL HIGH-CONSISTENCY GENOTYPES:\n")
+        f.write("\nALL HIGH-CONSISTENCY GENOTYPES:\n")
         for _, row in results_df.iterrows():
             f.write(f"  {row['genotype']}: {row['num_significant_metrics']} significant metrics")
             if bool(row["significant"]):

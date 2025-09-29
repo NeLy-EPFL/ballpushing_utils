@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore")
 import Config
 
 # === CONFIGURATION ===
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
+DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250924_14_summary_TNT_screen_Data/summary/pooled_summary.feather"
 
 # Two metric lists to compare
 METRICS_LIST_1_PATH = "metric_lists/final_metrics_for_pca.txt"  # Your correlation-based selection

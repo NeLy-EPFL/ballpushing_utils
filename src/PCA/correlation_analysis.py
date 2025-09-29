@@ -110,6 +110,7 @@ def identify_metric_columns(dataset):
         "logistic_k",
         "logistic_t0",
         "logistic_r2",
+        "raw_pauses",
     ]
 
     potential = []
@@ -404,7 +405,7 @@ def correlation_select_objective(
 
 
 def main():
-    DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250919_15_summary_TNT_screen_Data/summary/pooled_summary.feather"
+    DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250924_14_summary_TNT_screen_Data/summary/pooled_summary.feather"
     NAN_THRESHOLD = 0.05  # 5% max missing
     CORRELATION_THRESHOLD = 0.8  # Threshold for counting high correlations
     CLUSTER_DISTANCE = 0.2  # corresponds to |rho| ≥ 0.8 within-cluster
