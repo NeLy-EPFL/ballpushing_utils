@@ -22,6 +22,9 @@ from pathlib import Path
 import argparse
 import time
 from datetime import datetime
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../src"))
 
 # Add the src directory to the path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -116,8 +119,11 @@ class F1PrematureExitTester:
             self.log("📥 Loading fly data...")
             start_time = time.time()
 
-            # Create fly with F1 experiment type
-            fly = Fly(fly_path, as_individual=True)
+            try:
+                # Create fly with F1 experiment type
+                fly = Fly(fly_path, as_individual=True)
+            except Exception as fly_creation_error:
+                raise ValueError(f"Failed to create Fly object: {fly_creation_error}")
 
             # Ensure F1 experiment type is set
             if hasattr(fly, "config"):
@@ -128,19 +134,53 @@ class F1PrematureExitTester:
             load_time = time.time() - start_time
             self.log(f"✅ Fly loaded in {load_time:.3f}s")
 
-            # Get tracking data
-            tracking_data = fly.tracking_data
+            # Get tracking data - handle case where tracking_data is None
+            try:
+                tracking_data = fly.tracking_data
+            except Exception as tracking_error:
+                raise ValueError(f"Failed to access tracking_data property: {tracking_error}")
 
             if tracking_data is None:
-                raise ValueError("Tracking data is None - failed to load")
+                raise ValueError("Tracking data is None - fly.tracking_data returned None")
 
+            # Check if tracking data is valid
             if not hasattr(tracking_data, "valid_data"):
                 raise ValueError("Tracking data missing valid_data attribute")
 
             test_result["valid_data"] = tracking_data.valid_data
 
+            if not tracking_data.valid_data:
+                # Provide detailed information about why data is invalid
+                error_details = []
+
+                # Check various potential issues
+                if tracking_data.flytrack is None:
+                    error_details.append("flytrack is None")
+                if tracking_data.balltrack is None:
+                    error_details.append("balltrack is None")
+                if tracking_data.skeletontrack is None:
+                    error_details.append("skeletontrack is None")
+
+                error_msg = f"Invalid tracking data - {'; '.join(error_details) if error_details else 'unknown reason'}"
+                self.log(f"⚠️  {error_msg}")
+
+                # Still try to get exit time if possible (for debugging)
+                try:
+                    exit_time = tracking_data.f1_exit_time if hasattr(tracking_data, "f1_exit_time") else None
+                    test_result["exit_time"] = exit_time
+                    if exit_time:
+                        test_result["exit_time_minutes"] = exit_time / 60
+                        self.log(f"🚪 Exit time (despite invalid data): {exit_time:.2f}s ({exit_time/60:.1f} minutes)")
+                except Exception as e:
+                    self.log(f"   Could not get exit time: {e}")
+
+                # Don't test premature exit logic if data is invalid
+                test_result["actual_premature"] = None
+                test_result["correct_detection"] = False
+                raise ValueError(error_msg)
+
             # Get exit time
-            exit_time = tracking_data.exit_time
+            exit_time = tracking_data.f1_exit_time
             test_result["exit_time"] = exit_time
 
             if exit_time is not None:
@@ -197,8 +237,21 @@ class F1PrematureExitTester:
             self.log(f"📊 Test completed successfully")
 
         except Exception as e:
-            self.log(f"❌ Error testing fly {fly_name}: {e}", force=True)
-            test_result["error"] = str(e)
+            error_type = type(e).__name__
+            self.log(f"❌ Error testing fly {fly_name}: {error_type}: {e}", force=True)
+
+            # Provide additional debugging information
+            if "string index out of range" in str(e):
+                self.log(f"   🔍 This is likely an arena/corridor parsing issue", force=True)
+                self.log(f"   🔍 Check if fly path matches expected F1 format: arena#/Left or arena#/Right", force=True)
+            elif "Tracking data is None" in str(e):
+                self.log(f"   🔍 Fly object created but tracking_data property returned None", force=True)
+                self.log(f"   🔍 This could be due to missing .h5 files or invalid data quality", force=True)
+            elif "Invalid tracking data" in str(e):
+                self.log(f"   🔍 Tracking data was loaded but marked as invalid", force=True)
+                self.log(f"   🔍 Check if fly movement meets quality thresholds", force=True)
+
+            test_result["error"] = f"{error_type}: {e}"
             test_result["success"] = False
             self.results["summary"]["errors"] += 1
 

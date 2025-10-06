@@ -257,7 +257,10 @@ def test_f1_fly_initialization(fly_path):
             details = results["tracking_data"]["details"]
             details["duration"] = tracking_data.duration if hasattr(tracking_data, "duration") else None
             details["start_position"] = (tracking_data.start_x, tracking_data.start_y)
-            details["exit_time"] = tracking_data.exit_time
+            details["f1_exit_time"] = tracking_data.f1_exit_time
+            details["chamber_exit_times"] = (
+                tracking_data.chamber_exit_times if hasattr(tracking_data, "chamber_exit_times") else None
+            )
 
             # Ball tracking analysis
             if tracking_data.balltrack and tracking_data.balltrack.objects:
@@ -358,6 +361,145 @@ def test_f1_fly_initialization(fly_path):
         return results
 
 
+def display_f1_ballpushing_summary(training_metrics, test_metrics):
+    """
+    Display a comprehensive summary of F1 ballpushing metrics with focus on learning indicators.
+
+    Parameters:
+    -----------
+    training_metrics : dict
+        Training ball metrics
+    test_metrics : dict
+        Test ball metrics
+    """
+    print(f"\n🎓 F1 LEARNING ANALYSIS SUMMARY")
+    print(f"{'='*60}")
+
+    if not training_metrics or not test_metrics:
+        print(f"❌ Cannot perform learning analysis - missing ball data")
+        print(f"   Training metrics: {'✅' if training_metrics else '❌'}")
+        print(f"   Test metrics: {'✅' if test_metrics else '❌'}")
+        return
+
+    # Learning indicators
+    learning_indicators = []
+
+    # 1. Event count comparison
+    train_events = training_metrics.get("Number of Events", 0)
+    test_events = test_metrics.get("Number of Events", 0)
+
+    if isinstance(train_events, (int, float)) and isinstance(test_events, (int, float)):
+        if not (pd.isna(train_events) or pd.isna(test_events)):
+            if test_events > train_events:
+                learning_indicators.append("✅ More events in test vs training (positive learning)")
+            elif test_events < train_events:
+                learning_indicators.append("⚠️  Fewer events in test vs training (possible extinction)")
+            else:
+                learning_indicators.append("➖ Same number of events in both phases")
+
+    # 2. Interaction proportion comparison
+    train_prop = training_metrics.get("Interaction Proportion", 0)
+    test_prop = test_metrics.get("Interaction Proportion", 0)
+
+    if isinstance(train_prop, (int, float)) and isinstance(test_prop, (int, float)):
+        if not (pd.isna(train_prop) or pd.isna(test_prop)):
+            if test_prop > train_prop * 1.1:  # 10% increase threshold
+                learning_indicators.append("✅ Higher interaction proportion in test (sustained engagement)")
+            elif test_prop < train_prop * 0.9:  # 10% decrease threshold
+                learning_indicators.append("⚠️  Lower interaction proportion in test (possible disengagement)")
+            else:
+                learning_indicators.append("➖ Similar interaction proportion in both phases")
+
+    # 3. Distance moved comparison
+    train_dist = training_metrics.get("Ball Distance Moved", 0)
+    test_dist = test_metrics.get("Ball Distance Moved", 0)
+
+    if isinstance(train_dist, (int, float)) and isinstance(test_dist, (int, float)):
+        if not (pd.isna(train_dist) or pd.isna(test_dist)):
+            if test_dist > train_dist * 1.1:  # 10% increase threshold
+                learning_indicators.append("✅ Greater ball movement in test (improved performance)")
+            elif test_dist < train_dist * 0.9:  # 10% decrease threshold
+                learning_indicators.append("⚠️  Less ball movement in test (possible decline)")
+            else:
+                learning_indicators.append("➖ Similar ball movement in both phases")
+
+    # 4. Learning slope analysis
+    train_slope = training_metrics.get("Learning Slope", None)
+    test_slope = test_metrics.get("Learning Slope", None)
+
+    if train_slope is not None and not pd.isna(train_slope):
+        if train_slope > 0:
+            learning_indicators.append("✅ Positive learning slope in training (skill acquisition)")
+        else:
+            learning_indicators.append("⚠️  Negative/zero learning slope in training")
+
+    if test_slope is not None and not pd.isna(test_slope):
+        if test_slope > 0:
+            learning_indicators.append("✅ Positive learning slope in test (continued improvement)")
+        else:
+            learning_indicators.append("⚠️  Negative/zero learning slope in test")
+
+    # Display learning indicators
+    print(f"\n📊 LEARNING INDICATORS:")
+    if learning_indicators:
+        for indicator in learning_indicators:
+            print(f"   {indicator}")
+    else:
+        print(f"   ❌ No clear learning indicators detected (insufficient data)")
+
+    # Performance metrics summary
+    print(f"\n📈 PERFORMANCE METRICS SUMMARY:")
+    print(f"{'Metric':<25} {'Training':<12} {'Test':<12} {'Change':<10}")
+    print(f"{'-'*60}")
+
+    key_metrics = [
+        ("Number of Events", "events"),
+        ("Interaction Proportion", "prop"),
+        ("Ball Distance Moved", "distance"),
+        ("Area Under Curve", "auc"),
+    ]
+
+    for metric_name, short_name in key_metrics:
+        train_val = training_metrics.get(metric_name, None)
+        test_val = test_metrics.get(metric_name, None)
+
+        if train_val is not None and test_val is not None:
+            if isinstance(train_val, (int, float)) and isinstance(test_val, (int, float)):
+                if not (pd.isna(train_val) or pd.isna(test_val)):
+                    if train_val != 0:
+                        change = ((test_val - train_val) / train_val) * 100
+                        change_str = f"{change:+.1f}%"
+                    else:
+                        change_str = "N/A"
+
+                    train_str = f"{train_val:.3f}" if isinstance(train_val, float) else str(train_val)
+                    test_str = f"{test_val:.3f}" if isinstance(test_val, float) else str(test_val)
+
+                    print(f"{metric_name:<25} {train_str:<12} {test_str:<12} {change_str:<10}")
+                else:
+                    print(f"{metric_name:<25} {'NaN':<12} {'NaN':<12} {'N/A':<10}")
+            else:
+                print(f"{metric_name:<25} {str(train_val):<12} {str(test_val):<12} {'N/A':<10}")
+
+    # Overall assessment
+    positive_indicators = sum(1 for ind in learning_indicators if ind.startswith("✅"))
+    warning_indicators = sum(1 for ind in learning_indicators if ind.startswith("⚠️"))
+
+    print(f"\n🎯 OVERALL ASSESSMENT:")
+    if positive_indicators > warning_indicators:
+        print(
+            f"✅ POSITIVE LEARNING DETECTED ({positive_indicators} positive vs {warning_indicators} warning indicators)"
+        )
+    elif warning_indicators > positive_indicators:
+        print(
+            f"⚠️  LEARNING CONCERNS DETECTED ({warning_indicators} warning vs {positive_indicators} positive indicators)"
+        )
+    else:
+        print(
+            f"➖ MIXED/UNCLEAR LEARNING PATTERN ({positive_indicators} positive, {warning_indicators} warning indicators)"
+        )
+
+
 def test_f1_metrics_computation(fly_path):
     """
     Test F1-specific metrics computation.
@@ -425,7 +567,7 @@ def test_f1_metrics_computation(fly_path):
 
         # Test standard ballpushing metrics for comparison
         try:
-            print(f"\n🔬 Computing standard ballpushing metrics for comparison...")
+            print(f"\n🔬 Computing standard ballpushing metrics for F1 experiment...")
             start_time = time.time()
             bp_metrics = BallPushingMetrics(f1_fly.tracking_data)
             bp_compute_time = time.time() - start_time
@@ -434,25 +576,134 @@ def test_f1_metrics_computation(fly_path):
             results["ballpushing_metrics"]["success"] = True
             results["ballpushing_metrics"]["compute_time"] = bp_compute_time
 
-            # Extract sample metrics for comparison
-            sample_metrics = {}
+            # Organize metrics by ball identity (training vs test)
+            training_metrics = {}
+            test_metrics = {}
+            unknown_metrics = {}
+
             for key, metrics_dict in bp_metrics.metrics.items():
                 if isinstance(metrics_dict, dict):
-                    # Take a few key metrics
-                    for metric in ["nb_events", "max_event", "chamber_ratio", "has_finished"]:
-                        if metric in metrics_dict:
-                            sample_key = f"{key}_{metric}"
-                            sample_metrics[sample_key] = convert_to_serializable(metrics_dict[metric])
+                    # Determine ball identity from key
+                    if "training" in key.lower():
+                        target_dict = training_metrics
+                        ball_label = "Training Ball"
+                    elif "test" in key.lower():
+                        target_dict = test_metrics
+                        ball_label = "Test Ball"
+                    else:
+                        target_dict = unknown_metrics
+                        ball_label = "Unknown Ball"
 
-            results["ballpushing_metrics"]["sample_metrics"] = sample_metrics
+                    # Extract key metrics with better naming
+                    key_metrics = [
+                        ("nb_events", "Number of Events"),
+                        ("max_event", "Max Event Index"),
+                        ("max_event_time", "Max Event Time (s)"),
+                        ("final_event", "Final Event Index"),
+                        ("final_event_time", "Final Event Time (s)"),
+                        ("chamber_ratio", "Chamber Ratio"),
+                        ("distance_moved", "Ball Distance Moved"),
+                        ("interaction_proportion", "Interaction Proportion"),
+                        ("has_finished", "Has Finished"),
+                        ("has_major", "Has Major Event"),
+                        ("auc", "Area Under Curve"),
+                        ("learning_slope", "Learning Slope"),
+                        ("binned_slope_0", "Early Slope (Bin 0)"),
+                        ("binned_slope_11", "Late Slope (Bin 11)"),
+                    ]
 
-            print(f"📊 Sample Ballpushing Metrics:")
-            for key, value in sample_metrics.items():
-                print(f"   {key}: {value}")
+                    for metric_key, metric_label in key_metrics:
+                        if metric_key in metrics_dict:
+                            value = convert_to_serializable(metrics_dict[metric_key])
+                            target_dict[metric_label] = value
+
+            # Store organized metrics in results
+            results["ballpushing_metrics"]["training_metrics"] = training_metrics
+            results["ballpushing_metrics"]["test_metrics"] = test_metrics
+            results["ballpushing_metrics"]["unknown_metrics"] = unknown_metrics
+
+            # Display F1 Ballpushing Metrics in organized format
+            print(f"\n📊 F1 Ballpushing Metrics Analysis:")
+            print(f"{'='*60}")
+
+            if training_metrics:
+                print(f"\n🎯 TRAINING BALL METRICS:")
+                print(f"{'-'*40}")
+                for metric_name, value in training_metrics.items():
+                    if isinstance(value, float):
+                        if pd.isna(value):
+                            print(f"   {metric_name:<25}: NaN")
+                        else:
+                            print(f"   {metric_name:<25}: {value:.4f}")
+                    else:
+                        print(f"   {metric_name:<25}: {value}")
+            else:
+                print(f"\n🎯 TRAINING BALL METRICS: No data found")
+
+            if test_metrics:
+                print(f"\n🧪 TEST BALL METRICS:")
+                print(f"{'-'*40}")
+                for metric_name, value in test_metrics.items():
+                    if isinstance(value, float):
+                        if pd.isna(value):
+                            print(f"   {metric_name:<25}: NaN")
+                        else:
+                            print(f"   {metric_name:<25}: {value:.4f}")
+                    else:
+                        print(f"   {metric_name:<25}: {value}")
+            else:
+                print(f"\n🧪 TEST BALL METRICS: No data found")
+
+            if unknown_metrics:
+                print(f"\n❓ UNCLASSIFIED BALL METRICS:")
+                print(f"{'-'*40}")
+                for metric_name, value in unknown_metrics.items():
+                    if isinstance(value, float):
+                        if pd.isna(value):
+                            print(f"   {metric_name:<25}: NaN")
+                        else:
+                            print(f"   {metric_name:<25}: {value:.4f}")
+                    else:
+                        print(f"   {metric_name:<25}: {value}")
+
+            # Display ball comparison if both training and test data exist
+            if training_metrics and test_metrics:
+                print(f"\n🔄 TRAINING vs TEST COMPARISON:")
+                print(f"{'-'*50}")
+                comparison_metrics = [
+                    "Number of Events",
+                    "Interaction Proportion",
+                    "Ball Distance Moved",
+                    "Area Under Curve",
+                ]
+
+                for metric in comparison_metrics:
+                    if metric in training_metrics and metric in test_metrics:
+                        train_val = training_metrics[metric]
+                        test_val = test_metrics[metric]
+
+                        if isinstance(train_val, (int, float)) and isinstance(test_val, (int, float)):
+                            if not (pd.isna(train_val) or pd.isna(test_val)):
+                                if test_val != 0:
+                                    ratio = train_val / test_val
+                                    print(
+                                        f"   {metric:<25}: Train={train_val:.3f}, Test={test_val:.3f} (Ratio: {ratio:.2f})"
+                                    )
+                                else:
+                                    print(f"   {metric:<25}: Train={train_val:.3f}, Test={test_val:.3f} (Test=0)")
+                            else:
+                                print(f"   {metric:<25}: Train={train_val}, Test={test_val} (NaN values)")
+                        else:
+                            print(f"   {metric:<25}: Train={train_val}, Test={test_val}")
+
+            # Generate comprehensive F1 learning analysis
+            if training_metrics and test_metrics:
+                display_f1_ballpushing_summary(training_metrics, test_metrics)
 
         except Exception as e:
             print(f"❌ Ballpushing metrics computation failed: {e}")
             results["ballpushing_metrics"]["error"] = str(e)
+            results["ballpushing_metrics"]["traceback"] = traceback.format_exc()
 
         # Test compatibility between F1 and standard metrics
         if results["f1_metrics"]["success"] and results["ballpushing_metrics"]["success"]:
@@ -474,16 +725,52 @@ def test_f1_metrics_computation(fly_path):
             # Check for overlapping data requirements
             f1_metrics_dict = results["f1_metrics"]["metrics"]
             f1_requires_dual_balls = isinstance(f1_metrics_dict, dict) and "training_ball_distances" in f1_metrics_dict
-            bp_works_with_dual = results["ballpushing_metrics"]["success"]
+
+            # Check if we have both training and test ball data
+            training_metrics = results["ballpushing_metrics"].get("training_metrics", {})
+            test_metrics = results["ballpushing_metrics"].get("test_metrics", {})
+            bp_works_with_dual = bool(training_metrics and test_metrics)
 
             compatibility["f1_dual_ball_support"] = f1_requires_dual_balls
             compatibility["bp_dual_ball_tolerance"] = bp_works_with_dual
+            compatibility["training_ball_detected"] = bool(training_metrics)
+            compatibility["test_ball_detected"] = bool(test_metrics)
 
-            if bp_works_with_dual:  # F1 works regardless of single/dual ball setup
+            print(f"🎯 Training ball metrics found: {'✅' if training_metrics else '❌'}")
+            print(f"🧪 Test ball metrics found: {'✅' if test_metrics else '❌'}")
+            print(f"🔄 Dual-ball setup detected: {'✅' if bp_works_with_dual else '❌'}")
+
+            if bp_works_with_dual and f1_requires_dual_balls:
                 results["compatibility"]["success"] = True
-                print(f"✅ F1 and standard ballpushing metrics are compatible")
+                print(f"✅ F1 and standard ballpushing metrics are fully compatible")
+
+                # Analyze metric quality
+                print(f"\n📈 Metric Quality Assessment:")
+                quality_issues = []
+
+                # Check for NaN values in key metrics
+                key_metrics = ["Number of Events", "Interaction Proportion", "Ball Distance Moved"]
+                for metric in key_metrics:
+                    train_val = training_metrics.get(metric)
+                    test_val = test_metrics.get(metric)
+
+                    if train_val is not None and pd.isna(train_val):
+                        quality_issues.append(f"Training {metric} is NaN")
+                    if test_val is not None and pd.isna(test_val):
+                        quality_issues.append(f"Test {metric} is NaN")
+
+                if quality_issues:
+                    print(f"⚠️  Quality issues detected:")
+                    for issue in quality_issues:
+                        print(f"   - {issue}")
+                else:
+                    print(f"✅ All key metrics have valid values")
+
+            elif bp_works_with_dual:
+                results["compatibility"]["success"] = True
+                print(f"✅ Ballpushing metrics work with dual-ball setup (F1 metrics may have limited data)")
             else:
-                print(f"⚠️  Potential compatibility issues detected")
+                print(f"⚠️  Limited compatibility - single ball or missing data detected")
 
         return results
 
@@ -625,7 +912,7 @@ def test_f1_premature_exit_logic(fly_path):
     print(f"{'='*60}")
 
     results = {
-        "exit_time_detection": {"success": False, "exit_time": None},
+        "f1_exit_time_detection": {"success": False, "f1_exit_time": None},
         "premature_exit_check": {"success": False, "is_premature": None},
         "threshold_verification": {"success": False, "threshold_correct": False},
         "f1_experiment_detection": {"success": False, "is_f1": None},
@@ -660,18 +947,18 @@ def test_f1_premature_exit_logic(fly_path):
             results["valid_data_handling"]["error"] = "tracking_data is None"
             return results
 
-        # Test exit time detection
-        print(f"🚪 Testing exit time detection...")
-        exit_time = tracking_data.exit_time
-        results["exit_time_detection"]["exit_time"] = exit_time
+        # Test F1 exit time detection
+        print(f"🚪 Testing F1 corridor exit time detection...")
+        f1_exit_time = tracking_data.f1_exit_time
+        results["f1_exit_time_detection"]["f1_exit_time"] = f1_exit_time
 
-        if exit_time is not None:
-            results["exit_time_detection"]["success"] = True
-            exit_time_minutes = exit_time / 60
-            print(f"✅ Exit time detected: {exit_time:.2f} seconds ({exit_time_minutes:.1f} minutes)")
+        if f1_exit_time is not None:
+            results["f1_exit_time_detection"]["success"] = True
+            exit_time_minutes = f1_exit_time / 60
+            print(f"✅ F1 exit time detected: {f1_exit_time:.2f} seconds ({exit_time_minutes:.1f} minutes)")
         else:
-            results["exit_time_detection"]["success"] = True  # Valid result - fly never exited
-            print(f"✅ No exit detected - fly remained in first corridor")
+            results["f1_exit_time_detection"]["success"] = True  # Valid result - fly never exited
+            print(f"✅ No F1 corridor exit detected - fly remained in first corridor")
 
         # Test premature exit check method
         if hasattr(tracking_data, "check_f1_premature_exit"):
@@ -684,10 +971,13 @@ def test_f1_premature_exit_logic(fly_path):
 
             if is_premature:
                 print(f"⚠️  PREMATURE EXIT detected - fly should be discarded")
-                print(f"   Exit time: {exit_time/60:.1f} minutes (threshold: 55.0 minutes)")
+                if f1_exit_time is not None:
+                    print(f"   F1 exit time: {f1_exit_time/60:.1f} minutes (threshold: 55.0 minutes)")
+                else:
+                    print(f"   F1 exit time: No exit detected (threshold: 55.0 minutes)")
             else:
-                if exit_time is not None:
-                    print(f"✅ Normal exit timing - fly kept (exited at {exit_time/60:.1f} minutes)")
+                if f1_exit_time is not None:
+                    print(f"✅ Normal exit timing - fly kept (exited at {f1_exit_time/60:.1f} minutes)")
                 else:
                     print(f"✅ No exit detected - fly kept")
         else:
@@ -699,11 +989,11 @@ def test_f1_premature_exit_logic(fly_path):
         print(f"📏 Verifying threshold logic...")
         expected_threshold = 55 * 60  # 55 minutes in seconds
 
-        if exit_time is not None:
-            manual_check = exit_time < expected_threshold
+        if f1_exit_time is not None:
+            manual_check = f1_exit_time < expected_threshold
             results["threshold_verification"]["manual_check"] = manual_check
             results["threshold_verification"]["threshold_seconds"] = expected_threshold
-            results["threshold_verification"]["exit_time_seconds"] = exit_time
+            results["threshold_verification"]["f1_exit_time_seconds"] = f1_exit_time
 
             # Compare manual check with method result
             if results["premature_exit_check"]["success"]:
@@ -757,7 +1047,7 @@ def test_f1_premature_exit_logic(fly_path):
 
         # Print summary
         print(f"\n📋 F1 Premature Exit Test Summary:")
-        print(f"   Exit time: {exit_time/60:.1f} min" if exit_time else "   Exit time: No exit detected")
+        print(f"   F1 exit time: {f1_exit_time/60:.1f} min" if f1_exit_time else "   F1 exit time: No exit detected")
         print(f"   Premature exit: {'YES' if results['premature_exit_check']['is_premature'] else 'NO'}")
         print(
             f"   Threshold (55 min): {'PASSED' if results['threshold_verification']['threshold_correct'] else 'FAILED'}"
@@ -890,7 +1180,7 @@ def run_comprehensive_f1_test(fly_path):
         # Add premature exit test results to summary
         if "premature_exit" in comprehensive_results:
             premature_exit = comprehensive_results["premature_exit"]
-            summary["premature_exit_detection_passed"] = premature_exit.get("exit_time_detection", {}).get(
+            summary["premature_exit_detection_passed"] = premature_exit.get("f1_exit_time_detection", {}).get(
                 "success", False
             )
             summary["premature_exit_check_passed"] = premature_exit.get("premature_exit_check", {}).get(
