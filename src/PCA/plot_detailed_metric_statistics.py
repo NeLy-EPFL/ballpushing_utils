@@ -476,7 +476,7 @@ def create_hits_heatmap(results_df, correlation_matrix, nickname_to_brainregion,
                 else:
                     sig_code = ""
 
-                sig_row.append(direction)  # 1 for up (red), -1 for down (blue)
+                sig_row.append(direction)  # 1 for higher than control (red), -1 for lower than control (blue)
                 annot_row.append(sig_code)
 
                 # DEBUG: Check our test cases
@@ -539,9 +539,9 @@ def create_hits_heatmap(results_df, correlation_matrix, nickname_to_brainregion,
     plt.style.use("default")
     fig, ax = plt.subplots(figsize=(max(14, len(metric_names) * 0.4), max(8, len(genotype_names) * 0.4)))
 
-    # Create custom colormap - FINAL FIX: invert colors to match the actual data
-    # Based on debug: -1 values show red but should show blue, so colormap is inverted
-    colors = ["lightcoral", "white", "lightblue"]  # red for -1, white for 0, blue for +1
+    # Create custom colormap to match RdBu_r used in dendrograms
+    # RdBu_r: negative values (lower than control) → Blue, positive values (higher than control) → Red
+    colors = ["lightblue", "white", "lightcoral"]  # blue for -1 (lower), white for 0, red for +1 (higher)
     cmap = ListedColormap(colors)
 
     # Create the heatmap
