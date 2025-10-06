@@ -803,3 +803,9 @@ src/PCA/250926_PCA_Results/simple_consistency_scores_all_genotypes_combined.pdf
 src/PCA/250926_PCA_Results/simple_consistency_scores_all_genotypes_combined.png
 src/PCA/250926_PCA_Results/simple_consistency_scores_with_hits_only_combined.pdf
 src/PCA/250926_PCA_Results/simple_consistency_scores_with_hits_only_combined.png
+src/F1_tracks/binary_metrics_analysis.png
+src/F1_tracks/first_major_event_boxplots.png
+src/F1_tracks/training_vs_test_max_distance_scatter.png
+src/F1_tracks/training_vs_test_scatter.png
+src/F1_tracks/test_ball_max_distance_boxplots.png
+src/F1_tracks/test_ball_distance_boxplots.png
