@@ -28,8 +28,8 @@ class BallPushingMetrics:
         # }
 
         if self.fly.config.debugging:
-            for fly_idx, exit_time in self.tracking_data.chamber_exit_times.items():
-                print(f"Fly {fly_idx} chamber exit time: {exit_time}")
+            print(f"Chamber exit time: {self.tracking_data.chamber_exit_time}")
+            print(f"F1 exit time: {self.tracking_data.f1_exit_time}")
 
         self.metrics = {}
         if compute_metrics_on_init:
@@ -312,6 +312,8 @@ class BallPushingMetrics:
                 final_event = None
                 final_event_idx = np.nan
                 final_event_time = np.nan
+                final_event_end_time = np.nan  # Initialize here for all code paths
+                raw_final_event_time = np.nan  # Initialize here for all code paths
                 if (
                     self.is_metric_enabled("final_event")
                     or self.is_metric_enabled("final_event_time")
@@ -332,8 +334,21 @@ class BallPushingMetrics:
                     if final_event is None:
                         final_event_idx = np.nan
                         final_event_time = np.nan
+                        final_event_end_time = np.nan
+                        raw_final_event_time = np.nan
                     else:
-                        final_event_idx, final_event_time, _ = final_event
+                        final_event_idx, final_event_time, final_event_end_time = final_event
+
+                        # For F1 test balls, we need both adjusted and raw final_event_time
+                        # - final_event_time: adjusted time (for time-based metrics)
+                        # - final_event_end_time: adjusted end time (for interaction_proportion denominator)
+                        # - raw_final_event_time: unadjusted time (for other rate calculations)
+                        if self._should_use_adjusted_time(fly_idx, ball_idx):
+                            # final_event_time and final_event_end_time are already adjusted, calculate raw version
+                            raw_final_event_time = final_event_time + self.tracking_data.f1_exit_time
+                        else:
+                            # final_event_time is raw, use as-is for both
+                            raw_final_event_time = final_event_time
 
                 significant_events = None
                 if (
@@ -414,12 +429,24 @@ class BallPushingMetrics:
                         default=pause_metrics,
                     )
 
-                long_pause_metrics = {"nb_long_pauses": 0, "median_long_pause_duration": np.nan}
-                if self.is_metric_enabled("nb_long_pauses") or self.is_metric_enabled("median_long_pause_duration"):
+                long_pause_metrics = {
+                    "nb_long_pauses": 0,
+                    "median_long_pause_duration": np.nan,
+                    "total_long_pause_duration": 0.0,
+                }
+                if (
+                    self.is_metric_enabled("nb_long_pauses")
+                    or self.is_metric_enabled("median_long_pause_duration")
+                    or self.is_metric_enabled("total_long_pause_duration")
+                ):
                     long_pause_metrics = safe_call(
                         self.compute_long_pause_metrics,
                         fly_idx,
-                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
+                        default={
+                            "nb_long_pauses": 0,
+                            "median_long_pause_duration": np.nan,
+                            "total_long_pause_duration": 0.0,
+                        },
                     )
 
                 # Raw pauses - the unfiltered list of pauses detected
@@ -575,9 +602,22 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("nb_events"):
                     metrics_dict["nb_events"] = nb_events
                 if self.is_metric_enabled("max_event") and max_event is not None:
-                    metrics_dict["max_event"] = max_event[0]
+                    # max_event is a tuple (max_event_idx, max_event_time)
+                    # Check if max_event_idx is valid (not None or NaN)
+                    if max_event[0] is not None and not (
+                        isinstance(max_event[0], (int, float)) and np.isnan(max_event[0])
+                    ):
+                        metrics_dict["max_event"] = max_event[0]
+                    else:
+                        metrics_dict["max_event"] = np.nan
                 if self.is_metric_enabled("max_event_time") and max_event is not None:
-                    metrics_dict["max_event_time"] = max_event[1]
+                    # Check if max_event_time is valid (not None or NaN)
+                    if max_event[1] is not None and not (
+                        isinstance(max_event[1], (int, float)) and np.isnan(max_event[1])
+                    ):
+                        metrics_dict["max_event_time"] = max_event[1]
+                    else:
+                        metrics_dict["max_event_time"] = np.nan
                 if self.is_metric_enabled("max_distance"):
                     metrics_dict["max_distance"] = metrics["max_distance"]()
                 if self.is_metric_enabled("final_event"):
@@ -617,9 +657,13 @@ class BallPushingMetrics:
                         self.get_cumulated_breaks_duration, fly_idx, ball_idx, subset=filtered_events
                     )
                 if self.is_metric_enabled("chamber_time"):
-                    metrics_dict["chamber_time"] = safe_call(self.get_chamber_time, fly_idx, end_time=final_event_time)
+                    metrics_dict["chamber_time"] = safe_call(
+                        self.get_chamber_time, fly_idx, end_time=raw_final_event_time
+                    )
                 if self.is_metric_enabled("chamber_ratio"):
-                    metrics_dict["chamber_ratio"] = safe_call(self.chamber_ratio, fly_idx, end_time=final_event_time)
+                    metrics_dict["chamber_ratio"] = safe_call(
+                        self.chamber_ratio, fly_idx, end_time=raw_final_event_time
+                    )
                 if self.is_metric_enabled("pushed"):
                     metrics_dict["pushed"] = len(filtered_pushed)
                 if self.is_metric_enabled("pulled"):
@@ -633,10 +677,23 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("success_direction"):
                     metrics_dict["success_direction"] = metrics["success_direction"]()
                 if self.is_metric_enabled("interaction_proportion"):
+                    # For interaction proportion, use the end time of the final event to include
+                    # the full duration of the final event in the accessible time period
+                    # If no final event detected, use full duration and all events
+                    if final_event_end_time is not None:
+                        proportion_denominator = final_event_end_time
+                        events_for_proportion = filtered_events
+                    else:
+                        proportion_denominator = self.tracking_data.duration
+                        events_for_proportion = events  # Use all events when no final event
+
+                    # Convert event durations from frames to seconds (event[2] is in frames)
+                    total_interaction_duration_seconds = sum(
+                        [event[2] / self.fly.experiment.fps for event in events_for_proportion]
+                    )
                     metrics_dict["interaction_proportion"] = (
-                        sum([event[2] for event in filtered_events])
-                        / (final_event_time if final_event_time is not None else self.tracking_data.duration)
-                        if (final_event_time if final_event_time is not None else self.tracking_data.duration) > 0
+                        total_interaction_duration_seconds / proportion_denominator
+                        if proportion_denominator > 0
                         else np.nan
                     )
                 if self.is_metric_enabled("interaction_persistence"):
@@ -651,10 +708,10 @@ class BallPushingMetrics:
                     metrics_dict["distance_ratio"] = safe_call(
                         self.get_distance_ratio, fly_idx, ball_idx, subset=filtered_events
                     )
-                if self.is_metric_enabled("exit_time"):
-                    metrics_dict["exit_time"] = self.tracking_data.exit_time
+                if self.is_metric_enabled("f1_exit_time"):
+                    metrics_dict["f1_exit_time"] = self.tracking_data.f1_exit_time
                 if self.is_metric_enabled("chamber_exit_time"):
-                    metrics_dict["chamber_exit_time"] = self.tracking_data.chamber_exit_times[fly_idx]
+                    metrics_dict["chamber_exit_time"] = self.tracking_data.chamber_exit_time
 
                 # Pause metrics
                 pause_metrics = {"nb_pauses": 0, "median_pause_duration": np.nan, "total_pause_duration": 0.0}
@@ -683,15 +740,34 @@ class BallPushingMetrics:
                         self.compute_long_pause_metrics,
                         fly_idx,
                         subset=filtered_events,
-                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
+                        default={
+                            "nb_long_pauses": 0,
+                            "median_long_pause_duration": np.nan,
+                            "total_long_pause_duration": 0.0,
+                        },
                     )["nb_long_pauses"]
                 if self.is_metric_enabled("median_long_pause_duration"):
                     metrics_dict["median_long_pause_duration"] = safe_call(
                         self.compute_long_pause_metrics,
                         fly_idx,
                         subset=filtered_events,
-                        default={"nb_long_pauses": 0, "median_long_pause_duration": np.nan},
+                        default={
+                            "nb_long_pauses": 0,
+                            "median_long_pause_duration": np.nan,
+                            "total_long_pause_duration": 0.0,
+                        },
                     )["median_long_pause_duration"]
+                if self.is_metric_enabled("total_long_pause_duration"):
+                    metrics_dict["total_long_pause_duration"] = safe_call(
+                        self.compute_long_pause_metrics,
+                        fly_idx,
+                        subset=filtered_events,
+                        default={
+                            "nb_long_pauses": 0,
+                            "median_long_pause_duration": np.nan,
+                            "total_long_pause_duration": 0.0,
+                        },
+                    )["total_long_pause_duration"]
 
                 # Learning and logistic metrics (expensive)
                 if self.is_metric_enabled("learning_slope"):
@@ -919,6 +995,83 @@ class BallPushingMetrics:
         else:
             return self.fly.config.final_event_F1_threshold
 
+    def _should_use_adjusted_time(self, fly_idx, ball_idx):
+        """
+        Determine if adjusted time should be used for F1 experiments with test ball.
+
+        For F1 experiments, we want to use adjusted times for the test ball to measure
+        performance relative to when the fly exits the first corridor (training corridor).
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        bool
+            True if adjusted time should be used, False otherwise.
+        """
+        # Check if this is an F1 experiment
+        if not hasattr(self.fly.config, "experiment_type") or self.fly.config.experiment_type != "F1":
+            return False
+
+        # Check if we have ball identity information
+        if not hasattr(self.tracking_data, "ball_identities") or self.tracking_data.ball_identities is None:
+            return False
+
+        # Check if this ball is the test ball
+        ball_identity = self.tracking_data.ball_identities.get(ball_idx)
+        if ball_identity != "test":
+            return False
+
+        # Check if we have F1 exit time available
+        if not hasattr(self.tracking_data, "f1_exit_time") or self.tracking_data.f1_exit_time is None:
+            return False
+
+        return True
+
+    def _adjust_time_for_f1_test_ball(self, raw_time, fly_idx, ball_idx):
+        """
+        Adjust time for F1 test ball metrics by subtracting the corridor exit time.
+
+        For F1 experiments with test ball, we want to measure time relative to when the fly
+        exits the first (training) corridor, not from the absolute start of the experiment.
+
+        Parameters
+        ----------
+        raw_time : float
+            Raw time value (seconds from experiment start).
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Adjusted time (seconds from corridor exit) if adjustment should be applied,
+            otherwise returns the raw time unchanged.
+        """
+        if not self._should_use_adjusted_time(fly_idx, ball_idx):
+            return raw_time
+
+        if np.isnan(raw_time) or raw_time is None:
+            return raw_time
+
+        # Apply the adjustment: subtract F1 corridor exit time to get time relative to corridor exit
+        adjusted_time = raw_time - self.tracking_data.f1_exit_time
+
+        # Ensure adjusted time is not negative (shouldn't happen for test ball events)
+        if adjusted_time < 0:
+            if self.fly.config.debugging:
+                print(f"Warning: Adjusted time is negative ({adjusted_time:.2f}s) for test ball event")
+            return np.nan
+
+        return adjusted_time
+
     def get_adjusted_nb_events(self, fly_idx, ball_idx, signif=False):
         """
         Calculate the adjusted number of events for a given fly and ball. adjustment is based on the duration of the experiment.
@@ -950,29 +1103,46 @@ class BallPushingMetrics:
         if hasattr(self.fly.metadata, "F1_condition"):
 
             if self.fly.metadata.F1_condition == "control":
-                if ball_idx == 0 and self.tracking_data.exit_time is not None:
+                if ball_idx == 0 and self.tracking_data.chamber_exit_time is not None:
+                    chamber_exit_time = self.tracking_data.chamber_exit_time
                     adjusted_nb_events = (
                         len(events)
                         * self.fly.config.adjusted_events_normalisation
-                        / (self.tracking_data.duration - self.tracking_data.exit_time)
-                        if self.tracking_data.duration - self.tracking_data.exit_time > 0
+                        / (self.tracking_data.duration - chamber_exit_time)
+                        if self.tracking_data.duration - chamber_exit_time > 0
                         else 0
                     )
             else:
-                if ball_idx == 1 and self.tracking_data.exit_time is not None:
+                if ball_idx == 1 and self.tracking_data.f1_exit_time is not None:
                     adjusted_nb_events = (
                         len(events)
                         * self.fly.config.adjusted_events_normalisation
-                        / (self.tracking_data.duration - self.tracking_data.exit_time)
-                        if self.tracking_data.duration - self.tracking_data.exit_time > 0
+                        / (self.tracking_data.duration - self.tracking_data.f1_exit_time)
+                        if self.tracking_data.duration - self.tracking_data.f1_exit_time > 0
                         else 0
                     )
                 elif ball_idx == 0:
-                    adjusted_nb_events = (
-                        len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.exit_time
-                        if (self.tracking_data.exit_time and self.tracking_data.exit_time > 0)
-                        else len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
-                    )
+                    # For F1 training ball (ball_idx == 0), calculate events per normalized time unit
+                    # This gives a rate: events * 1000 / training_duration_seconds
+                    # High values (e.g., 925) are expected for short training durations (e.g., ~1 second)
+                    # since it represents events per 1000 seconds of normalized time
+                    chamber_exit_time = None
+                    if hasattr(self.tracking_data, "chamber_exit_times") and self.tracking_data.chamber_exit_times:
+                        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx)
+                    elif hasattr(self.tracking_data, "chamber_exit_time"):
+                        chamber_exit_time = self.tracking_data.chamber_exit_time
+
+                    if chamber_exit_time and chamber_exit_time > 0:
+                        adjusted_nb_events = (
+                            len(events) * self.fly.config.adjusted_events_normalisation / chamber_exit_time
+                        )
+                    else:
+                        # Fallback: use total duration for training ball
+                        adjusted_nb_events = (
+                            len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
+                            if self.tracking_data.duration > 0
+                            else 0
+                        )
 
         else:
             adjusted_nb_events = (
@@ -1129,49 +1299,17 @@ class BallPushingMetrics:
     # TODO: Implement adjustment by computing time to exit chamber and subtract it from the time of the event (perhaps keep both?)
     def get_chamber_exit_time(self, fly_idx, ball_idx):
         """
-        Compute the time at which the fly left the chamber for a given fly and ball.
+        Get the chamber exit time from the tracking data.
+        Since we have only one fly in one chamber, this delegates to the tracking_data method.
 
         Args:
-            fly_idx (int): Index of the fly.
-            ball_idx (int): Index of the ball.
+            fly_idx (int): Index of the fly (ignored, kept for API compatibility).
+            ball_idx (int): Index of the ball (ignored, kept for API compatibility).
 
         Returns:
             float or None: The exit time in seconds, or None if the fly never left the chamber.
         """
-        fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
-
-        # Calculate the distance from the fly start position for each frame
-        distances = Processing.calculate_euclidian_distance(
-            fly_data["x_thorax"], fly_data["y_thorax"], self.tracking_data.start_x, self.tracking_data.start_y
-        )
-
-        # Debugging: Print distances
-        if self.fly.config.debugging:
-            print(f"Distances for fly {fly_idx}, ball {ball_idx}: {distances}")
-
-        # Determine the frames where the fly is within a certain radius of the start position
-        in_chamber = distances <= self.fly.config.chamber_radius
-
-        # Debugging: Print in_chamber array
-        if self.fly.config.debugging:
-            print(f"In-chamber status for fly {fly_idx}, ball {ball_idx}: {in_chamber}")
-
-        # Check if the fly ever leaves the chamber
-        if not np.any(~in_chamber):  # If all values in `in_chamber` are True
-            if self.fly.config.debugging:
-                print(f"Fly {fly_idx} never left the chamber.")
-            return None
-
-        # Get the first frame where the fly is outside the chamber
-        exit_frame = np.argmax(~in_chamber)  # Find the first `False` in `in_chamber`
-
-        # Debugging: Print exit_frame
-        if self.fly.config.debugging:
-            print(f"Exit frame for fly {fly_idx}, ball {ball_idx}: {exit_frame}")
-
-        exit_time = exit_frame / self.fly.experiment.fps
-
-        return exit_time
+        return self.tracking_data.chamber_exit_time
 
     @lru_cache(maxsize=128)
     def get_max_event(self, fly_idx, ball_idx, threshold=None):
@@ -1202,21 +1340,17 @@ class BallPushingMetrics:
         max_event, max_event_idx = self.find_event_by_distance(fly_idx, ball_idx, threshold, distance_type="max")
 
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_time
 
         # Calculate the time of the maximum event
-        if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            if max_event:
-                max_event_time = max_event[0] / self.fly.experiment.fps
-                if chamber_exit_time is not None:
-                    max_event_time -= chamber_exit_time
-            else:
-                max_event_time = np.nan
+        if max_event:
+            # Get raw time first
+            raw_max_event_time = max_event[0] / self.fly.experiment.fps
+            # Apply appropriate time adjustment based on ball identity
+            max_event_time = self._adjust_time_for_f1_test_ball(raw_max_event_time, fly_idx, ball_idx)
         else:
-            if max_event:
-                max_event_time = (max_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
-            else:
-                max_event_time = np.nan
+            max_event_time = np.nan
+        # max_event_time = self._adjust_time_for_f1_test_ball(max_event_time, fly_idx, ball_idx)
 
         return max_event_idx if max_event_idx is not None else np.nan, max_event_time
 
@@ -1287,7 +1421,7 @@ class BallPushingMetrics:
         #     ball_data = ball_data.iloc[start:end]
 
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_time
 
         # Determine the appropriate threshold
         if threshold is None:
@@ -1306,22 +1440,15 @@ class BallPushingMetrics:
         if not final_event:
             return None
 
-        # Calculate the time and end time of the final event
-        if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-            final_event_start_time = final_event[0] / self.fly.experiment.fps
-            final_event_time = final_event[0] / self.fly.experiment.fps  # Use START time for final event
-            final_event_end = final_event[1] / self.fly.experiment.fps
+        # Calculate the raw time and end time of the final event (no adjustments yet)
+        raw_final_event_start_time = final_event[0] / self.fly.experiment.fps
+        raw_final_event_time = final_event[0] / self.fly.experiment.fps  # Use START time for final event
+        raw_final_event_end = final_event[1] / self.fly.experiment.fps
 
-            if chamber_exit_time is not None:
-                final_event_start_time -= chamber_exit_time
-                final_event_time -= chamber_exit_time
-                final_event_end -= chamber_exit_time
-        else:
-            final_event_start_time = (final_event[0] / self.fly.experiment.fps) - self.tracking_data.exit_time
-            final_event_time = (
-                final_event[0] / self.fly.experiment.fps
-            ) - self.tracking_data.exit_time  # Use START time
-            final_event_end = (final_event[1] / self.fly.experiment.fps) - self.tracking_data.exit_time
+        # Apply appropriate time adjustment based on ball identity
+        final_event_start_time = self._adjust_time_for_f1_test_ball(raw_final_event_start_time, fly_idx, ball_idx)
+        final_event_time = self._adjust_time_for_f1_test_ball(raw_final_event_time, fly_idx, ball_idx)
+        final_event_end = self._adjust_time_for_f1_test_ball(raw_final_event_end, fly_idx, ball_idx)
 
         return final_event_idx, final_event_time, final_event_end
 
@@ -1358,7 +1485,7 @@ class BallPushingMetrics:
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
         # Get the chamber exit time for the current fly
-        chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx, None)
+        chamber_exit_time = self.tracking_data.chamber_exit_time
 
         # Get significant events
         significant_events = self.get_significant_events(fly_idx, ball_idx, distance=distance)
@@ -1367,15 +1494,13 @@ class BallPushingMetrics:
             first_significant_event = significant_events[0]
             first_significant_event_idx = first_significant_event[1]
 
-            # Calculate the time of the first significant event
-            if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                first_significant_event_time = first_significant_event[0][0] / self.fly.experiment.fps
-                if chamber_exit_time is not None:
-                    first_significant_event_time -= chamber_exit_time
-            else:
-                first_significant_event_time = (
-                    first_significant_event[0][0] / self.fly.experiment.fps
-                ) - self.tracking_data.exit_time
+            # Calculate the raw time of the first significant event (no adjustments yet)
+            raw_first_significant_event_time = first_significant_event[0][0] / self.fly.experiment.fps
+
+            # Apply appropriate time adjustment based on ball identity
+            first_significant_event_time = self._adjust_time_for_f1_test_ball(
+                raw_first_significant_event_time, fly_idx, ball_idx
+            )
 
             return first_significant_event_idx, first_significant_event_time
         else:
@@ -1640,12 +1765,11 @@ class BallPushingMetrics:
 
             major_event_instance, major_event_idx = major_event[0]
 
-            if abs(ball_data["x_centre"].iloc[0] - self.tracking_data.start_x) < 100:
-                first_major_event_time = major_event_instance[0] / self.fly.experiment.fps
-            else:
-                first_major_event_time = (
-                    major_event_instance[0] / self.fly.experiment.fps
-                ) - self.tracking_data.exit_time
+            # Calculate raw time first (no adjustments yet)
+            raw_first_major_event_time = major_event_instance[0] / self.fly.experiment.fps
+
+            # Apply appropriate time adjustment based on ball identity
+            first_major_event_time = self._adjust_time_for_f1_test_ball(raw_first_major_event_time, fly_idx, ball_idx)
 
             return major_event_idx, first_major_event_time
         else:
@@ -2186,6 +2310,15 @@ class BallPushingMetrics:
         time = np.arange(len(ball_data)) / self.fly.experiment.fps  # Time in seconds
         position = ball_data["y_centre"].values  # Replace with "x_centre" if needed
 
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            position = position[valid_mask]
+
         # Check if there is enough data to fit a regression
         if len(time) < 2 or np.all(position == position[0]):  # No movement
             return {"slope": np.nan, "r2": np.nan}
@@ -2227,6 +2360,15 @@ class BallPushingMetrics:
         # Extract time (in seconds) and position (e.g., y_centre)
         time = np.arange(len(ball_data)) / self.fly.experiment.fps  # Time in seconds
         position = ball_data["y_centre"].values  # Replace with "x_centre" if needed
+
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            position = position[valid_mask]
 
         # Check if there is enough data to fit a logistic function
         if len(time) < 3 or np.all(position == position[0]):  # No movement
@@ -2454,6 +2596,18 @@ class BallPushingMetrics:
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
         position = ball_data["y_centre"].values
 
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            position = position[valid_mask]
+
+        if len(time) == 0:
+            return [np.nan] * n_bins
+
         bins = np.linspace(time[0], time[-1], n_bins + 1)
         slopes = []
 
@@ -2476,6 +2630,16 @@ class BallPushingMetrics:
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
         position = ball_data["y_centre"].values
+
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            position = position[valid_mask]
+
         if len(time) < 2 or np.all(position == position[0]):
             return np.nan
         model = LinearRegression()
@@ -2489,16 +2653,44 @@ class BallPushingMetrics:
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
-        bins = np.linspace(time[0], time[-1], n_bins + 1)
         events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+
+            # Adjust event times and filter events that occur after corridor exit
+            adjusted_events = []
+            for event in events:
+                event_time = event[0] / self.fly.experiment.fps - self.tracking_data.f1_exit_time
+                if event_time >= 0:  # Only include events after corridor exit
+                    adjusted_events.append((event_time * self.fly.experiment.fps, event[1], event[2]))
+            events = adjusted_events
+
+        if len(time) == 0:
+            return [np.nan] * n_bins
+
+        bins = np.linspace(time[0], time[-1], n_bins + 1)
         rates = []
         for i in range(n_bins):
             bin_start, bin_end = bins[i], bins[i + 1]
             # Count events whose start falls in this bin
-            count = sum(
-                (event[0] / self.fly.experiment.fps >= bin_start) and (event[0] / self.fly.experiment.fps < bin_end)
-                for event in events
-            )
+            if self._should_use_adjusted_time(fly_idx, ball_idx):
+                # Events are already adjusted
+                count = sum(
+                    (event[0] / self.fly.experiment.fps >= bin_start) and (event[0] / self.fly.experiment.fps < bin_end)
+                    for event in events
+                )
+            else:
+                # Use original logic for non-F1 or non-test-ball scenarios
+                count = sum(
+                    (event[0] / self.fly.experiment.fps >= bin_start) and (event[0] / self.fly.experiment.fps < bin_end)
+                    for event in events
+                )
             duration = bin_end - bin_start
             rates.append(count / duration if duration > 0 else np.nan)
         return rates
@@ -2536,6 +2728,18 @@ class BallPushingMetrics:
         # Create time array
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
 
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            euclidean_distances = euclidean_distances[valid_mask]
+
+        if len(time) == 0:
+            return np.nan
+
         # Compute AUC using euclidean distance (progress)
         auc = np.trapz(euclidean_distances, time)
         return auc
@@ -2562,6 +2766,18 @@ class BallPushingMetrics:
 
         # Create time array
         time = np.arange(len(ball_data)) / self.fly.experiment.fps
+
+        # Apply F1 test ball time adjustment if applicable
+        if self._should_use_adjusted_time(fly_idx, ball_idx):
+            # Adjust time array to be relative to corridor exit
+            time = time - self.tracking_data.f1_exit_time
+            # Filter out negative times (data before corridor exit)
+            valid_mask = time >= 0
+            time = time[valid_mask]
+            euclidean_distances = euclidean_distances[valid_mask]
+
+        if len(time) == 0:
+            return [np.nan] * n_bins
 
         # Create time bins
         bins = np.linspace(time[0], time[-1], n_bins + 1)

@@ -61,18 +61,13 @@ class FlyTrackingData:
             self.calculate_relative_positions()
 
             time_range_start = self.fly.config.time_range[0] if self.fly.config.time_range else None
-            self.chamber_exit_times = {
-                fly_idx: (
-                    0
-                    if (
-                        (exit_time := self.get_chamber_exit_time(fly_idx, 0)) is not None
-                        and time_range_start is not None
-                        and exit_time < time_range_start
-                    )
-                    else exit_time
-                )
-                for fly_idx in range(len(self.flytrack.objects))
-            }
+            exit_time = self.get_chamber_exit_time()
+
+            # Handle case where exit time is before time range start
+            if exit_time is not None and time_range_start is not None and exit_time < time_range_start:
+                self.chamber_exit_time = 0
+            else:
+                self.chamber_exit_time = exit_time
 
             # Apply initial time range filter if specified in config
             if self.fly.config.time_range:
@@ -92,7 +87,7 @@ class FlyTrackingData:
                 print(f"Initial position for {self.fly.metadata.name}: ({self.start_x}, {self.start_y})")
 
             self.fly_skeleton = self.get_skeleton()
-            self.exit_time = self.get_exit_time()
+            self.f1_exit_time = self.get_f1_exit_time()
             self.adjusted_time = self.compute_adjusted_time()
 
             # Check for F1 premature exit (flies that exit before 55 minutes should be discarded)
@@ -170,15 +165,39 @@ class FlyTrackingData:
 
             # Get expected arena/corridor from current fly
             expected_arena = self.fly.metadata.arena  # e.g., "arena2"
-            expected_corridor = self.fly.metadata.corridor  # e.g., "corridor5"
+            expected_corridor = self.fly.metadata.corridor  # e.g., "corridor5" or "Left"/"Right" for F1
 
-            # Parse expected values to integers
-            expected_arena_num = (
-                int(expected_arena.replace("arena", "")) if expected_arena.startswith("arena") else None
-            )
-            expected_corridor_num = (
-                int(expected_corridor.replace("corridor", "")) if expected_corridor.startswith("corridor") else None
-            )
+            # Parse expected values to integers, handling different experiment types
+            expected_arena_num = None
+            expected_corridor_num = None
+
+            # Handle arena parsing (should be consistent across experiment types)
+            if expected_arena and isinstance(expected_arena, str) and expected_arena.startswith("arena"):
+                try:
+                    expected_arena_num = int(expected_arena.replace("arena", ""))
+                except (ValueError, IndexError):
+                    expected_arena_num = None
+
+            # Handle corridor parsing - depends on experiment type
+            if expected_corridor and isinstance(expected_corridor, str):
+                # Check if this is an F1 experiment
+                is_f1_experiment = (
+                    hasattr(self.fly.config, "experiment_type") and self.fly.config.experiment_type == "F1"
+                )
+
+                if is_f1_experiment and expected_corridor.lower() in ["left", "right"]:
+                    # For F1 experiments, map Left/Right to corridor numbers for validation
+                    expected_corridor_num = 1 if expected_corridor.lower() == "left" else 2
+                elif expected_corridor.startswith("corridor"):
+                    # For regular experiments with corridor1, corridor2, etc.
+                    try:
+                        expected_corridor_num = int(expected_corridor.replace("corridor", ""))
+                    except (ValueError, IndexError):
+                        expected_corridor_num = None
+                else:
+                    # Unknown corridor format, skip validation
+                    expected_corridor_num = None
+
             expected_arena_corridor = (expected_arena_num, expected_corridor_num)
 
             # Check if video path matches expected arena/corridor
@@ -198,6 +217,7 @@ class FlyTrackingData:
     def _parse_arena_corridor_from_path(self, path_str):
         """
         Extract arena and corridor numbers from a path string.
+        Handles both regular experiments (arena1/corridor2) and F1 experiments (arena1/Left, arena1/Right).
 
         Parameters
         ----------
@@ -211,27 +231,45 @@ class FlyTrackingData:
         """
         import re
 
-        # Look for patterns like "arena6/corridor2" or "arena6\corridor2"
+        # Look for arena pattern
         arena_match = re.search(r"arena(\d+)", path_str, re.IGNORECASE)
+
+        if not arena_match:
+            return None
+
+        arena_num = int(arena_match.group(1))
+
+        # Look for corridor pattern - try both regular and F1 experiment formats
         corridor_match = re.search(r"corridor(\d+)", path_str, re.IGNORECASE)
 
-        if arena_match and corridor_match:
-            return (int(arena_match.group(1)), int(corridor_match.group(1)))
+        if corridor_match:
+            # Regular experiment format: corridor1, corridor2, etc.
+            corridor_num = int(corridor_match.group(1))
+        else:
+            # F1 experiment format: Left/Right
+            if re.search(r"left", path_str, re.IGNORECASE):
+                corridor_num = 1  # Map Left to corridor 1
+            elif re.search(r"right", path_str, re.IGNORECASE):
+                corridor_num = 2  # Map Right to corridor 2
+            else:
+                return None  # No recognizable corridor pattern found
 
-        return None
+        return (arena_num, corridor_num)
 
-    def get_chamber_exit_time(self, fly_idx, ball_idx):
+    def get_chamber_exit_time(self):
         """
-        Compute the time at which the fly left the chamber for a given fly and ball.
-
-        Args:
-            fly_idx (int): Index of the fly.
-            ball_idx (int): Index of the ball.
+        Compute the time at which the fly left the chamber.
+        Since we have only one fly in one chamber, this returns a single value.
 
         Returns:
             float or None: The exit time in seconds, or None if the fly never left the chamber.
         """
-        fly_data = self.flytrack.objects[fly_idx].dataset
+        if self.flytrack is None or self.flytrack.objects is None or len(self.flytrack.objects) == 0:
+            if self.fly.config.debugging:
+                print(f"No flytrack data available for chamber exit calculation.")
+            return None
+
+        fly_data = self.flytrack.objects[0].dataset
 
         # Calculate the distance from the fly start position for each frame
         distances = Processing.calculate_euclidian_distance(
@@ -240,19 +278,19 @@ class FlyTrackingData:
 
         # Debugging: Print distances
         if self.fly.config.debugging:
-            print(f"Distances for fly {fly_idx}, ball {ball_idx}: {distances}")
+            print(f"Distances for chamber exit calculation: {distances}")
 
         # Determine the frames where the fly is within a certain radius of the start position
         in_chamber = distances <= self.fly.config.chamber_radius
 
         # Debugging: Print in_chamber array
         if self.fly.config.debugging:
-            print(f"In-chamber status for fly {fly_idx}, ball {ball_idx}: {in_chamber}")
+            print(f"In-chamber status: {in_chamber}")
 
         # Check if the fly ever leaves the chamber
         if not np.any(~in_chamber):  # If all values in `in_chamber` are True
             if self.fly.config.debugging:
-                print(f"Fly {fly_idx} never left the chamber.")
+                print(f"Fly never left the chamber.")
             return None
 
         # Get the first frame where the fly is outside the chamber
@@ -260,7 +298,7 @@ class FlyTrackingData:
 
         # Debugging: Print exit_frame
         if self.fly.config.debugging:
-            print(f"Exit frame for fly {fly_idx}, ball {ball_idx}: {exit_frame}")
+            print(f"Exit frame: {exit_frame}")
 
         exit_time = exit_frame / self.fly.experiment.fps
 
@@ -1178,8 +1216,8 @@ class FlyTrackingData:
         if not (hasattr(self.fly.config, "experiment_type") and self.fly.config.experiment_type == "F1"):
             return False
 
-        # If no exit time detected, fly never left first corridor (valid)
-        if self.exit_time is None:
+        # If no F1 exit time detected, fly never left first corridor (valid)
+        if self.f1_exit_time is None:
             if self.fly.config.debugging:
                 print(f"F1 fly {self.fly.metadata.name} never exited first corridor - keeping")
             return False
@@ -1188,16 +1226,16 @@ class FlyTrackingData:
         premature_exit_threshold = 55 * 60  # 55 minutes in seconds
 
         # Check if fly exited before threshold
-        if self.exit_time < premature_exit_threshold:
+        if self.f1_exit_time < premature_exit_threshold:
             if self.fly.config.debugging:
                 print(
-                    f"F1 fly {self.fly.metadata.name} exited at {self.exit_time/60:.1f} minutes (before {premature_exit_threshold/60} min threshold)"
+                    f"F1 fly {self.fly.metadata.name} exited at {self.f1_exit_time/60:.1f} minutes (before {premature_exit_threshold/60} min threshold)"
                 )
             return True
 
         if self.fly.config.debugging:
             print(
-                f"F1 fly {self.fly.metadata.name} exited at {self.exit_time/60:.1f} minutes (after threshold) - keeping"
+                f"F1 fly {self.fly.metadata.name} exited at {self.f1_exit_time/60:.1f} minutes (after threshold) - keeping"
             )
         return False
 
@@ -1298,14 +1336,15 @@ class FlyTrackingData:
 
         return full_body_data
 
-    def get_exit_time(self):
+    def get_f1_exit_time(self):
         """
-        Get the exit time, which is the first time at which the fly x position has been 100 px away from the initial fly x position.
+        Get the F1 corridor exit time, which is the first time at which the fly x position has been 100 px away from the initial fly x position.
+        This is specifically for F1 experiments to detect when the fly exits the first corridor to enter the second arena.
         Uses raw positions with sustained exit (2 seconds) requirement to reduce false positives from tracking errors.
         The 2-second persistence requirement provides robustness without the computational overhead of median smoothing.
 
         Returns:
-            float: The exit time, or None if the fly did not move 100 px away from the initial position sustainedly.
+            float: The F1 exit time, or None if the fly did not move 100 px away from the initial position sustainedly.
         """
 
         if self.flytrack is None:
@@ -1389,9 +1428,9 @@ class FlyTrackingData:
 
     def compute_adjusted_time(self):
         """
-        Compute adjusted time based on the fly's exit time if any, otherwise return None.
+        Compute adjusted time based on the fly's F1 exit time if any, otherwise return None.
         """
-        if self.exit_time is not None:
+        if self.f1_exit_time is not None:
             # Ensure flytrack and its objects are not None
             if self.flytrack is None or self.flytrack.objects is None:
                 warnings.warn("Flytrack or its objects are not initialized.")
@@ -1405,7 +1444,7 @@ class FlyTrackingData:
             flydata = self.flytrack.objects[0].dataset
 
             # Compute adjusted time
-            flydata["adjusted_time"] = flydata["time"] - self.exit_time
+            flydata["adjusted_time"] = flydata["time"] - self.f1_exit_time
 
             return flydata["adjusted_time"]
         else:
