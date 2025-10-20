@@ -13,18 +13,39 @@ from pathlib import Path
 from scipy import stats
 
 
-def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_palette=None):
+def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_mapping=None, order=None):
     """Create a boxplot with superimposed scatter plot."""
 
-    # Create boxplot
-    box_plot = sns.boxplot(data=data, x=x_col, y=y_col, ax=ax, hue=x_col, palette=color_palette, legend=False)
+    # Create boxplot with no fill and black outline
+    box_plot = sns.boxplot(data=data, x=x_col, y=y_col, ax=ax, order=order)
 
-    # Make boxplot transparent
+    # Style boxplot: no fill, black outline
     for patch in box_plot.patches:
-        patch.set_alpha(0.7)
+        patch.set_facecolor("none")  # No fill
+        patch.set_edgecolor("black")  # Black outline
+        patch.set_linewidth(1.5)
 
-    # Superimpose scatter plot with jitter
-    sns.stripplot(data=data, x=x_col, y=y_col, ax=ax, size=4, alpha=0.6, jitter=True, dodge=False, color="black")
+    # Style the whiskers, caps, and medians to black
+    for line in ax.lines:
+        line.set_color("black")
+        line.set_linewidth(1.5)
+
+    # Superimpose scatter plot with specified colors
+    if color_mapping and order:
+        for i, condition in enumerate(order):
+            condition_data = data[data[x_col] == condition]
+            color = color_mapping.get(condition, "black")
+
+            # Add jitter manually for better control
+            y_values = condition_data[y_col].values
+            x_positions = np.random.normal(i, 0.1, size=len(y_values))
+
+            ax.scatter(x_positions, y_values, c=color, s=30, alpha=0.7, edgecolors="black", linewidth=0.5)
+    else:
+        # Fallback to default stripplot
+        sns.stripplot(
+            data=data, x=x_col, y=y_col, ax=ax, size=6, alpha=0.7, jitter=True, dodge=False, color="black", order=order
+        )
 
     # Set title and labels
     ax.set_title(title, fontsize=14, fontweight="bold")
@@ -72,7 +93,7 @@ def main():
 
     # Dataset path
     dataset_path = (
-        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251001_13_summary_F1_New_Data/summary/pooled_summary.feather"
+        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
     )
 
     # Load dataset
@@ -210,9 +231,12 @@ def main():
     # Create subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
-    # Set up color palettes
-    pretraining_palette = sns.color_palette("Set2", n_colors=len(test_ball_data[pretraining_col].unique()))
-    f1_palette = sns.color_palette("Set1", n_colors=len(test_ball_data[f1_condition_col].unique()))
+    # Define color mappings and ordering
+    pretraining_colors = {"n": "steelblue", "y": "orange"}
+    f1_condition_colors = {"control": "steelblue", "pretrained": "orange", "pretrained_unlocked": "lightgreen"}
+
+    pretraining_order = ["n", "y"]
+    f1_condition_order = ["control", "pretrained_unlocked", "pretrained"]
 
     # Plot 1: Max distance by Pretraining condition
     create_boxplot_with_scatter(
@@ -221,7 +245,8 @@ def main():
         y_col=distance_col,
         title="Test Ball Max Distance by Pretraining Condition",
         ax=ax1,
-        color_palette=pretraining_palette,
+        color_mapping=pretraining_colors,
+        order=pretraining_order,
     )
 
     # Plot 2: Max distance by F1_Condition
@@ -231,7 +256,8 @@ def main():
         y_col=distance_col,
         title="Test Ball Max Distance by F1 Condition",
         ax=ax2,
-        color_palette=f1_palette,
+        color_mapping=f1_condition_colors,
+        order=f1_condition_order,
     )
 
     # Overall formatting
@@ -253,6 +279,7 @@ def main():
             test_ball_data.groupby(pretraining_col)[distance_col]
             .agg(["count", "mean", "std", "median", "min", "max"])
             .round(3)
+            .reindex(pretraining_order)
         )
         print(pretraining_summary)
 
@@ -262,6 +289,7 @@ def main():
             test_ball_data.groupby(f1_condition_col)[distance_col]
             .agg(["count", "mean", "std", "median", "min", "max"])
             .round(3)
+            .reindex(f1_condition_order)
         )
         print(f1_summary)
 

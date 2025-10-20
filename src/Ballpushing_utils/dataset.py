@@ -201,7 +201,8 @@ class Dataset:
             elif metrics == "F1_coordinates":
                 for fly in self.flies:
                     data = self._prepare_dataset_F1_coordinates(fly)
-                    Dataset.append(data)
+                    if data is not None and not data.empty:
+                        Dataset.append(data)
 
             elif metrics == "F1_checkpoints":
                 for fly in self.flies:
@@ -232,12 +233,11 @@ class Dataset:
             elif metrics == "transformed":
                 for fly in self.flies:
                     data = self._prepare_transformed_dataset(fly)
-                    Dataset.append(data)
                     if not data.empty:
                         Dataset.append(data)
 
             if Dataset:
-                self.data = pd.concat(Dataset).reset_index()
+                self.data = pd.concat(Dataset, ignore_index=True)
             else:
                 self.data = pd.DataFrame()  # Return an empty DataFrame if no data
 
@@ -293,7 +293,7 @@ class Dataset:
             {
                 "time": flydata[0]["time"],
                 "frame": flydata[0]["frame"],
-                "adjusted_time": (fly.f1_metrics["adjusted_time"] if fly.tracking_data.exit_time else np.nan),
+                "adjusted_time": (fly.f1_metrics["adjusted_time"] if fly.tracking_data.f1_exit_time else np.nan),
             }
         )
 
@@ -543,50 +543,88 @@ class Dataset:
         return dataset
 
     def _prepare_dataset_F1_coordinates(self, fly, downsampling_factor=None):
+        """
+        Prepare F1 coordinates dataset with simple adjusted time and ball distances.
+
+        Args:
+            fly (Fly): A Fly object.
+            downsampling_factor (int): Optional downsampling factor.
+
+        Returns:
+            pandas.DataFrame: DataFrame with adjusted_time and ball distances.
+        """
         # Check if the fly ever exits the corridor
-        if fly.tracking_data.exit_time is None:
+        if fly.tracking_data.f1_exit_time is None:
             print(f"Fly {fly.metadata.name} never exits the corridor")
-            return
+            return pd.DataFrame()  # Return empty DataFrame
 
-        downsampling_factor = fly.config.downsampling_factor
+        downsampling_factor = fly.config.downsampling_factor or downsampling_factor
 
-        dataset = pd.DataFrame()
+        # Get the raw adjusted time from tracking data
+        raw_adjusted_time = fly.tracking_data.adjusted_time
 
-        dataset["time"] = fly.tracking_data.flytrack.objects[0].dataset["time"]
-        dataset["frame"] = fly.tracking_data.flytrack.objects[0].dataset["frame"]
+        if raw_adjusted_time is None or np.all(np.isnan(raw_adjusted_time)):
+            print(f"No valid adjusted time data for {fly.metadata.name}")
+            return pd.DataFrame()
 
-        dataset["adjusted_time"] = fly.f1_metrics["adjusted_time"]
+        # Initialize dataset with time information
+        dataset = pd.DataFrame(
+            {
+                "time": fly.tracking_data.flytrack.objects[0].dataset["time"],
+                "frame": fly.tracking_data.flytrack.objects[0].dataset["frame"],
+                "adjusted_time": raw_adjusted_time,
+            }
+        )
 
-        # Assign training_ball and test_ball distances separately
+        # Add ball distances directly from tracking data
 
-        if fly.metadata.F1_condition != "control":
-            dataset["training_ball"] = fly.f1_metrics["training_ball_distances"]["euclidean_distance"]
+        # For training ball (only if not control condition)
+        if fly.metadata.F1_condition != "control" and fly.tracking_data.has_training_ball():
+            training_ball_data = fly.tracking_data.get_training_ball_data()
+            if training_ball_data is not None and "euclidean_distance" in training_ball_data.columns:
+                dataset["training_ball_euclidean_distance"] = training_ball_data["euclidean_distance"]
+            else:
+                dataset["training_ball_euclidean_distance"] = np.nan
+        else:
+            dataset["training_ball_euclidean_distance"] = np.nan
 
-        dataset["test_ball"] = fly.f1_metrics["test_ball_distances"]["euclidean_distance"]
+        # For test ball (should always be available)
+        if fly.tracking_data.has_test_ball():
+            test_ball_data = fly.tracking_data.get_test_ball_data()
+            if test_ball_data is not None and "euclidean_distance" in test_ball_data.columns:
+                dataset["test_ball_euclidean_distance"] = test_ball_data["euclidean_distance"]
+            else:
+                dataset["test_ball_euclidean_distance"] = np.nan
+        else:
+            dataset["test_ball_euclidean_distance"] = np.nan
 
-        # Exclude the fly if test_ball_distances has moved > 10 px before adjusted time 0
-        NegData = dataset[dataset["adjusted_time"] < 0]
+        # Filter out data points with negative adjusted time (keep only positive values)
+        positive_time_mask = dataset["adjusted_time"] >= 0
+        if positive_time_mask.any():
+            dataset = dataset[positive_time_mask].reset_index(drop=True)
+            print(f"Fly {fly.metadata.name}: Kept {len(dataset)} frames with positive adjusted time")
+        else:
+            print(f"Fly {fly.metadata.name}: No frames with positive adjusted time")
+            return pd.DataFrame()
 
-        if NegData["test_ball"].max() > 10:
-            print(f"Fly {fly.metadata.name} excluded due to premature ball movements")
-            return
-
+        # Apply downsampling if specified
         if downsampling_factor:
             dataset = dataset.iloc[:: downsampling_factor * fly.experiment.fps]
 
+        # Add metadata
         dataset = self._add_metadata(dataset, fly)
 
         return dataset
 
     def _prepare_dataset_F1_checkpoints(self, fly):
-        if fly.tracking_data.exit_time is None:
+        if fly.tracking_data.f1_exit_time is None:
             print(f"Fly {fly.metadata.name} never exits the corridor")
             return pd.DataFrame()  # Return an empty DataFrame
 
         # Create a list of dictionaries for each checkpoint
         data = [
             {
-                "fly_exit_time": fly.tracking_data.exit_time,
+                "fly_exit_time": fly.tracking_data.f1_exit_time,
                 "distance": distance,
                 "adjusted_time": adjusted_time,
             }
@@ -653,48 +691,73 @@ class Dataset:
         Returns:
             pandas.DataFrame: A DataFrame containing the fly's coordinates and associated metadata.
         """
-
-        dataset = pd.DataFrame()
-
         try:
-            dataset = data
+            # Create a dictionary to hold all metadata columns
+            metadata_dict = {}
 
-            # Add a column with the fly name as categorical data
-            dataset["fly"] = fly.metadata.name
-            dataset["fly"] = dataset["fly"].astype("category")
-
-            # Add a column with the path to the fly's folder
-            dataset["flypath"] = fly.metadata.directory.as_posix()
-            dataset["flypath"] = dataset["flypath"].astype("category")
-
-            # Add a column with the experiment name as categorical data
-            dataset["experiment"] = fly.experiment.directory.name
-            dataset["experiment"] = dataset["experiment"].astype("category")
+            # Add basic fly information only if not already present
+            if "fly" not in data.columns:
+                metadata_dict["fly"] = fly.metadata.name
+            if "flypath" not in data.columns:
+                metadata_dict["flypath"] = fly.metadata.directory.as_posix()
+            if "experiment" not in data.columns:
+                metadata_dict["experiment"] = fly.experiment.directory.name
 
             # Handle missing values for 'Nickname' and 'Brain region'
-            dataset["Nickname"] = fly.metadata.nickname if fly.metadata.nickname is not None else "Unknown"
-            dataset["Brain region"] = fly.metadata.brain_region if fly.metadata.brain_region is not None else "Unknown"
-            dataset["Simplified Nickname"] = (
-                fly.metadata.simplified_nickname if fly.metadata.simplified_nickname is not None else "Unknown"
-            )
-            dataset["Split"] = fly.metadata.split if fly.metadata.split is not None else "Unknown"
+            if "Nickname" not in data.columns:
+                metadata_dict["Nickname"] = fly.metadata.nickname if fly.metadata.nickname is not None else "Unknown"
+            if "Brain region" not in data.columns:
+                metadata_dict["Brain region"] = (
+                    fly.metadata.brain_region if fly.metadata.brain_region is not None else "Unknown"
+                )
+            if "Simplified Nickname" not in data.columns:
+                metadata_dict["Simplified Nickname"] = (
+                    fly.metadata.simplified_nickname if fly.metadata.simplified_nickname is not None else "Unknown"
+                )
+            if "Split" not in data.columns:
+                metadata_dict["Split"] = fly.metadata.split if fly.metadata.split is not None else "Unknown"
 
-            # Add the metadata for the fly's arena as columns
-            for var, data in fly.metadata.arena_metadata.items():
-                # Handle missing values in arena metadata
-                data = data if data is not None else "Unknown"
-                dataset[var] = data
-                dataset[var] = dataset[var].astype("category")
+            # Add the metadata for the fly's arena only if not already present
+            for var, arena_data in fly.metadata.arena_metadata.items():
+                if var not in data.columns:
+                    # Handle missing values in arena metadata
+                    arena_data = arena_data if arena_data is not None else "Unknown"
+                    metadata_dict[var] = arena_data
 
-                # If the variable name is not in the metadata list, add it
-                if var not in self.metadata:
-                    self.metadata.append(var)
+                    # If the variable name is not in the metadata list, add it
+                    if var not in self.metadata:
+                        self.metadata.append(var)
+
+            # If no new metadata to add, return original data
+            if not metadata_dict:
+                return data
+
+            # Create a metadata DataFrame with the same number of rows as the input data
+            metadata_df = pd.DataFrame({key: [value] * len(data) for key, value in metadata_dict.items()})
+
+            # Convert categorical columns
+            categorical_columns = [
+                "fly",
+                "flypath",
+                "experiment",
+                "Nickname",
+                "Brain region",
+                "Simplified Nickname",
+                "Split",
+            ] + list(fly.metadata.arena_metadata.keys())
+            for col in categorical_columns:
+                if col in metadata_df.columns:
+                    metadata_df[col] = metadata_df[col].astype("category")
+
+            # Concatenate the original data with metadata using pd.concat for better performance
+            dataset = pd.concat([data.reset_index(drop=True), metadata_df.reset_index(drop=True)], axis=1)
+
+            return dataset
 
         except Exception as e:
             print(f"Error occurred while adding metadata for fly {fly.metadata.name}: {str(e)}")
-            print(f"Current dataset:\n{dataset}")
-
-        return dataset
+            print(f"Current dataset:\n{data}")
+            return data  # Return original data if metadata addition fails
 
     def _prepare_dataset_standardized_contacts(self, fly):
         """Prepares standardized contact event windows for analysis"""
@@ -785,7 +848,7 @@ class Dataset:
             }
 
             # Add event-level metrics (avoiding duplicates)
-            if "event_id" in event_metrics_df.columns:
+            if event_metrics_df is not None and "event_id" in event_metrics_df.columns:
                 event_metrics = event_metrics_df[event_metrics_df["event_id"] == group_key[0]].iloc[0].to_dict()
                 row.update(event_metrics)
 
@@ -868,7 +931,7 @@ class Dataset:
             )
 
             # Add event metrics if available
-            if not event_metrics_df.empty:
+            if event_metrics_df is not None and not event_metrics_df.empty:
                 event_metrics = event_metrics_df[
                     (event_metrics_df["event_id"] == event_id) & (event_metrics_df["event_type"] == event_type)
                 ]

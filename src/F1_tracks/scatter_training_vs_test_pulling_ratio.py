@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Script to create a scatter plot of training vs test ball distance moved for Pretraining == "y" flies.
-X-axis: distance_moved for ball_condition "training"
-Y-axis: distance_moved for ball_condition "test"
+Script to create a scatter plot of training vs test ball pulling_ratio for Pretraining == "y" flies.
+X-axis: pulling_ratio for ball_condition "training"
+Y-axis: pulling_ratio for ball_condition "test"
+Compare across different F1_condition values.
 """
 
 import pandas as pd
@@ -14,7 +15,7 @@ from scipy import stats
 
 
 def main():
-    """Main function to create the training vs test scatter plot."""
+    """Main function to create the training vs test pulling_ratio scatter plot."""
 
     # Dataset path
     dataset_path = (
@@ -30,7 +31,6 @@ def main():
         return
 
     # Remove the data for Date 250904
-
     if "Date" in df.columns:
         initial_shape = df.shape
         df = df[df["Date"] != "250904"]
@@ -44,26 +44,19 @@ def main():
         print(f"  {i+1:2d}. {col}")
 
     # Try to identify the correct column names
-    distance_col = None
+    pulling_ratio_col = None
     pretraining_col = None
     ball_condition_col = None
     f1_condition_col = None
 
-    # Look for distance column - prioritize ball-specific distance over fly distance
+    # Look for pulling_ratio column
     for col in df.columns:
-        if col.lower() == "distance_moved":  # Exact match for ball-specific distance
-            distance_col = col
+        if col.lower() == "pulling_ratio":  # Exact match
+            pulling_ratio_col = col
             break
-        elif "distance" in col.lower() and "move" in col.lower() and "fly" not in col.lower():
-            distance_col = col
+        elif "pulling" in col.lower() and "ratio" in col.lower():
+            pulling_ratio_col = col
             break
-
-    # If still no distance column found, try any distance column as fallback
-    if distance_col is None:
-        for col in df.columns:
-            if "distance" in col.lower() and ("move" in col.lower() or "total" in col.lower()):
-                distance_col = col
-                break
 
     # Look for pretraining column
     for col in df.columns:
@@ -89,12 +82,12 @@ def main():
             break
 
     # If exact matches not found, use manual mapping based on your dataset structure
-    if distance_col is None:
-        # Look for any distance column
-        distance_cols = [col for col in df.columns if "distance" in col.lower()]
-        if distance_cols:
-            distance_col = distance_cols[0]
-            print(f"Using '{distance_col}' as distance column")
+    if pulling_ratio_col is None:
+        # Look for any pulling-related column
+        pulling_cols = [col for col in df.columns if "pulling" in col.lower()]
+        if pulling_cols:
+            pulling_ratio_col = pulling_cols[0]
+            print(f"Using '{pulling_ratio_col}' as pulling ratio column")
 
     if pretraining_col is None:
         # Look for any training-related column
@@ -116,7 +109,7 @@ def main():
 
     # Check if we found all required columns
     required_columns = {
-        "distance": distance_col,
+        "pulling_ratio": pulling_ratio_col,
         "pretraining": pretraining_col,
         "ball_condition": ball_condition_col,
         "f1_condition": f1_condition_col,
@@ -129,7 +122,7 @@ def main():
         return
 
     print(f"Using columns:")
-    print(f"  Distance: {distance_col}")
+    print(f"  Pulling ratio: {pulling_ratio_col}")
     print(f"  Pretraining: {pretraining_col}")
     print(f"  Ball condition: {ball_condition_col}")
     print(f"  F1 condition: {f1_condition_col}")
@@ -148,12 +141,12 @@ def main():
             fly_id_col = "fly"
 
     # Clean the data
-    df_clean = df[[distance_col, pretraining_col, ball_condition_col, f1_condition_col, fly_id_col]].dropna()
+    df_clean = df[[pulling_ratio_col, pretraining_col, ball_condition_col, f1_condition_col, fly_id_col]].dropna()
     print(f"Data shape after removing NaNs: {df_clean.shape}")
 
-    # Debug: Show some sample data to verify the distance values are different
-    sample_data = df_clean[[distance_col, ball_condition_col, f1_condition_col, fly_id_col]].head(10)
-    print(f"\nSample data to verify distance values:")
+    # Debug: Show some sample data to verify the pulling_ratio values are different
+    sample_data = df_clean[[pulling_ratio_col, ball_condition_col, f1_condition_col, fly_id_col]].head(10)
+    print(f"\nSample data to verify pulling_ratio values:")
     print(sample_data)
 
     # Print unique values
@@ -202,11 +195,11 @@ def main():
         # Filter data for this F1_condition
         condition_data = pretrained_flies[pretrained_flies[f1_condition_col] == f1_condition]
 
-        # Pivot the data to get training and test distances for each fly
+        # Pivot the data to get training and test pulling ratios for each fly
         pivot_data = condition_data.pivot_table(
             index=fly_id_col,
             columns=ball_condition_col,
-            values=distance_col,
+            values=pulling_ratio_col,
             aggfunc="first",  # In case there are duplicates, take the first value
         )
 
@@ -249,16 +242,6 @@ def main():
         if len(x) > 1:  # Need at least 2 points for correlation
             correlation_coef, p_value = stats.pearsonr(x, y)  # type: ignore
 
-            # Normalized correlation: scale both training and test to [0,1] based on their ranges
-            x_normalized = (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x * 0
-            y_normalized = (y - y.min()) / (y.max() - y.min()) if y.max() > y.min() else y * 0
-
-            # Calculate correlation on normalized data
-            normalized_correlation_coef = float("nan")
-            normalized_p_value = float("nan")
-            if x_normalized.std() > 0 and y_normalized.std() > 0:
-                normalized_correlation_coef, normalized_p_value = stats.pearsonr(x_normalized, y_normalized)  # type: ignore
-
             # Add trend line (best fit)
             z = np.polyfit(x, y, 1)
             fit_line = np.poly1d(z)
@@ -275,8 +258,6 @@ def main():
             results[f1_condition] = {
                 "correlation": correlation_coef,
                 "p_value": p_value,
-                "normalized_correlation": normalized_correlation_coef,
-                "normalized_p_value": normalized_p_value,
                 "slope": z[0],
                 "intercept": z[1],
                 "n_flies": len(complete_data),
@@ -287,18 +268,17 @@ def main():
             # Add correlation text box
             r_squared = correlation_coef * correlation_coef  # type: ignore
             textstr = (
-                f"Raw: r = {correlation_coef:.3f} (p = {p_value:.3f})\n"
-                f"Norm: r = {normalized_correlation_coef:.3f} (p = {normalized_p_value:.3f})\n"
+                f"r = {correlation_coef:.3f}\n"
+                f"R² = {r_squared:.3f}\n"
+                f"p = {p_value:.3f}\n"
                 f"n = {len(complete_data)}"
             )
             props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
-            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8, verticalalignment="top", bbox=props)
+            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=9, verticalalignment="top", bbox=props)
         else:
             results[f1_condition] = {
                 "correlation": np.nan,
                 "p_value": np.nan,
-                "normalized_correlation": np.nan,
-                "normalized_p_value": np.nan,
                 "slope": np.nan,
                 "intercept": np.nan,
                 "n_flies": len(complete_data),
@@ -307,20 +287,20 @@ def main():
             }
 
         # Formatting for individual plots
-        ax.set_xlabel("Distance Moved - Training Ball", fontsize=11)
-        ax.set_ylabel("Distance Moved - Test Ball", fontsize=11)
+        ax.set_xlabel("Pulling Ratio - Training Ball", fontsize=11)
+        ax.set_ylabel("Pulling Ratio - Test Ball", fontsize=11)
         ax.set_title(f"F1_condition: {f1_condition}", fontsize=12, fontweight="bold")
         ax.grid(True, alpha=0.3)
 
-        # Set axis limits with padding
+        # Set axis limits with padding (pulling ratio is typically 0-1)
         if len(x) > 0 and len(y) > 0:
-            x_range = x.max() - x.min() if x.max() > x.min() else x.mean() * 0.1
-            y_range = y.max() - y.min() if y.max() > y.min() else y.mean() * 0.1
-            x_padding = x_range * 0.1
-            y_padding = y_range * 0.1
+            x_range = x.max() - x.min() if x.max() > x.min() else 0.1
+            y_range = y.max() - y.min() if y.max() > y.min() else 0.1
+            x_padding = max(x_range * 0.1, 0.05)  # At least 5% padding
+            y_padding = max(y_range * 0.1, 0.05)  # At least 5% padding
 
-            ax.set_xlim(x.min() - x_padding, x.max() + x_padding)
-            ax.set_ylim(y.min() - y_padding, y.max() + y_padding)
+            ax.set_xlim(max(0, x.min() - x_padding), min(1, x.max() + x_padding))
+            ax.set_ylim(max(0, y.min() - y_padding), min(1, y.max() + y_padding))
 
     # Create combined plot in the last subplot
     if all_complete_data:
@@ -356,40 +336,44 @@ def main():
                 fit_line = np.poly1d(z)
                 ax_combined.plot(x, fit_line(x), color=color, alpha=0.8, linewidth=2, linestyle="--")
 
-        ax_combined.set_xlabel("Distance Moved - Training Ball", fontsize=11)
-        ax_combined.set_ylabel("Distance Moved - Test Ball", fontsize=11)
+        ax_combined.set_xlabel("Pulling Ratio - Training Ball", fontsize=11)
+        ax_combined.set_ylabel("Pulling Ratio - Test Ball", fontsize=11)
         ax_combined.set_title("Combined: All F1_conditions", fontsize=12, fontweight="bold")
         ax_combined.grid(True, alpha=0.3)
         ax_combined.legend()
 
+        # Set limits for combined plot
+        all_x = combined_data["training"]
+        all_y = combined_data["test"]
+        if len(all_x) > 0 and len(all_y) > 0:
+            ax_combined.set_xlim(max(0, all_x.min() - 0.05), min(1, all_x.max() + 0.05))
+            ax_combined.set_ylim(max(0, all_y.min() - 0.05), min(1, all_y.max() + 0.05))
+
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path(__file__).parent / "training_vs_test_scatter_by_f1condition.png"
+    output_path = Path(__file__).parent / "training_vs_test_pulling_ratio_by_f1condition.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
     # Print comparison statistics
     print("\n" + "=" * 60)
-    print("COMPARISON ACROSS F1_CONDITIONS")
+    print("COMPARISON ACROSS F1_CONDITIONS - PULLING RATIO")
     print("=" * 60)
 
     for f1_condition, result in results.items():
         print(f"\nF1_condition: {f1_condition}")
         print(f"  Number of flies: {result['n_flies']}")
         if not np.isnan(result["correlation"]):
-            print(f"  Raw correlation: {result['correlation']:.3f} (p = {result['p_value']:.3f})")
-            print(
-                f"  Normalized correlation: {result['normalized_correlation']:.3f} (p = {result['normalized_p_value']:.3f})"
-            )
+            print(f"  Correlation: {result['correlation']:.3f} (p = {result['p_value']:.3f})")
             print(f"  Slope: {result['slope']:.3f}")
+            print(f"  Training pulling ratio - Mean: {result['x_data'].mean():.3f} ± {result['x_data'].std():.3f}")
+            print(f"  Test pulling ratio - Mean: {result['y_data'].mean():.3f} ± {result['y_data'].std():.3f}")
             print(
-                f"  Training mean: {result['x_data'].mean():.3f} ± {result['x_data'].std():.3f}, Range: {result['x_data'].min():.1f}-{result['x_data'].max():.1f}"
+                f"  Test/Training ratio: {result['y_data'].mean() / result['x_data'].mean():.3f}"
+                if result["x_data"].mean() > 0
+                else "  Test/Training ratio: undefined (training mean = 0)"
             )
-            print(
-                f"  Test mean: {result['y_data'].mean():.3f} ± {result['y_data'].std():.3f}, Range: {result['y_data'].min():.1f}-{result['y_data'].max():.1f}"
-            )
-            print(f"  Test/Training ratio: {result['y_data'].mean() / result['x_data'].mean():.3f}")
         else:
             print("  Insufficient data for correlation analysis")
 
@@ -411,12 +395,43 @@ def main():
                     )
                     print(f"  Slope difference: {results[cond1]['slope'] - results[cond2]['slope']:.3f}")
 
-                    # Test for difference in means between test ball performance
+                    # Test for difference in means between test ball pulling ratios
                     from scipy.stats import ttest_ind
 
                     t_stat, p_val = ttest_ind(results[cond1]["y_data"], results[cond2]["y_data"])
-                    print(f"  Test ball mean difference: t = {t_stat:.3f}, p = {p_val:.3f}")
+                    print(f"  Test pulling ratio mean difference: t = {t_stat:.3f}, p = {p_val:.3f}")
 
+    # Additional insights for pulling ratio
+    print(f"\n" + "-" * 40)
+    print("PULLING RATIO INSIGHTS")
+    print("-" * 40)
+
+    for f1_condition, result in results.items():
+        if not np.isnan(result["correlation"]):
+            x_data = result["x_data"]
+            y_data = result["y_data"]
+
+            print(f"\n{f1_condition}:")
+            print(f"  Training pulling ratio range: {x_data.min():.3f} - {x_data.max():.3f}")
+            print(f"  Test pulling ratio range: {y_data.min():.3f} - {y_data.max():.3f}")
+
+            # Count flies with high pulling ratios (>0.5)
+            high_training = sum(x_data > 0.5)
+            high_test = sum(y_data > 0.5)
+            print(
+                f"  Flies with high training pulling ratio (>0.5): {high_training}/{len(x_data)} ({100*high_training/len(x_data):.1f}%)"
+            )
+            print(
+                f"  Flies with high test pulling ratio (>0.5): {high_test}/{len(y_data)} ({100*high_test/len(y_data):.1f}%)"
+            )
+
+            # Count flies that show consistent pulling behavior
+            consistent_pullers = sum((x_data > 0.5) & (y_data > 0.5))
+            print(
+                f"  Consistent pullers (high in both): {consistent_pullers}/{len(x_data)} ({100*consistent_pullers/len(x_data):.1f}%)"
+            )
+
+    plt.show()
     return results
 
 

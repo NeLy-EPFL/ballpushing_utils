@@ -1,0 +1,229 @@
+---
+# Configuration file for F1 tracks analysis scripts
+# This file consolidates common parameters across different analysis modes
+
+# Analysis modes configuration
+analysis_modes:
+  control:
+    description: "Control flies tested across pretraining and F1 conditions"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
+    grouping_variables:
+      primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
+      secondary: "f1_condition"  # Column name will be auto-detected with "f1" and "condition"
+    excluded_dates: ["250904"]  # Dates to exclude from analysis
+    # Coordinate plotting specific settings
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_10_F1_coordinates_F1_New_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_F1_coordinates_F1_New_Data/F1_coordinates/pooled_F1_coordinates.feather"
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_summary_F1_New_Data/summary/pooled_summary.feather"
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+
+  tnt_mb247:
+    description: "TNT MB247 flies tested across pretraining and genotype"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+    grouping_variables:
+      primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
+      secondary: "genotype"   # Column name will be auto-detected with "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxMB247": "MB"
+      "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
+    # Coordinate plotting specific settings for MB247
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_17_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_summary_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+
+  tnt_lc10_2:
+    description: "TNT LC10-2 flies tested across pretraining and genotype"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+    grouping_variables:
+      primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
+      secondary: "genotype"   # Column name will be auto-detected with "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxLC10-2": "Vision"
+      "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
+    # Coordinate plotting specific settings for LC10-2
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_summary_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+
+# Common analysis parameters
+analysis_parameters:
+  # Ball condition filtering
+  ball_condition:
+    filter_for_test_ball: true
+    test_ball_values: ["test", "Test", "TEST", "1", 1, "test_ball", "testball"]
+    ball_condition_columns: ["ball_condition", "ball_identity"]  # Priority order
+
+  # Binary metrics to analyze
+  binary_metrics: ["has_finished", "has_long_pauses", "has_major", "has_significant"]
+
+  # Continuous metrics for boxplots
+  continuous_metrics:
+    interaction_rate: "overall_interaction_rate"
+    distance_metrics: ["distance_moved", "max_distance", "distance_ratio"]
+    pulling_metrics: ["pulled", "pulling_ratio", "significant_ratio"]
+
+  # Statistical tests
+  statistical_tests:
+    binary_metrics:
+      two_groups: "fisher_exact"
+      fallback: "chi_square"
+    continuous_metrics:
+      two_groups: "mann_whitney"
+      multiple_groups: "kruskal_wallis"
+
+# Plot styling configuration
+plot_styling:
+  control:
+    figure_size: [20, 16]
+    pretraining_colors:
+      "n": "steelblue"
+      "y": "orange"
+    f1_condition_colors:
+      "control": "steelblue"
+      "pretrained": "orange"
+      "pretrained_unlocked": "lightgreen"
+    pretraining_order: ["n", "y"]
+    f1_condition_order: ["control", "pretrained_unlocked", "pretrained"]
+
+  tnt_mb247:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "MB": "#1f77b4"  # Blue
+      "Control": "#7f7f7f"  # Gray
+      "Vision": "#ff7f0e"  # Orange
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"  # White fill with colored outline
+      "y": "colored_fill"  # Colored fill
+
+  tnt_lc10_2:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "Vision": "#ff7f0e"  # Orange
+      "Control": "#7f7f7f"  # Gray
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"
+      "y": "colored_fill"
+
+# Output configuration
+output:
+  save_plots: true
+  plot_format: "png"
+  dpi: 300
+  bbox_inches: "tight"
+  show_plots: true
+
+  # Summary statistics
+  print_detailed_stats: true
+  save_summary_tables: false  # Option to save CSV summaries
+
+# Column name detection patterns
+column_detection:
+  pretraining:
+    patterns: ["pretrain", "training"]
+    case_insensitive: true
+
+  f1_condition:
+    patterns: ["f1_condition", "f1condition", "f1 condition", "F1_condition", "F1condition"]
+    case_insensitive: true
+
+  genotype:
+    patterns: ["genotype", "strain"]
+    case_insensitive: true
+
+  ball_condition:
+    patterns: ["ball_condition", "ball_identity", "ball"]
+    priority: ["ball_condition", "ball_identity"]  # Check in this order
+    case_insensitive: true
+
+# Brain region integration
+brain_region_config:
+  use_config_file: true
+  config_path: "/home/matthias/ballpushing_utils/src/PCA/Config.py"
+  fallback_colors:
+    "MB": "#1f77b4"
+    "Control": "#7f7f7f"
+    "Vision": "#ff7f0e"
+    "Unknown": "#808080"
+
+# Advanced options
+advanced:
+  # Data filtering
+  remove_infinite_values: true
+  minimum_sample_size: 2  # Minimum n per group for statistical testing
+
+  # Plot customization
+  add_sample_sizes: true
+  add_statistical_annotations: true
+  rotate_x_labels: true  # For long labels
+
+  # Confidence intervals for continuous metrics
+  confidence_level: 0.95
+
+  # Jitter settings for scatter plots
+  jitter_alpha: 0.7
+  jitter_size: 6
+
+# Templates for different plot types
+plot_templates:
+  binary_metrics:
+    layout: "bar_plots_with_heatmap"
+    statistical_annotation: true
+    show_proportions: true
+    show_counts: true
+
+  boxplots:
+    overlay_scatter: true
+    box_style: "no_fill_black_outline"
+    scatter_color: "black"
+    add_median_line: true
+
+  coordinate_plots:
+    time_normalization: ["percentage", "trimmed"]
+    confidence_intervals: true
+    bin_size: 0.1  # For percentage-based plots
+
+  correlation_plots:
+    scatter_with_regression: true
+    color_by_groups: true
+    add_correlation_stats: true
+
+# Validation settings
+validation:
+  check_required_columns: true
+  warn_missing_metrics: true
+  validate_grouping_variables: true
+  check_data_distribution: true

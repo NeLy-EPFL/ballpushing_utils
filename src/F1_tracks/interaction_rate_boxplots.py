@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Script to create boxplots with superimposed scatter plots for test ball distance moved.
-1. Distance moved for test ball by Pretraining condition
-2. Distance moved for test ball by F1_Condition
+Script to create boxplots with superimposed scatter plots for interaction rate metrics.
+1. overall_interaction_rate by Pretraining condition
+2. overall_interaction_rate by F1_condition
 """
 
 import pandas as pd
@@ -50,7 +50,7 @@ def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_mapping=Non
     # Set title and labels
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12)
-    ax.set_ylabel("Distance Moved - Test Ball", fontsize=12)
+    ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
 
     # Add sample size annotations
     x_labels = ax.get_xticklabels()
@@ -117,25 +117,19 @@ def main():
         print(f"  {i+1:2d}. {col}")
 
     # Try to identify the correct column names
-    distance_col = None
+    interaction_rate_col = None
     pretraining_col = None
     f1_condition_col = None
     ball_condition_col = None
 
-    # Look for distance column - prioritize ball-specific distance over fly distance
-    for col in df.columns:
-        if col.lower() == "distance_moved":  # Exact match for ball-specific distance
-            distance_col = col
-            break
-        elif "distance" in col.lower() and "move" in col.lower() and "fly" not in col.lower():
-            distance_col = col
-            break
-
-    # If still no distance column found, try any distance column as fallback
-    if distance_col is None:
+    # Look for interaction rate columns
+    if "overall_interaction_rate" in df.columns:
+        interaction_rate_col = "overall_interaction_rate"
+    else:
+        # Look for similar columns
         for col in df.columns:
-            if "distance" in col.lower() and ("move" in col.lower() or "total" in col.lower()):
-                distance_col = col
+            if "interaction" in col.lower() and "rate" in col.lower() and "overall" in col.lower():
+                interaction_rate_col = col
                 break
 
     # Look for pretraining column
@@ -146,7 +140,7 @@ def main():
 
     # Look for F1_condition column
     for col in df.columns:
-        if "f1" in col.lower() and "condition" in col.lower():
+        if "f1_condition" in col.lower() or "f1condition" in col.lower():
             f1_condition_col = col
             break
 
@@ -162,36 +156,15 @@ def main():
                 break
 
     # If exact matches not found, use manual mapping
-    if distance_col is None:
-        distance_cols = [col for col in df.columns if "distance" in col.lower()]
-        if distance_cols:
-            distance_col = distance_cols[0]
-            print(f"Using '{distance_col}' as distance column")
-
     if pretraining_col is None:
         train_cols = [col for col in df.columns if "train" in col.lower()]
         if train_cols:
             pretraining_col = train_cols[0]
             print(f"Using '{pretraining_col}' as pretraining column")
 
-    if f1_condition_col is None:
-        f1_cols = [col for col in df.columns if "f1" in col.lower()]
-        if f1_cols:
-            f1_condition_col = f1_cols[0]
-            print(f"Using '{f1_condition_col}' as F1 condition column")
-
-    if ball_condition_col is None:
-        if "ball_condition" in df.columns:
-            ball_condition_col = "ball_condition"
-        else:
-            ball_cols = [col for col in df.columns if "ball" in col.lower()]
-            if ball_cols:
-                ball_condition_col = ball_cols[0]
-                print(f"Using '{ball_condition_col}' as ball condition column")
-
     # Check if we found all required columns
     required_columns = {
-        "distance": distance_col,
+        "interaction_rate": interaction_rate_col,
         "pretraining": pretraining_col,
         "f1_condition": f1_condition_col,
         "ball_condition": ball_condition_col,
@@ -204,20 +177,25 @@ def main():
         return
 
     print(f"Using columns:")
-    print(f"  Distance: {distance_col}")
+    print(f"  Interaction rate: {interaction_rate_col}")
     print(f"  Pretraining: {pretraining_col}")
     print(f"  F1 condition: {f1_condition_col}")
     print(f"  Ball condition: {ball_condition_col}")
 
     # Clean the data and filter for test ball only
-    df_clean = df[[distance_col, pretraining_col, f1_condition_col, ball_condition_col]].dropna()
+    df_clean = df[[interaction_rate_col, pretraining_col, f1_condition_col, ball_condition_col]]
+
+    # Only drop rows where grouping variables are missing
+    df_clean = df_clean.dropna(subset=[pretraining_col, f1_condition_col, ball_condition_col])
+
+    print(f"Data shape after removing missing grouping variables: {df_clean.shape}")
 
     # Check available ball condition values
     print(f"Available {ball_condition_col} values: {df_clean[ball_condition_col].unique()}")
 
-    # Debug: Show some sample data to verify the distance values
-    sample_data = df_clean[[distance_col, ball_condition_col]].head(10)
-    print(f"\nSample data to verify distance values:")
+    # Debug: Show some sample data to verify the values
+    sample_data = df_clean[[interaction_rate_col, ball_condition_col, pretraining_col, f1_condition_col]].head(10)
+    print(f"\nSample data to verify values:")
     print(sample_data)
 
     # Try different possible values for test ball
@@ -239,11 +217,66 @@ def main():
 
     print(f"Data shape for analysis: {test_ball_data.shape}")
 
-    # Print unique values
+    # Print unique values and missing data info
     print(f"Unique {pretraining_col} values: {test_ball_data[pretraining_col].unique()}")
     print(f"Unique {f1_condition_col} values: {test_ball_data[f1_condition_col].unique()}")
 
-    # Create subplots
+    # Check for missing values in the interaction rate metric
+    print(f"\nMissing values analysis:")
+    print(
+        f"  {interaction_rate_col}: {test_ball_data[interaction_rate_col].isna().sum()} missing out of {len(test_ball_data)}"
+    )
+
+    # Show actual values for debugging
+    print(f"\nSample of actual values:")
+    print(f"{interaction_rate_col} (first 10 non-null values):")
+    rate_sample = test_ball_data[interaction_rate_col].dropna().head(10)
+    print(rate_sample.tolist() if not rate_sample.empty else "No non-null values found")
+
+    # Check unique values to see if there are unexpected values
+    print(f"\nUnique values in {interaction_rate_col} (first 20):")
+    unique_rate_vals = test_ball_data[interaction_rate_col].unique()
+    print(f"Found {len(unique_rate_vals)} unique values: {unique_rate_vals[:20]}...")
+
+    # Show distribution by grouping variables
+    print(f"\nData distribution by {pretraining_col}:")
+    pretraining_dist = test_ball_data[pretraining_col].value_counts()
+    print(pretraining_dist)
+
+    print(f"\nData distribution by {f1_condition_col}:")
+    f1_condition_dist = test_ball_data[f1_condition_col].value_counts()
+    print(f1_condition_dist)
+
+    # Check if we have valid data for the metric by grouping conditions
+    print(f"\nValid (non-missing) data by pretraining condition:")
+    valid_data = test_ball_data[test_ball_data[interaction_rate_col].notna()]
+    if not valid_data.empty:
+        valid_dist = valid_data[pretraining_col].value_counts()
+        print(valid_dist)
+    else:
+        print("  No valid data found!")
+
+    print(f"\nValid (non-missing) data by F1 condition:")
+    if not valid_data.empty:
+        valid_dist = valid_data[f1_condition_col].value_counts()
+        print(valid_dist)
+    else:
+        print("  No valid data found!")
+
+    # Prepare data for plotting - remove invalid values
+    plot_data = test_ball_data.copy()
+
+    # Remove only truly invalid values (inf, -inf, but keep finite numbers including 0)
+    mask = pd.isna(plot_data[interaction_rate_col]) | np.isinf(plot_data[interaction_rate_col])
+    plot_data_filtered = plot_data[~mask]
+
+    print(f"\nAfter removing NaN/inf: {len(plot_data_filtered)} out of {len(test_ball_data)} remain")
+
+    if len(plot_data_filtered) < 2:
+        print(f"Insufficient valid data for plotting (only {len(plot_data_filtered)} valid points)")
+        return
+
+    # Create subplots - 1x2 grid for pretraining and F1_condition
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
     # Define color mappings
@@ -256,8 +289,8 @@ def main():
     f1_condition_order = ["control", "pretrained_unlocked", "pretrained"]  # control, pretrained_unlocked, pretrained
 
     # Get actual unique values and filter orders to only include existing values
-    actual_pretraining_values = test_ball_data[pretraining_col].unique()
-    actual_f1_values = test_ball_data[f1_condition_col].unique()
+    actual_pretraining_values = plot_data_filtered[pretraining_col].unique()
+    actual_f1_values = plot_data_filtered[f1_condition_col].unique()
 
     # Filter orders to only include values that exist in the data
     filtered_pretraining_order = [val for val in pretraining_order if val in actual_pretraining_values]
@@ -268,23 +301,36 @@ def main():
     print(f"Using pretraining order: {filtered_pretraining_order}")
     print(f"Using F1 condition order: {filtered_f1_order}")
 
-    # Plot 1: Distance moved by Pretraining condition
+    print(f"Creating plots with {len(plot_data_filtered)} data points")
+
+    # Show final distribution by grouping variables
+    print(f"Final distribution by {pretraining_col}:")
+    for pretraining_val in plot_data_filtered[pretraining_col].unique():
+        count = len(plot_data_filtered[plot_data_filtered[pretraining_col] == pretraining_val])
+        print(f"  {pretraining_val}: {count} data points")
+
+    print(f"Final distribution by {f1_condition_col}:")
+    for f1_condition_val in plot_data_filtered[f1_condition_col].unique():
+        count = len(plot_data_filtered[plot_data_filtered[f1_condition_col] == f1_condition_val])
+        print(f"  {f1_condition_val}: {count} data points")
+
+    # Plot 1: interaction_rate by Pretraining condition
     create_boxplot_with_scatter(
-        data=test_ball_data,
+        data=plot_data_filtered,
         x_col=pretraining_col,
-        y_col=distance_col,
-        title="Test Ball Distance Moved by Pretraining Condition",
+        y_col=interaction_rate_col,
+        title="Overall Interaction Rate by Pretraining Condition",
         ax=ax1,
         color_mapping=pretraining_colors,
         order=filtered_pretraining_order,
     )
 
-    # Plot 2: Distance moved by F1_Condition
+    # Plot 2: interaction_rate by F1_condition
     create_boxplot_with_scatter(
-        data=test_ball_data,
+        data=plot_data_filtered,
         x_col=f1_condition_col,
-        y_col=distance_col,
-        title="Test Ball Distance Moved by F1 Condition",
+        y_col=interaction_rate_col,
+        title="Overall Interaction Rate by F1 Condition",
         ax=ax2,
         color_mapping=f1_condition_colors,
         order=filtered_f1_order,
@@ -294,7 +340,7 @@ def main():
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path(__file__).parent / "test_ball_distance_boxplots.png"
+    output_path = Path(__file__).parent / "interaction_rate_boxplots.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
@@ -303,34 +349,51 @@ def main():
     print("SUMMARY STATISTICS")
     print("=" * 60)
 
-    if pretraining_col and distance_col:
-        print(f"\n1. Test Ball Distance by {pretraining_col}:")
-        # Use the same ordering as in the plots
-        pretraining_summary = (
-            test_ball_data.groupby(pretraining_col)[distance_col]
-            .agg(["count", "mean", "std", "median", "min", "max"])
-            .round(3)
-        )
-        # Reorder the summary to match plot order
-        if set(filtered_pretraining_order).issubset(pretraining_summary.index):
-            pretraining_summary = pretraining_summary.reindex(filtered_pretraining_order)
-        print(pretraining_summary)
+    if pretraining_col and interaction_rate_col:
+        print(f"\n1. Interaction Rate by {pretraining_col}:")
+        rate_data = plot_data_filtered.dropna(subset=[interaction_rate_col])
+        if not rate_data.empty:
+            rate_summary = (
+                rate_data.groupby(pretraining_col)[interaction_rate_col]
+                .agg(["count", "mean", "std", "median", "min", "max"])
+                .round(4)
+            )
+            # Reorder the summary to match plot order
+            if set(filtered_pretraining_order).issubset(rate_summary.index):
+                rate_summary = rate_summary.reindex(filtered_pretraining_order)
+            print(rate_summary)
+        else:
+            print("No valid data for interaction_rate")
 
-    if f1_condition_col and distance_col:
-        print(f"\n2. Test Ball Distance by {f1_condition_col}:")
-        f1_summary = (
-            test_ball_data.groupby(f1_condition_col)[distance_col]
-            .agg(["count", "mean", "std", "median", "min", "max"])
-            .round(3)
+    if f1_condition_col and interaction_rate_col:
+        print(f"\n2. Interaction Rate by {f1_condition_col}:")
+        rate_data = plot_data_filtered.dropna(subset=[interaction_rate_col])
+        if not rate_data.empty:
+            rate_summary = (
+                rate_data.groupby(f1_condition_col)[interaction_rate_col]
+                .agg(["count", "mean", "std", "median", "min", "max"])
+                .round(4)
+            )
+            # Reorder the summary to match plot order
+            if set(filtered_f1_order).issubset(rate_summary.index):
+                rate_summary = rate_summary.reindex(filtered_f1_order)
+            print(rate_summary)
+        else:
+            print("No valid data for interaction_rate")
+
+    # Additional analysis: Two-way comparison
+    print(f"\n3. Two-way breakdown by {pretraining_col} and {f1_condition_col}:")
+    if not plot_data_filtered.empty:
+        two_way_summary = (
+            plot_data_filtered.groupby([pretraining_col, f1_condition_col])[interaction_rate_col]
+            .agg(["count", "mean", "std", "median"])
+            .round(4)
         )
-        # Reorder the summary to match plot order
-        if set(filtered_f1_order).issubset(f1_summary.index):
-            f1_summary = f1_summary.reindex(filtered_f1_order)
-        print(f1_summary)
+        print(two_way_summary)
 
     plt.show()
 
-    return test_ball_data
+    return plot_data_filtered
 
 
 if __name__ == "__main__":

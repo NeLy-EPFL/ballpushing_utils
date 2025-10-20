@@ -53,7 +53,7 @@ def calculate_proportions_and_stats(data, group_col, binary_col):
     return prop_data, p_value, test_name
 
 
-def create_binary_barplot(data, group_col, binary_metrics, title_prefix, ax_row, fig):
+def create_binary_barplot(data, group_col, binary_metrics, title_prefix, ax_row, fig, color_mapping=None):
     """Create bar plots for binary metrics."""
 
     n_metrics = len(binary_metrics)
@@ -67,10 +67,16 @@ def create_binary_barplot(data, group_col, binary_metrics, title_prefix, ax_row,
         # Create bar plot
         bars = ax.bar(prop_data[group_col], prop_data["proportion"], alpha=0.7, edgecolor="black", linewidth=1)
 
-        # Color bars based on group
-        colors = sns.color_palette("Set2", n_colors=len(prop_data))
-        for bar, color in zip(bars, colors):
-            bar.set_facecolor(color)
+        # Color bars based on group using consistent color mapping
+        if color_mapping:
+            for j, (bar, group_val) in enumerate(zip(bars, prop_data[group_col])):
+                color = color_mapping.get(group_val, "gray")
+                bar.set_facecolor(color)
+        else:
+            # Fallback to seaborn palette
+            colors = sns.color_palette("Set2", n_colors=len(prop_data))
+            for bar, color in zip(bars, colors):
+                bar.set_facecolor(color)
 
         # Add sample size and proportion labels on bars
         for j, (idx, row) in enumerate(prop_data.iterrows()):
@@ -134,7 +140,7 @@ def main():
 
     # Dataset path
     dataset_path = (
-        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251001_13_summary_F1_New_Data/summary/pooled_summary.feather"
+        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
     )
 
     # Load dataset
@@ -259,6 +265,10 @@ def main():
         if not set(unique_vals).issubset({0, 1, True, False}):
             print(f"Warning: {metric} may not be binary!")
 
+    # Define color mappings for consistent styling
+    pretraining_colors = {"n": "steelblue", "y": "orange"}
+    f1_condition_colors = {"control": "steelblue", "pretrained": "orange", "pretrained_unlocked": "lightgreen"}
+
     # Create comprehensive figure
     n_metrics = len(available_metrics)
     fig = plt.figure(figsize=(20, 16))
@@ -269,19 +279,29 @@ def main():
     # Row 1: Bar plots by Pretraining
     ax_pretraining = [fig.add_subplot(gs[0, i]) for i in range(n_metrics)]
     create_binary_barplot(
-        df_clean, pretraining_col, available_metrics, "Binary Metrics by Pretraining", ax_pretraining, fig
+        df_clean,
+        pretraining_col,
+        available_metrics,
+        "Binary Metrics by Pretraining",
+        ax_pretraining,
+        fig,
+        pretraining_colors,
     )
 
     # Row 2: Bar plots by F1_Condition
     ax_f1 = [fig.add_subplot(gs[1, i]) for i in range(n_metrics)]
-    create_binary_barplot(df_clean, f1_condition_col, available_metrics, "Binary Metrics by F1 Condition", ax_f1, fig)
+    create_binary_barplot(
+        df_clean, f1_condition_col, available_metrics, "Binary Metrics by F1 Condition", ax_f1, fig, f1_condition_colors
+    )
 
     # Row 3: Heatmaps
     ax_heatmap1 = fig.add_subplot(gs[2, 0])
     create_heatmap(df_clean, pretraining_col, available_metrics, "Test Ball Binary Metrics - Pretraining", ax_heatmap1)
 
     ax_heatmap2 = fig.add_subplot(gs[2, 1])
-    create_heatmap(df_clean, f1_condition_col, available_metrics, "Test Ball Binary Metrics - F1 Condition", ax_heatmap2)
+    create_heatmap(
+        df_clean, f1_condition_col, available_metrics, "Test Ball Binary Metrics - F1 Condition", ax_heatmap2
+    )
 
     # Overall title
     fig.suptitle("F1 Dataset: Binary Metrics Analysis (Test Ball Only)", fontsize=16, fontweight="bold", y=0.98)

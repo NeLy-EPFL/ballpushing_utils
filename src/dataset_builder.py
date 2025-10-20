@@ -86,6 +86,8 @@ CONFIG = {
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
+            # "F1_checkpoints",
+            "F1_coordinates",
             # "standardized_contacts",
             "summary",  # Re-enabled for testing the optimization
             # "coordinates",

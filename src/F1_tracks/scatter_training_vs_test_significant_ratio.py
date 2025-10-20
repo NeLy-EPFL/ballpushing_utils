@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Script to create a scatter plot of training vs test ball max_distance for Pretraining == "y" flies.
-X-axis: max_distance for ball_condition "training"
-Y-axis: max_distance for ball_condition "test"
+Script to create a scatter plot of training vs test ball significant_ratio for Pretraining == "y" flies.
+X-axis: significant_ratio for ball_condition "training"
+Y-axis: significant_ratio for ball_condition "test"
 """
 
 import pandas as pd
@@ -29,6 +29,7 @@ def main():
         print(f"Error loading dataset: {e}")
         return
 
+    # Remove the data for Date 250904
     if "Date" in df.columns:
         initial_shape = df.shape
         df = df[df["Date"] != "250904"]
@@ -42,19 +43,18 @@ def main():
         print(f"  {i+1:2d}. {col}")
 
     # Try to identify the correct column names
-    distance_col = None
+    significant_ratio_col = None
     pretraining_col = None
     ball_condition_col = None
     f1_condition_col = None
 
-    # Look for max_distance column specifically
-    if "max_distance" in df.columns:
-        distance_col = "max_distance"
+    # Look for significant_ratio column
+    if "significant_ratio" in df.columns:
+        significant_ratio_col = "significant_ratio"
     else:
-        # Look for any max distance column as fallback
         for col in df.columns:
-            if "max" in col.lower() and "distance" in col.lower():
-                distance_col = col
+            if "significant" in col.lower() and "ratio" in col.lower():
+                significant_ratio_col = col
                 break
 
     # Look for pretraining column
@@ -84,11 +84,11 @@ def main():
                 break
 
     # If exact matches not found, use manual mapping based on your dataset structure
-    if distance_col is None:
-        distance_cols = [col for col in df.columns if "distance" in col.lower()]
-        if distance_cols:
-            distance_col = distance_cols[0]
-            print(f"Using '{distance_col}' as distance column")
+    if significant_ratio_col is None:
+        ratio_cols = [col for col in df.columns if "ratio" in col.lower()]
+        if ratio_cols:
+            significant_ratio_col = ratio_cols[0]
+            print(f"Using '{significant_ratio_col}' as significant ratio column")
 
     if pretraining_col is None:
         train_cols = [col for col in df.columns if "train" in col.lower()]
@@ -98,7 +98,7 @@ def main():
 
     # Check if we found all required columns
     required_columns = {
-        "distance": distance_col,
+        "significant_ratio": significant_ratio_col,
         "pretraining": pretraining_col,
         "ball_condition": ball_condition_col,
         "f1_condition": f1_condition_col,
@@ -111,7 +111,7 @@ def main():
         return
 
     print(f"Using columns:")
-    print(f"  Distance: {distance_col}")
+    print(f"  Significant ratio: {significant_ratio_col}")
     print(f"  Pretraining: {pretraining_col}")
     print(f"  Ball condition: {ball_condition_col}")
     print(f"  F1 condition: {f1_condition_col}")
@@ -130,12 +130,12 @@ def main():
             fly_id_col = "fly"
 
     # Clean the data
-    df_clean = df[[distance_col, pretraining_col, ball_condition_col, f1_condition_col, fly_id_col]].dropna()
+    df_clean = df[[significant_ratio_col, pretraining_col, ball_condition_col, f1_condition_col, fly_id_col]].dropna()
     print(f"Data shape after removing NaNs: {df_clean.shape}")
 
-    # Debug: Show some sample data to verify the distance values are different
-    sample_data = df_clean[[distance_col, ball_condition_col, f1_condition_col, fly_id_col]].head(10)
-    print(f"\nSample data to verify distance values:")
+    # Debug: Show some sample data to verify the ratio values are different
+    sample_data = df_clean[[significant_ratio_col, ball_condition_col, f1_condition_col, fly_id_col]].head(10)
+    print(f"\nSample data to verify significant ratio values:")
     print(sample_data)
 
     # Print unique values
@@ -184,11 +184,11 @@ def main():
         condition_data = pretrained_flies[pretrained_flies[f1_condition_col] == condition]
         print(f"\n{condition} - Number of flies: {len(condition_data[fly_id_col].unique())}")
 
-        # Pivot the data to get training and test distances for each fly
+        # Pivot the data to get training and test ratios for each fly
         pivot_data = condition_data.pivot_table(
             index=fly_id_col,
             columns=ball_condition_col,
-            values=distance_col,
+            values=significant_ratio_col,
             aggfunc="first",  # In case there are duplicates, take the first value
         )
 
@@ -221,14 +221,11 @@ def main():
         # Calculate correlation and trend line
         correlation_coef = float("nan")
         p_value = float("nan")
-        mean_ratio = float("nan")
         normalized_correlation_coef = float("nan")
         normalized_p_value = float("nan")
 
         if len(x) > 1 and x.std() > 0 and y.std() > 0:
-            # Original correlation
             correlation_coef, p_value = stats.pearsonr(x, y)
-            mean_ratio = y.mean() / x.mean() if x.mean() != 0 else 1
 
             # Normalized correlation: scale both training and test to [0,1] based on their ranges
             x_normalized = (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x * 0
@@ -263,7 +260,7 @@ def main():
                 label=f"Expected scaling (test/training = {mean_ratio:.2f})",
             )
 
-            # Add y=x line for reference
+            # Add y=x line for reference (since both are ratios, this makes sense)
             min_val = min(x.min(), y.min())
             max_val = max(x.max(), y.max())
             ax.plot(
@@ -279,23 +276,16 @@ def main():
             # Add correlation text box
             slope, intercept = z
             r_squared = correlation_coef * correlation_coef  # type: ignore
-            normalized_r_squared = normalized_correlation_coef * normalized_correlation_coef  # type: ignore
             textstr = (
-                f"Raw correlation:\n"
-                f"  Pearson r = {correlation_coef:.3f}\n"
-                f"  p-value = {p_value:.3f}\n"
-                f"Normalized correlation:\n"
-                f"  Pearson r = {normalized_correlation_coef:.3f}\n"
-                f"  p-value = {normalized_p_value:.3f}\n"
+                f"Raw: r = {correlation_coef:.3f} (p = {p_value:.3f})\n"
+                f"Norm: r = {normalized_correlation_coef:.3f} (p = {normalized_p_value:.3f})\n"
+                f"R² = {r_squared:.3f}\n"
+                f"Slope = {slope:.3f}\n"
                 f"n = {len(complete_data)} flies"
             )
             props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
-            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8, verticalalignment="top", bbox=props)
+            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=9, verticalalignment="top", bbox=props)
         else:
-            correlation_coef = float("nan")
-            p_value = float("nan")
-            normalized_correlation_coef = float("nan")
-            normalized_p_value = float("nan")
             ax.text(
                 0.05,
                 0.95,
@@ -307,37 +297,35 @@ def main():
             )
 
         # Formatting
-        ax.set_xlabel(f"Max Distance - Training Ball", fontsize=11)
-        ax.set_ylabel(f"Max Distance - Test Ball", fontsize=11)
+        ax.set_xlabel(f"Significant Ratio - Training Ball", fontsize=11)
+        ax.set_ylabel(f"Significant Ratio - Test Ball", fontsize=11)
         ax.set_title(f"{condition.replace('_', ' ').title()}", fontsize=12, fontweight="bold")
 
-        # Set axis limits with padding
+        # Set axis limits with padding - special handling for ratio data (0-1 range)
         if len(x) > 0:
-            x_range = x.max() - x.min()
-            y_range = y.max() - y.min()
-            x_padding = x_range * 0.05 if x_range > 0 else 0.1
-            y_padding = y_range * 0.05 if y_range > 0 else 0.1
+            # For ratios, we want to show the full meaningful range
+            x_min, x_max = max(0, x.min() - 0.05), min(1, x.max() + 0.05)
+            y_min, y_max = max(0, y.min() - 0.05), min(1, y.max() + 0.05)
 
-            ax.set_xlim(x.min() - x_padding, x.max() + x_padding)
-            ax.set_ylim(y.min() - y_padding, y.max() + y_padding)
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
 
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
         # Print summary statistics for this condition
         print(f"\n{condition} Summary Statistics:")
-        print(f"Training ball - Mean: {x.mean():.3f}, Std: {x.std():.3f}, Range: {x.min():.1f}-{x.max():.1f}")
-        print(f"Test ball - Mean: {y.mean():.3f}, Std: {y.std():.3f}, Range: {y.min():.1f}-{y.max():.1f}")
+        print(f"Training ball - Mean: {x.mean():.3f}, Std: {x.std():.3f}")
+        print(f"Test ball - Mean: {y.mean():.3f}, Std: {y.std():.3f}")
         if not np.isnan(correlation_coef):
             print(f"Raw correlation: {correlation_coef:.3f} (p = {p_value:.3f})")
         if not np.isnan(normalized_correlation_coef):
             print(f"Normalized correlation: {normalized_correlation_coef:.3f} (p = {normalized_p_value:.3f})")
-        if not np.isnan(mean_ratio):
             print(f"Mean ratio (test/training): {mean_ratio:.3f}")
 
     # Main title
     fig.suptitle(
-        "Training vs Test Ball Max Distance by F1_condition\n(Pretrained Flies Only - Raw and Normalized Correlations)",
+        "Training vs Test Ball Significant Ratio by F1_condition\n(Pretrained Flies Only)",
         fontsize=14,
         fontweight="bold",
     )
@@ -345,7 +333,7 @@ def main():
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path(__file__).parent / "training_vs_test_max_distance_scatter_by_f1_condition.png"
+    output_path = Path(__file__).parent / "training_vs_test_significant_ratio_by_f1condition.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"\nPlot saved to: {output_path}")
 

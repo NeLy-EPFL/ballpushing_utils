@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Script to create boxplots with superimposed scatter plots for test ball distance_ratio.
-1. Distance ratio for test ball by Pretraining condition
-2. Distance ratio for test ball by F1_Condition
+Script to create boxplots with superimposed scatter plots for significant_ratio metric.
+Analyzes significant_ratio by Pretraining condition.
 """
 
 import pandas as pd
@@ -13,44 +12,23 @@ from pathlib import Path
 from scipy import stats
 
 
-def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_mapping=None, order=None):
+def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_palette=None):
     """Create a boxplot with superimposed scatter plot."""
 
-    # Create boxplot with no fill and black outline
-    box_plot = sns.boxplot(data=data, x=x_col, y=y_col, ax=ax, order=order)
+    # Create boxplot
+    box_plot = sns.boxplot(data=data, x=x_col, y=y_col, ax=ax, hue=x_col, palette=color_palette, legend=False)
 
-    # Style boxplot: no fill, black outline
+    # Make boxplot transparent
     for patch in box_plot.patches:
-        patch.set_facecolor("none")  # No fill
-        patch.set_edgecolor("black")  # Black outline
-        patch.set_linewidth(1.5)
+        patch.set_alpha(0.7)
 
-    # Style the whiskers, caps, and medians to black
-    for line in ax.lines:
-        line.set_color("black")
-        line.set_linewidth(1.5)
-
-    # Superimpose scatter plot with specified colors
-    if color_mapping and order:
-        for i, condition in enumerate(order):
-            condition_data = data[data[x_col] == condition]
-            color = color_mapping.get(condition, "black")
-
-            # Add jitter manually for better control
-            y_values = condition_data[y_col].values
-            x_positions = np.random.normal(i, 0.1, size=len(y_values))
-
-            ax.scatter(x_positions, y_values, c=color, s=30, alpha=0.7, edgecolors="black", linewidth=0.5)
-    else:
-        # Fallback to default stripplot
-        sns.stripplot(
-            data=data, x=x_col, y=y_col, ax=ax, size=6, alpha=0.7, jitter=True, dodge=False, color="black", order=order
-        )
+    # Superimpose scatter plot with jitter
+    sns.stripplot(data=data, x=x_col, y=y_col, ax=ax, size=4, alpha=0.6, jitter=True, dodge=False, color="black")
 
     # Set title and labels
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12)
-    ax.set_ylabel("Distance Ratio (Test/Control)", fontsize=12)
+    ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
 
     # Add sample size annotations
     x_labels = ax.get_xticklabels()
@@ -89,7 +67,7 @@ def create_boxplot_with_scatter(data, x_col, y_col, title, ax, color_mapping=Non
 
 
 def main():
-    """Main function to create the boxplots with scatter plots."""
+    """Main function to create the boxplot with scatter plot."""
 
     # Dataset path
     dataset_path = (
@@ -104,37 +82,36 @@ def main():
         print(f"Error loading dataset: {e}")
         return
 
+    if "Date" in df.columns:
+        initial_shape = df.shape
+        df = df[df["Date"] != "250904"]
+        print(f"Removed data for Date 250904. Shape changed from {initial_shape} to {df.shape}.")
+    else:
+        print("Column 'Date' not found in dataset. Skipping date-based filtering.")
+
     # Print available columns to help identify the correct ones
     print("Available columns:")
     for i, col in enumerate(df.columns):
         print(f"  {i+1:2d}. {col}")
 
     # Try to identify the correct column names
-    distance_ratio_col = None
+    significant_ratio_col = None
     pretraining_col = None
-    f1_condition_col = None
     ball_condition_col = None
 
-    # Look for distance_ratio column specifically
-    if "distance_ratio" in df.columns:
-        distance_ratio_col = "distance_ratio"
+    # Look for significant_ratio column
+    if "significant_ratio" in df.columns:
+        significant_ratio_col = "significant_ratio"
     else:
-        # Look for any distance ratio column as fallback
         for col in df.columns:
-            if "distance" in col.lower() and "ratio" in col.lower():
-                distance_ratio_col = col
+            if "significant" in col.lower() and "ratio" in col.lower():
+                significant_ratio_col = col
                 break
 
     # Look for pretraining column
     for col in df.columns:
         if "pretrain" in col.lower():
             pretraining_col = col
-            break
-
-    # Look for F1_condition column
-    for col in df.columns:
-        if "f1" in col.lower() and "condition" in col.lower():
-            f1_condition_col = col
             break
 
     # Look for ball condition column - prioritize ball_condition over ball_identity
@@ -149,29 +126,16 @@ def main():
                 break
 
     # If exact matches not found, use manual mapping
-    if distance_ratio_col is None:
-        ratio_cols = [col for col in df.columns if "ratio" in col.lower()]
-        if ratio_cols:
-            distance_ratio_col = ratio_cols[0]
-            print(f"Using '{distance_ratio_col}' as distance ratio column")
-
     if pretraining_col is None:
         train_cols = [col for col in df.columns if "train" in col.lower()]
         if train_cols:
             pretraining_col = train_cols[0]
             print(f"Using '{pretraining_col}' as pretraining column")
 
-    if f1_condition_col is None:
-        f1_cols = [col for col in df.columns if "f1" in col.lower()]
-        if f1_cols:
-            f1_condition_col = f1_cols[0]
-            print(f"Using '{f1_condition_col}' as F1 condition column")
-
     # Check if we found all required columns
     required_columns = {
-        "distance_ratio": distance_ratio_col,
+        "significant_ratio": significant_ratio_col,
         "pretraining": pretraining_col,
-        "f1_condition": f1_condition_col,
         "ball_condition": ball_condition_col,
     }
 
@@ -182,20 +146,24 @@ def main():
         return
 
     print(f"Using columns:")
-    print(f"  Distance Ratio: {distance_ratio_col}")
+    print(f"  Significant ratio: {significant_ratio_col}")
     print(f"  Pretraining: {pretraining_col}")
-    print(f"  F1 condition: {f1_condition_col}")
     print(f"  Ball condition: {ball_condition_col}")
 
     # Clean the data and filter for test ball only
-    df_clean = df[[distance_ratio_col, pretraining_col, f1_condition_col, ball_condition_col]].dropna()
+    df_clean = df[[significant_ratio_col, pretraining_col, ball_condition_col]]
+
+    # Only drop rows where grouping variables are missing
+    df_clean = df_clean.dropna(subset=[pretraining_col, ball_condition_col])
+
+    print(f"Data shape after removing missing grouping variables: {df_clean.shape}")
 
     # Check available ball condition values
     print(f"Available {ball_condition_col} values: {df_clean[ball_condition_col].unique()}")
 
-    # Debug: Show some sample data to verify the distance ratio values
-    sample_data = df_clean[[distance_ratio_col, ball_condition_col]].head(10)
-    print(f"\nSample data to verify distance ratio values:")
+    # Debug: Show some sample data to verify the values
+    sample_data = df_clean[[significant_ratio_col, ball_condition_col, pretraining_col]].head(10)
+    print(f"\nSample data to verify values:")
     print(sample_data)
 
     # Try different possible values for test ball
@@ -217,47 +185,70 @@ def main():
 
     print(f"Data shape for analysis: {test_ball_data.shape}")
 
-    # Print unique values
+    # Print unique values and missing data info
     print(f"Unique {pretraining_col} values: {test_ball_data[pretraining_col].unique()}")
-    print(f"Unique {f1_condition_col} values: {test_ball_data[f1_condition_col].unique()}")
 
-    # Create subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-
-    # Define color mappings and ordering
-    pretraining_colors = {"n": "steelblue", "y": "orange"}
-    f1_condition_colors = {"control": "steelblue", "pretrained": "orange", "pretrained_unlocked": "lightgreen"}
-
-    pretraining_order = ["n", "y"]
-    f1_condition_order = ["control", "pretrained_unlocked", "pretrained"]
-
-    # Plot 1: Distance ratio by Pretraining condition
-    create_boxplot_with_scatter(
-        data=test_ball_data,
-        x_col=pretraining_col,
-        y_col=distance_ratio_col,
-        title="Test Ball Distance Ratio by Pretraining Condition",
-        ax=ax1,
-        color_mapping=pretraining_colors,
-        order=pretraining_order,
+    # Check for missing values in the metric
+    print(f"\nMissing values analysis:")
+    print(
+        f"  {significant_ratio_col}: {test_ball_data[significant_ratio_col].isna().sum()} missing out of {len(test_ball_data)}"
     )
 
-    # Plot 2: Distance ratio by F1_Condition
-    create_boxplot_with_scatter(
-        data=test_ball_data,
-        x_col=f1_condition_col,
-        y_col=distance_ratio_col,
-        title="Test Ball Distance Ratio by F1 Condition",
-        ax=ax2,
-        color_mapping=f1_condition_colors,
-        order=f1_condition_order,
-    )
+    # Show actual values for debugging
+    print(f"\nSample of actual values:")
+    print(f"{significant_ratio_col} (first 10 non-null values):")
+    ratio_sample = test_ball_data[significant_ratio_col].dropna().head(10)
+    print(ratio_sample.tolist() if not ratio_sample.empty else "No non-null values found")
+
+    # Check unique values to see range
+    print(f"\nValue range for {significant_ratio_col}:")
+    ratio_values = test_ball_data[significant_ratio_col].dropna()
+    if not ratio_values.empty:
+        print(f"Min: {ratio_values.min():.3f}, Max: {ratio_values.max():.3f}")
+        print(f"Mean: {ratio_values.mean():.3f}, Std: {ratio_values.std():.3f}")
+    else:
+        print("No valid values found")
+
+    # Show distribution by pretraining condition
+    print(f"\nData distribution by {pretraining_col}:")
+    pretraining_dist = test_ball_data[pretraining_col].value_counts()
+    print(pretraining_dist)
+
+    # Check if we have valid data by pretraining condition
+    print(f"\nValid (non-missing) data by pretraining condition:")
+    valid_data = test_ball_data[test_ball_data[significant_ratio_col].notna()]
+    if not valid_data.empty:
+        valid_dist = valid_data[pretraining_col].value_counts()
+        print(valid_dist)
+    else:
+        print("  No valid data found!")
+
+    # Create the plot
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+
+    # Set up color palette
+    pretraining_palette = sns.color_palette("Set2", n_colors=len(test_ball_data[pretraining_col].unique()))
+
+    # Plot significant_ratio by Pretraining condition (only for non-missing data)
+    ratio_data = test_ball_data.dropna(subset=[significant_ratio_col])
+    if not ratio_data.empty:
+        create_boxplot_with_scatter(
+            data=ratio_data,
+            x_col=pretraining_col,
+            y_col=significant_ratio_col,
+            title="Significant Ratio by Pretraining Condition",
+            ax=ax,
+            color_palette=pretraining_palette,
+        )
+    else:
+        ax.text(0.5, 0.5, "No valid data for significant_ratio", ha="center", va="center", transform=ax.transAxes)
+        ax.set_title("Significant Ratio by Pretraining Condition")
 
     # Overall formatting
     plt.tight_layout()
 
     # Save the plot
-    output_path = Path(__file__).parent / "test_ball_distance_ratio_boxplots.png"
+    output_path = Path(__file__).parent / "significant_ratio_boxplots.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     print(f"Plot saved to: {output_path}")
 
@@ -266,25 +257,18 @@ def main():
     print("SUMMARY STATISTICS")
     print("=" * 60)
 
-    if pretraining_col and distance_ratio_col:
-        print(f"\n1. Test Ball Distance Ratio by {pretraining_col}:")
-        pretraining_summary = (
-            test_ball_data.groupby(pretraining_col)[distance_ratio_col]
-            .agg(["count", "mean", "std", "median", "min", "max"])
-            .round(3)
-            .reindex(pretraining_order)
-        )
-        print(pretraining_summary)
-
-    if f1_condition_col and distance_ratio_col:
-        print(f"\n2. Test Ball Distance Ratio by {f1_condition_col}:")
-        f1_summary = (
-            test_ball_data.groupby(f1_condition_col)[distance_ratio_col]
-            .agg(["count", "mean", "std", "median", "min", "max"])
-            .round(3)
-            .reindex(f1_condition_order)
-        )
-        print(f1_summary)
+    if pretraining_col and significant_ratio_col:
+        print(f"\nSignificant Ratio by {pretraining_col}:")
+        ratio_data = test_ball_data.dropna(subset=[significant_ratio_col])
+        if not ratio_data.empty:
+            ratio_summary = (
+                ratio_data.groupby(pretraining_col)[significant_ratio_col]
+                .agg(["count", "mean", "std", "median", "min", "max"])
+                .round(3)
+            )
+            print(ratio_summary)
+        else:
+            print("No valid data for significant_ratio")
 
     plt.show()
 
