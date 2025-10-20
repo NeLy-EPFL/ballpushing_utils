@@ -809,24 +809,24 @@ class F1AnalysisFramework:
 
     def analyze_coordinates(self, mode):
         """Analyze coordinate data and create trajectory plots."""
-        mode_config = self.config['analysis_modes'][mode]
-        coordinates_config = mode_config.get('coordinates', {})
-        
+        mode_config = self.config["analysis_modes"][mode]
+        coordinates_config = mode_config.get("coordinates", {})
+
         if not coordinates_config:
             print(f"No coordinates configuration found for mode: {mode}")
             return
-            
+
         # Get dataset paths from config
-        coordinates_path = coordinates_config['coordinates_path']
-        summary_path = coordinates_config.get('summary_path')
-        alt_coord_paths = coordinates_config.get('alternative_coordinates_paths', [])
-        alt_summary_paths = coordinates_config.get('alternative_summary_paths', [])
-        plot_params = coordinates_config.get('coordinates_plot_params', {})
-        
+        coordinates_path = coordinates_config["coordinates_path"]
+        summary_path = coordinates_config.get("summary_path")
+        alt_coord_paths = coordinates_config.get("alternative_coordinates_paths", [])
+        alt_summary_paths = coordinates_config.get("alternative_summary_paths", [])
+        plot_params = coordinates_config.get("coordinates_plot_params", {})
+
         # Load coordinates dataset
         df_coords = None
         used_coords_path = None
-        
+
         for path in [coordinates_path] + alt_coord_paths:
             try:
                 if Path(path).exists():
@@ -838,11 +838,11 @@ class F1AnalysisFramework:
             except Exception as e:
                 print(f"⚠️  Could not load coordinates from {path}: {e}")
                 continue
-                
+
         if df_coords is None:
             print("❌ Could not load coordinates dataset from any path")
             return
-            
+
         # Load summary dataset for filtering (optional)
         df_summary = None
         if summary_path:
@@ -856,39 +856,39 @@ class F1AnalysisFramework:
                 except Exception as e:
                     print(f"⚠️  Could not load summary from {path}: {e}")
                     continue
-                    
+
         # Filter coordinates data based on summary dataset
-        if df_summary is not None and 'fly' in df_coords.columns and 'fly' in df_summary.columns:
-            summary_flies = set(df_summary['fly'].unique())
-            coords_flies = set(df_coords['fly'].unique())
+        if df_summary is not None and "fly" in df_coords.columns and "fly" in df_summary.columns:
+            summary_flies = set(df_summary["fly"].unique())
+            coords_flies = set(df_coords["fly"].unique())
             common_flies = summary_flies.intersection(coords_flies)
-            
+
             print(f"📊 Dataset filtering:")
             print(f"   Flies in coordinates: {len(coords_flies)}")
             print(f"   Flies in summary: {len(summary_flies)}")
             print(f"   Common flies: {len(common_flies)}")
-            
+
             # Filter to common flies
-            df_coords = df_coords[df_coords['fly'].isin(common_flies)]
+            df_coords = df_coords[df_coords["fly"].isin(common_flies)]
             print(f"   Filtered coordinates shape: {df_coords.shape}")
-            
+
         # Detect grouping columns
         detected_cols = self.detect_columns(df_coords, mode)
-        if 'primary' not in detected_cols or 'secondary' not in detected_cols:
+        if "primary" not in detected_cols or "secondary" not in detected_cols:
             print("❌ Could not detect required grouping columns for coordinates")
             return
-            
-        primary_col = detected_cols['primary']
-        secondary_col = detected_cols['secondary']
-        
+
+        primary_col = detected_cols["primary"]
+        secondary_col = detected_cols["secondary"]
+
         print(f"📋 Using grouping columns: {primary_col}, {secondary_col}")
-        
+
         # Check for required coordinate columns
-        coord_cols = ['training_ball_euclidean_distance', 'test_ball_euclidean_distance']
+        coord_cols = ["training_ball_euclidean_distance", "test_ball_euclidean_distance"]
         missing_cols = [col for col in coord_cols if col not in df_coords.columns]
         if missing_cols:
             # Try alternative column names
-            alt_coord_cols = ['training_ball', 'test_ball']
+            alt_coord_cols = ["training_ball", "test_ball"]
             missing_alt = [col for col in alt_coord_cols if col not in df_coords.columns]
             if not missing_alt:
                 coord_cols = alt_coord_cols
@@ -897,239 +897,272 @@ class F1AnalysisFramework:
                 print(f"❌ Missing coordinate columns: {missing_cols}")
                 print(f"   Available columns: {list(df_coords.columns)}")
                 return
-        
+
         # Get plotting parameters
-        normalize_methods = plot_params.get('normalize_methods', ['percentage', 'trimmed'])
-        
+        normalize_methods = plot_params.get("normalize_methods", ["percentage", "trimmed"])
+
         # Create plots for each normalization method
         for method in normalize_methods:
             print(f"\n📈 Creating {method} plots...")
-            
-            if method == 'percentage':
+
+            if method == "percentage":
                 self._create_percentage_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
-            elif method == 'trimmed':
+            elif method == "trimmed":
                 self._create_trimmed_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
-                
+
         print(f"✅ Coordinate analysis completed for mode: {mode}")
 
     def _normalize_time_to_percentage(self, df):
         """Normalize adjusted_time to 0-100% for each fly."""
-        if 'adjusted_time' not in df.columns or 'fly' not in df.columns:
+        if "adjusted_time" not in df.columns or "fly" not in df.columns:
             print("⚠️  Cannot normalize - missing 'adjusted_time' or 'fly' columns")
             return df
-            
+
         print(f"🔄 Normalizing time to percentage...")
         standard_time_grid = np.arange(0, 100.1, 0.1)
         normalized_data = []
-        
-        for fly_id in df['fly'].unique():
-            fly_data = df[df['fly'] == fly_id].copy()
-            
+
+        for fly_id in df["fly"].unique():
+            fly_data = df[df["fly"] == fly_id].copy()
+
             # Skip flies with no valid adjusted_time data
-            if fly_data['adjusted_time'].isna().all():
+            if fly_data["adjusted_time"].isna().all():
                 continue
-                
-            valid_mask = ~fly_data['adjusted_time'].isna()
+
+            valid_mask = ~fly_data["adjusted_time"].isna()
             if not valid_mask.any():
                 continue
-                
-            valid_times = fly_data.loc[valid_mask, 'adjusted_time']
+
+            valid_times = fly_data.loc[valid_mask, "adjusted_time"]
             min_time = valid_times.min()
             max_time = valid_times.max()
-            
+
             if max_time <= min_time or valid_mask.sum() < 2:
                 continue
-                
+
             # Normalize to 0-100%
-            normalized_time = ((fly_data['adjusted_time'] - min_time) / (max_time - min_time)) * 100
-            
+            normalized_time = ((fly_data["adjusted_time"] - min_time) / (max_time - min_time)) * 100
+
             # Create DataFrame with standard time grid
-            fly_normalized = pd.DataFrame({'adjusted_time': standard_time_grid})
-            
+            fly_normalized = pd.DataFrame({"adjusted_time": standard_time_grid})
+
             # Add metadata columns
-            for col in ['fly', 'Pretraining', 'Genotype', 'F1_condition']:
+            for col in ["fly", "Pretraining", "Genotype", "F1_condition"]:
                 if col in fly_data.columns:
                     fly_normalized[col] = fly_data[col].iloc[0]
-                    
+
             # Interpolate ball distances
-            for ball_col in ['training_ball_euclidean_distance', 'test_ball_euclidean_distance', 'training_ball', 'test_ball']:
+            for ball_col in [
+                "training_ball_euclidean_distance",
+                "test_ball_euclidean_distance",
+                "training_ball",
+                "test_ball",
+            ]:
                 if ball_col in fly_data.columns:
                     if valid_mask.sum() > 1:
                         fly_normalized[ball_col] = np.interp(
-                            standard_time_grid, 
-                            normalized_time[valid_mask], 
-                            fly_data.loc[valid_mask, ball_col]
+                            standard_time_grid, normalized_time[valid_mask], fly_data.loc[valid_mask, ball_col]
                         )
                     else:
                         fly_normalized[ball_col] = np.nan
-                        
+
             normalized_data.append(fly_normalized)
-            
+
         if not normalized_data:
             print("⚠️  No flies could be normalized")
             return df
-            
+
         result_df = pd.concat(normalized_data, ignore_index=True)
         print(f"✅ Normalized {len(df['fly'].unique())} flies to 0-100% time grid")
         return result_df
 
     def _find_maximum_shared_time(self, df):
         """Find maximum time that all flies share."""
-        if 'fly' not in df.columns or 'adjusted_time' not in df.columns:
-            return df['adjusted_time'].max() if 'adjusted_time' in df.columns else 30
-            
-        max_times_per_fly = df.groupby('fly')['adjusted_time'].max()
+        if "fly" not in df.columns or "adjusted_time" not in df.columns:
+            return df["adjusted_time"].max() if "adjusted_time" in df.columns else 30
+
+        max_times_per_fly = df.groupby("fly")["adjusted_time"].max()
         max_shared_time = max_times_per_fly.min()
-        
+
         print(f"📊 Maximum shared time: {max_shared_time:.2f}s")
         print(f"   Flies with longer data: {(max_times_per_fly > max_shared_time).sum()}")
-        
+
         return max_shared_time
 
     def _create_percentage_coordinate_plots(self, df, primary_col, secondary_col, coord_cols, mode):
         """Create percentage-normalized coordinate plots."""
         # Normalize time to percentage
         df_norm = self._normalize_time_to_percentage(df)
-        
+
         if df_norm.empty:
             print("⚠️  No data after percentage normalization")
             return
-            
+
         # Create plots grouped by primary variable (pretraining)
         self._create_coordinate_line_plots(
-            df_norm, 'adjusted_time', coord_cols, primary_col,
+            df_norm,
+            "adjusted_time",
+            coord_cols,
+            primary_col,
             f"F1 Coordinates by {primary_col.title()} (Percentage Time)",
-            "f1_coordinates_percentage_time_pretraining.png", mode,
-            xlabel="Adjusted Time (%)", time_type="percentage"
+            "f1_coordinates_percentage_time_pretraining.png",
+            mode,
+            xlabel="Adjusted Time (%)",
+            time_type="percentage",
         )
-        
+
         # Create plots grouped by secondary variable (F1_condition or Genotype)
         self._create_coordinate_line_plots(
-            df_norm, 'adjusted_time', coord_cols, secondary_col,
+            df_norm,
+            "adjusted_time",
+            coord_cols,
+            secondary_col,
             f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} (Percentage Time)",
-            "f1_coordinates_percentage_time_f1condition.png", mode,
-            xlabel="Adjusted Time (%)", time_type="percentage"
+            "f1_coordinates_percentage_time_f1condition.png",
+            mode,
+            xlabel="Adjusted Time (%)",
+            time_type="percentage",
         )
 
     def _create_trimmed_coordinate_plots(self, df, primary_col, secondary_col, coord_cols, mode):
         """Create trimmed-time coordinate plots."""
         # Find maximum shared time and trim data
         max_shared_time = self._find_maximum_shared_time(df)
-        df_trimmed = df[df['adjusted_time'] <= max_shared_time].copy()
-        
+        df_trimmed = df[df["adjusted_time"] <= max_shared_time].copy()
+
         print(f"📊 Trimmed data: {df_trimmed.shape[0]} points from {df_trimmed['fly'].nunique()} flies")
-        
+
         # Create plots grouped by primary variable
         self._create_coordinate_line_plots(
-            df_trimmed, 'adjusted_time', coord_cols, primary_col,
+            df_trimmed,
+            "adjusted_time",
+            coord_cols,
+            primary_col,
             f"F1 Coordinates by {primary_col.title()} (Trimmed Time)",
-            "f1_coordinates_trimmed_time_pretraining.png", mode,
-            xlabel="Adjusted Time (seconds)", time_type="trimmed"
-        )
-        
-        # Create plots grouped by secondary variable
-        self._create_coordinate_line_plots(
-            df_trimmed, 'adjusted_time', coord_cols, secondary_col,
-            f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} (Trimmed Time)",
-            "f1_coordinates_trimmed_time_f1condition.png", mode,
-            xlabel="Adjusted Time (seconds)", time_type="trimmed"
+            "f1_coordinates_trimmed_time_pretraining.png",
+            mode,
+            xlabel="Adjusted Time (seconds)",
+            time_type="trimmed",
         )
 
-    def _create_coordinate_line_plots(self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage"):
+        # Create plots grouped by secondary variable
+        self._create_coordinate_line_plots(
+            df_trimmed,
+            "adjusted_time",
+            coord_cols,
+            secondary_col,
+            f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} (Trimmed Time)",
+            "f1_coordinates_trimmed_time_f1condition.png",
+            mode,
+            xlabel="Adjusted Time (seconds)",
+            time_type="trimmed",
+        )
+
+    def _create_coordinate_line_plots(
+        self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage"
+    ):
         """Create line plots for coordinate data with confidence intervals."""
         if data.empty:
             print(f"⚠️  No data for {filename}")
             return
-            
+
         # Create figure
         fig, axes = plt.subplots(len(y_cols), 1, figsize=(12, 6 * len(y_cols)))
         if len(y_cols) == 1:
             axes = [axes]
-            
+
         # Get color mapping
         unique_values = data[hue_col].unique()
-        if mode.startswith('tnt_'):
+        if mode.startswith("tnt_"):
             # Use brain region colors for TNT modes
-            color_mapping = self.create_color_mapping(mode, unique_values, 'brain_region')
+            color_mapping = self.create_color_mapping(mode, unique_values, "brain_region")
         else:
             # Use F1_condition colors for control mode
-            color_mapping = self.create_color_mapping(mode, unique_values, 'f1_condition')
-            
+            color_mapping = self.create_color_mapping(mode, unique_values, "f1_condition")
+
         for i, y_col in enumerate(y_cols):
             ax = axes[i]
-            
+
             if y_col not in data.columns:
-                ax.text(0.5, 0.5, f"Column '{y_col}' not found", 
-                       ha='center', va='center', transform=ax.transAxes)
+                ax.text(0.5, 0.5, f"Column '{y_col}' not found", ha="center", va="center", transform=ax.transAxes)
                 continue
-                
+
             # Plot each group
             for hue_val in unique_values:
                 subset = data[data[hue_col] == hue_val]
                 if subset.empty or subset[y_col].isna().all():
                     continue
-                    
+
                 # Skip training_ball for control groups (usually all NaN)
-                if 'training' in y_col and subset[y_col].isna().all():
+                if "training" in y_col and subset[y_col].isna().all():
                     continue
-                    
+
                 # Bin data and calculate statistics
                 subset_clean = subset.dropna(subset=[y_col])
                 if subset_clean.empty:
                     continue
-                    
+
                 # Create time bins
                 bin_size = 0.1 if time_type == "percentage" else 0.1
                 subset_clean = subset_clean.copy()
-                subset_clean['time_bin'] = np.floor(subset_clean[x_col] / bin_size) * bin_size
-                
+                subset_clean["time_bin"] = np.floor(subset_clean[x_col] / bin_size) * bin_size
+
                 # Get median per fly per time bin
-                fly_medians = subset_clean.groupby(['fly', 'time_bin'])[y_col].median().reset_index()
-                
+                fly_medians = subset_clean.groupby(["fly", "time_bin"])[y_col].median().reset_index()
+
                 # Calculate statistics across flies for each time bin
-                time_stats = fly_medians.groupby('time_bin')[y_col].agg(['mean', 'std', 'count', 'sem']).reset_index()
-                
+                time_stats = fly_medians.groupby("time_bin")[y_col].agg(["mean", "std", "count", "sem"]).reset_index()
+
                 # Calculate confidence intervals
                 confidence_level = 0.95
                 alpha = 1 - confidence_level
-                time_stats['ci'] = time_stats.apply(
-                    lambda row: stats.t.ppf(1 - alpha/2, row['count'] - 1) * row['sem'] if row['count'] > 1 else 0,
-                    axis=1
+                time_stats["ci"] = time_stats.apply(
+                    lambda row: stats.t.ppf(1 - alpha / 2, row["count"] - 1) * row["sem"] if row["count"] > 1 else 0,
+                    axis=1,
                 )
-                
+
                 # Plot mean trajectory
-                color = color_mapping.get(hue_val, 'black')
+                color = color_mapping.get(hue_val, "black")
                 label = str(hue_val)
-                
-                ax.plot(time_stats['time_bin'], time_stats['mean'], 
-                       color=color, linewidth=2, alpha=0.8, label=label)
-                
+
+                ax.plot(time_stats["time_bin"], time_stats["mean"], color=color, linewidth=2, alpha=0.8, label=label)
+
                 # Add confidence intervals
-                ax.fill_between(time_stats['time_bin'], 
-                               time_stats['mean'] - time_stats['ci'],
-                               time_stats['mean'] + time_stats['ci'],
-                               color=color, alpha=0.2)
-                               
+                ax.fill_between(
+                    time_stats["time_bin"],
+                    time_stats["mean"] - time_stats["ci"],
+                    time_stats["mean"] + time_stats["ci"],
+                    color=color,
+                    alpha=0.2,
+                )
+
             # Formatting
-            ax.set_title(f"{y_col.replace('_', ' ').title()}", fontsize=12, fontweight='bold')
+            ax.set_title(f"{y_col.replace('_', ' ').title()}", fontsize=12, fontweight="bold")
             ax.set_xlabel(xlabel, fontsize=10)
             ax.set_ylabel("Distance (pixels)", fontsize=10)
             ax.legend()
             ax.grid(True, alpha=0.3)
-            
+
             # Add vertical line at time 0
-            ax.axvline(x=0, color='black', linestyle=':', alpha=0.7, label='Exit time')
-            
+            ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time")
+
             # Add sample size
-            n_flies = data['fly'].nunique() if 'fly' in data.columns else len(data)
-            ax.text(0.02, 0.98, f"N flies = {n_flies}", transform=ax.transAxes,
-                   fontsize=10, va='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
-                   
-        plt.suptitle(title, fontsize=14, fontweight='bold')
+            n_flies = data["fly"].nunique() if "fly" in data.columns else len(data)
+            ax.text(
+                0.02,
+                0.98,
+                f"N flies = {n_flies}",
+                transform=ax.transAxes,
+                fontsize=10,
+                va="top",
+                bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+            )
+
+        plt.suptitle(title, fontsize=14, fontweight="bold")
         plt.tight_layout()
-        
+
         # Save plot
-        self._save_plot(fig, filename.replace('.png', ''), mode)
+        self._save_plot(fig, filename.replace(".png", ""), mode)
 
     def run_all_analyses(self, mode, metric=None):
         """Run all available analyses for the specified mode."""
