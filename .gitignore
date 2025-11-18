@@ -849,3 +849,16 @@ src/F1_tracks/MB247/pulling_ratio_boxplots.png
 src/F1_tracks/MB247/resolution_test.png
 src/F1_tracks/MB247/significant_ratio_boxplots.png
 src/F1_tracks/MB247/single_group_test.png
+src/F1_tracks/LC10_2/binary_metrics_analysis.png
+src/F1_tracks/LC10_2/distance_moved_boxplots.png
+src/F1_tracks/LC10_2/max_distance_boxplots.png
+src/F1_tracks/LC10_2/overall_interaction_rate_boxplots.png
+src/F1_tracks/MB247/f1_coordinates_percentage_time_f1condition.png
+src/F1_tracks/MB247/f1_coordinates_percentage_time_pretraining.png
+src/F1_tracks/MB247/f1_coordinates_trimmed_time_f1condition.png
+src/F1_tracks/MB247/f1_coordinates_trimmed_time_pretraining.png
+src/F1_tracks/MB247/test_ball_euclidean_distance_permutation_tests.png
+src/F1_tracks/MB247/training_ball_euclidean_distance_permutation_tests.png
+src/F1_tracks/MB247/training_ball_euclidean_distance_permutation_results.csv
+src/F1_tracks/MB247/test_ball_euclidean_distance_permutation_results.csv
+src/F1_tracks/first_sig_to_major_event_time_diff_boxplot.png
