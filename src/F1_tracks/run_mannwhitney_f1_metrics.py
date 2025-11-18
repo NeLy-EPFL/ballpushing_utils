@@ -35,15 +35,15 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))  # Go up to src directory
 sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting directory
 
-try:
-    from All_metrics import generate_jitterboxplots_with_mannwhitney
-
-    print("✅ Successfully imported All_metrics module")
-except Exception as e:
-    print(f"❌ Error importing All_metrics: {e}")
-    print("This error occurs during All_metrics module initialization")
-    print("Check the All_metrics.py file for issues in the module-level code")
-    sys.exit(1)
+# NOTE: All_metrics import commented out - not needed for F1 plotting
+# try:
+#     from All_metrics import generate_jitterboxplots_with_mannwhitney
+#     print("✅ Successfully imported All_metrics module")
+# except Exception as e:
+#     print(f"❌ Error importing All_metrics: {e}")
+#     print("This error occurs during All_metrics module initialization")
+#     print("Check the All_metrics.py file for issues in the module-level code")
+#     sys.exit(1)
 
 from Config import color_dict
 import pandas as pd
@@ -68,7 +68,7 @@ def load_f1_dataset(test_mode=False, test_sample_size=500):
     """
     # Load the F1 dataset
     dataset_path = (
-        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/250918_15_summary_F1_New_Data/summary/pooled_summary.feather"
+        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
     )
 
     print(f"Loading F1 dataset from: {dataset_path}")
@@ -218,9 +218,105 @@ def create_pretraining_colors():
         "untrained": "#ff7f0e",
         "control": "#2ca02c",  # Green for control
         "naive": "#d62728",  # Red for naive
+        "Pretrained": "#1f77b4",  # Blue
+        "Ctrl": "#ff7f0e",  # Orange
     }
 
     return pretraining_colors
+
+
+def map_condition_labels(condition):
+    """
+    Map short condition codes to informative display labels
+
+    Parameters:
+    -----------
+    condition : str
+        Original condition label
+
+    Returns:
+    --------
+    str
+        Mapped informative label
+    """
+    label_map = {
+        "y": "Pretrained",
+        "n": "Ctrl",
+        "yes": "Pretrained",
+        "no": "Ctrl",
+    }
+    return label_map.get(condition, condition)
+
+
+def map_metric_name(metric):
+    """
+    Map metric codes to informative display names based on README documentation
+
+    Parameters:
+    -----------
+    metric : str
+        Original metric name
+
+    Returns:
+    --------
+    str
+        Mapped informative display name
+    """
+    metric_map = {
+        # Task Performance Metrics
+        "has_finished": "Task completed",
+        "max_distance": "Max ball distance",
+        "has_major": "Has major event",
+        "first_major_event": "First major event",
+        "first_major_event_time": "First major event time",
+        "max_event": "Max event",
+        "max_event_time": "Max event time",
+        # Interaction Behavior Metrics
+        "nb_events": "Number of events",
+        "has_significant": "Has significant event",
+        "nb_significant_events": "Number of significant events",
+        "significant_ratio": "Significant event ratio",
+        "overall_interaction_rate": "Interaction rate",
+        "distance_moved": "Total ball distance moved",
+        "distance_ratio": "Distance ratio",
+        "pushed": "Number of pushes",
+        "pulled": "Number of pulls",
+        "pulling_ratio": "Pulling ratio",
+        "flailing": "Leg flailing",
+        "head_pushing_ratio": "Head pushing ratio",
+        # Locomotor Activity Metrics
+        "normalized_velocity": "Normalized velocity",
+        "velocity_during_interactions": "Velocity during interactions",
+        "velocity_trend": "Velocity trend",
+        "has_long_pauses": "Has long pauses",
+        "nb_stops": "Number of stops",
+        "total_stop_duration": "Total stop duration",
+        "median_stop_duration": "Median stop duration",
+        "nb_pauses": "Number of pauses",
+        "total_pause_duration": "Total pause duration",
+        "median_pause_duration": "Median pause duration",
+        "nb_long_pauses": "Number of long pauses",
+        "total_long_pause_duration": "Total long pause duration",
+        "median_long_pause_duration": "Median long pause duration",
+        # Spatial Behavior Metrics
+        "time_chamber_beginning": "Time in chamber (early)",
+        "persistence_at_end": "Persistence at end",
+        # Additional metrics
+        "final_event": "Final event",
+        "final_event_time": "Final event time",
+        "first_significant_event": "First significant event",
+        "first_significant_event_time": "First significant event time",
+        "interaction_persistence": "Interaction persistence",
+        "interaction_proportion": "Interaction proportion",
+        "cumulated_breaks_duration": "Total break duration",
+        "fly_distance_moved": "Fly distance moved",
+        "fraction_not_facing_ball": "Fraction not facing ball",
+        "leg_visibility_ratio": "Leg visibility ratio",
+        "chamber_time": "Chamber time",
+        "chamber_ratio": "Chamber ratio",
+        "chamber_exit_time": "Chamber exit time",
+    }
+    return metric_map.get(metric, metric)
 
 
 def load_f1_metrics_list():
@@ -583,10 +679,16 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
     """
     from scipy.stats import mannwhitneyu
     import matplotlib.pyplot as plt
-    import seaborn as sns
+    import matplotlib
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set Arial font globally for editable text in PDFs
+    matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for editable text in PDF
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
     # Get pretraining colors
     pretraining_colors = create_pretraining_colors()
@@ -598,6 +700,10 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
 
     print(f"Control condition: {control_condition}")
     print(f"Experimental condition: {experimental_condition}")
+
+    # Map conditions to display labels
+    control_label = map_condition_labels(control_condition)
+    experimental_label = map_condition_labels(experimental_condition)
 
     # Process each metric
     for metric in metrics:
@@ -637,71 +743,105 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
             p_value = 1.0
             sig_level = "ns"
 
-        # Create the plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        # Create the plot with smaller figure size for publication-quality layout
+        fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
 
-        # Create boxplot with jitter
-        sns.boxplot(
-            data=metric_data,
-            x=y_col,
-            y=metric,
-            hue=y_col,
-            palette=[
-                pretraining_colors.get(control_condition, "#ff7f0e"),
-                pretraining_colors.get(experimental_condition, "#1f77b4"),
-            ],
-            legend=False,
-            ax=ax,
+        # Define colors consistently - ALWAYS use the same color for the same condition
+        # This ensures 'n' is always orange and 'y' is always blue across all plots
+        control_color = pretraining_colors.get(control_condition, "#808080")  # Gray fallback
+        experimental_color = pretraining_colors.get(experimental_condition, "#808080")  # Gray fallback
+
+        # Create thinner boxplot with transparency
+        box_props = dict(linewidth=1.5, edgecolor="black")  # Black outline
+        whisker_props = dict(linewidth=1.5, color="black")
+        cap_props = dict(linewidth=1.5, color="black")
+        median_props = dict(linewidth=2, color="black")
+
+        bp = ax.boxplot(
+            [control_data, experimental_data],
+            positions=[0, 1],
+            widths=0.5,  # Thinner boxes (50% of spacing)
+            patch_artist=True,
+            boxprops=box_props,
+            whiskerprops=whisker_props,
+            capprops=cap_props,
+            medianprops=median_props,
+            showfliers=False,  # Don't show outliers since we're plotting all points
         )
 
-        # Add jitter points
-        sns.stripplot(data=metric_data, x=y_col, y=metric, color="black", alpha=0.6, size=3, ax=ax)
+        # Color the boxes consistently with black outlines - position 0 is control, position 1 is experimental
+        bp["boxes"][0].set_facecolor(control_color)
+        bp["boxes"][0].set_alpha(0.7)
+        bp["boxes"][0].set_edgecolor("black")
+        bp["boxes"][0].set_linewidth(1.5)
+        bp["boxes"][1].set_facecolor(experimental_color)
+        bp["boxes"][1].set_alpha(0.7)
+        bp["boxes"][1].set_edgecolor("black")
+        bp["boxes"][1].set_linewidth(1.5)
 
-        # Add statistical annotation
+        # Add individual data points as larger filled circles matching box colors
+        x_jitter = 0.08  # Amount of horizontal jitter
+        for i, (condition, color) in enumerate(
+            [(control_condition, control_color), (experimental_condition, experimental_color)]
+        ):
+            condition_data = metric_data[metric_data[y_col] == condition][metric]
+            # Add random jitter to x positions
+            x_positions = np.random.normal(i, x_jitter, size=len(condition_data))
+            ax.scatter(
+                x_positions,
+                condition_data,
+                s=25,  # Smaller point size for cleaner look
+                c=color,
+                alpha=0.6,  # Translucent
+                edgecolors="none",  # No edge
+                zorder=3,
+            )  # Draw on top
+
+        # Add significance annotation
         y_max = metric_data[metric].max()
         y_min = metric_data[metric].min()
         y_range = y_max - y_min
-        annotation_y = y_max + 0.05 * y_range
 
-        ax.text(
-            0.5,
-            annotation_y,
-            f"Mann-Whitney U: p={p_value:.4f} {sig_level}",
-            ha="center",
-            va="bottom",
-            transform=ax.transData,
-            fontsize=10,
-            weight="bold" if sig_level != "ns" else "normal",
-        )
-
-        # Add sample sizes
-        for i, condition in enumerate([control_condition, experimental_condition]):
-            n = len(metric_data[metric_data[y_col] == condition])
-            ax.text(i, y_min - 0.05 * y_range, f"n={n}", ha="center", va="top", fontsize=9)
-
-        # Formatting
-        ax.set_title(f"F1 Analysis: {metric}", fontsize=14, weight="bold")
-        ax.set_xlabel("Pretraining Condition", fontsize=12)
-        ax.set_ylabel(metric, fontsize=12)
-        ax.grid(True, alpha=0.3)
-
-        # Set background color based on significance
+        # Draw significance bar and asterisks
         if sig_level != "ns":
-            control_median = control_data.median()
-            experimental_median = experimental_data.median()
+            bar_height = y_max + 0.08 * y_range
+            ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
+            ax.text(
+                0.5, bar_height + 0.02 * y_range, sig_level, ha="center", va="bottom", fontsize=12, fontname="Arial"
+            )
 
-            if experimental_median > control_median:
-                # Experimental higher than control - light green background
-                ax.set_facecolor("#e8f5e8")
-            else:
-                # Experimental lower than control - light coral background
-                ax.set_facecolor("#ffeaea")
+        # Clean formatting - no grid, white background, with tick marks
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+        ax.grid(False)
+
+        # Add tick marks pointing outward
+        ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+
+        # Set x-axis labels using mapped informative labels
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels([control_label, experimental_label], fontsize=10, fontname="Arial")
+
+        # Set y-axis label with mapped metric name
+        metric_display_name = map_metric_name(metric)
+        ax.set_ylabel(metric_display_name, fontsize=11, fontname="Arial")
+
+        # Format y-axis tick labels
+        ax.tick_params(axis="y", labelsize=9)
+        for label in ax.get_yticklabels():
+            label.set_fontname("Arial")
+
+        # Remove top and right spines for cleaner look
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_linewidth(1.5)
 
         plt.tight_layout()
 
-        # Save plot
+        # Save plot with editable text
         output_file = output_dir / f"f1_{metric}_pretraining_comparison.pdf"
-        plt.savefig(output_file, dpi=300, bbox_inches="tight")
+        plt.savefig(output_file, dpi=300, bbox_inches="tight", format="pdf")
         plt.close()
 
         print(f"    ✅ Saved: {output_file.name}")

@@ -54,6 +54,12 @@ analysis_modes:
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
         create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
+        run_permutation_tests: true
+        permutation_params:
+          n_permutations: 10000
+          alpha: 0.05
+          bin_size: 8.33  # ~12 bins across 0-100% (avoids over-testing with too many bins)
+          progress: true
 
   tnt_lc10_2:
     description: "TNT LC10-2 flies tested across pretraining and genotype"

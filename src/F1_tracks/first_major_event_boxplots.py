@@ -454,7 +454,90 @@ def main():
     else:
         print(f"\nInsufficient valid data for correlation analysis (n={len(correlation_data)})")
 
-    plt.show()
+    # --- NEW ANALYSIS: Time between first significant and first major event ---
+    # Identify relevant columns
+    sig_event_col = None
+    major_event_col = None
+    f1_condition_col = None
+    pretraining_col2 = None
+
+    # Find columns for significant and major event times
+    for col in df.columns:
+        if "first_significant_event_time" in col:
+            sig_event_col = col
+        if "first_major_event_time" in col:
+            major_event_col = col
+        if "f1_condition" in col.lower():
+            f1_condition_col = col
+        if "pretrain" in col.lower():
+            pretraining_col2 = col
+
+    if not all([sig_event_col, major_event_col, f1_condition_col, pretraining_col2]):
+        print(
+            "Missing required columns for time difference plot: sig_event_col={}, major_event_col={}, f1_condition_col={}, pretraining_col2={}".format(
+                sig_event_col, major_event_col, f1_condition_col, pretraining_col2
+            )
+        )
+    else:
+        # Compute time difference
+        df["event_time_diff"] = df[major_event_col] - df[sig_event_col]
+        # Filter for valid rows
+        diff_data = df[[sig_event_col, major_event_col, "event_time_diff", f1_condition_col, pretraining_col2]].copy()
+        diff_data = diff_data[
+            diff_data[sig_event_col].notna()
+            & diff_data[major_event_col].notna()
+            & np.isfinite(diff_data[sig_event_col])
+            & np.isfinite(diff_data[major_event_col])
+            & diff_data[pretraining_col2].notna()
+            & diff_data[f1_condition_col].notna()
+        ]
+        print(f"\nTime difference data shape: {diff_data.shape}")
+        print(f"Sample time differences:\n", diff_data[["event_time_diff", f1_condition_col, pretraining_col2]].head())
+
+        # Plot: event_time_diff by f1_condition and Pretraining
+        plt.figure(figsize=(10, 6))
+        ax = plt.gca()
+        # Use a color palette for Pretraining
+        palette = sns.color_palette("Set2", n_colors=diff_data[pretraining_col2].nunique())
+        # Boxplot with scatter overlay, grouped by f1_condition, hue=Pretraining
+        sns.boxplot(
+            data=diff_data,
+            x=f1_condition_col,
+            y="event_time_diff",
+            hue=pretraining_col2,
+            palette=palette,
+            ax=ax,
+            dodge=True,
+            showfliers=False,
+        )
+        sns.stripplot(
+            data=diff_data,
+            x=f1_condition_col,
+            y="event_time_diff",
+            hue=pretraining_col2,
+            dodge=True,
+            color="black",
+            size=4,
+            alpha=0.5,
+            ax=ax,
+        )
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(
+            handles[: diff_data[pretraining_col2].nunique()],
+            labels[: diff_data[pretraining_col2].nunique()],
+            title=pretraining_col2,
+        )
+        ax.set_title("Time between First Significant and First Major Event", fontsize=14, fontweight="bold")
+        if f1_condition_col:
+            ax.set_xlabel(f1_condition_col.replace("_", " ").title())
+        else:
+            ax.set_xlabel("F1 Condition")
+        ax.set_ylabel("Time Difference (s)")
+        plt.tight_layout()
+        out_path = Path(__file__).parent / "first_sig_to_major_event_time_diff_boxplot.png"
+        plt.savefig(out_path, dpi=300, bbox_inches="tight")
+        print(f"Time difference plot saved to: {out_path}")
+        plt.show()
 
     return test_ball_data
 

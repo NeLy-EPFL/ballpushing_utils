@@ -164,6 +164,7 @@ class Dataset:
             experiments (list): A list of Experiment objects.
             metrics (str): The kind of dataset to generate. Currently, the following metrics are available:
             - 'coordinates': The fly and ball coordinates for each frame.
+            - 'fly_positions': Raw tracking positions for all available keypoints (fly, ball, skeleton).
             - 'summary': Summary metrics for each fly. These are single values for each fly (e.g. number of events, duration of the breaks between events, etc.). A list of available summary metrics can be found in _prepare_dataset_summary_metrics documentation.
 
         Returns:
@@ -176,6 +177,11 @@ class Dataset:
             if metrics == "coordinates":
                 for fly in self.flies:
                     data = self._prepare_dataset_coordinates(fly)
+                    Dataset.append(data)
+
+            elif metrics == "fly_positions":
+                for fly in self.flies:
+                    data = self._prepare_dataset_fly_positions(fly)
                     Dataset.append(data)
 
             elif metrics == "contact_data":
@@ -308,6 +314,74 @@ class Dataset:
             dataset[f"x_ball_{i}"] = data["x_centre"] - fly.tracking_data.start_x
             dataset[f"y_ball_{i}"] = data["y_centre"] - fly.tracking_data.start_y
             dataset[f"distance_ball_{i}"] = np.sqrt(dataset[f"x_ball_{i}"].pow(2) + dataset[f"y_ball_{i}"].pow(2))
+
+        # Downsample the dataset if required
+        if downsampling_factor:
+            dataset = dataset.iloc[:: downsampling_factor * fly.experiment.fps]
+
+        # Annotate interaction events if required
+        if annotate_events:
+            self._annotate_interaction_events(dataset, fly)
+
+        # Add trial information for learning experiments
+        if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
+            self._add_trial_information(dataset, fly)
+
+        # Add metadata
+        dataset = self._add_metadata(dataset, fly)
+
+        return dataset
+
+    def _prepare_dataset_fly_positions(self, fly, downsampling_factor=None, annotate_events=True):
+        """
+        Prepare a dataset with raw tracking positions for all available keypoints.
+        This includes fly keypoints (if available from skeleton tracking), ball positions,
+        and all skeleton keypoints. Useful for generating heatmaps and position analyses.
+
+        Args:
+            fly (Fly): A Fly object.
+            downsampling_factor (int): The factor (in seconds) by which to downsample the dataset. Defaults to None.
+            annotate_events (bool): Whether to annotate the dataset with interaction events. Defaults to True.
+
+        Returns:
+            pandas.DataFrame: A DataFrame containing all raw tracking positions and associated metadata.
+        """
+        downsampling_factor = fly.config.downsampling_factor or downsampling_factor
+
+        # Extract fly and ball tracking data
+        flydata = [obj.dataset for obj in fly.tracking_data.flytrack.objects]
+        balldata = [obj.dataset for obj in fly.tracking_data.balltrack.objects]
+
+        # Initialize dataset with time and frame columns
+        dataset = pd.DataFrame(
+            {
+                "time": flydata[0]["time"],
+                "frame": flydata[0]["frame"],
+                "adjusted_time": (fly.f1_metrics["adjusted_time"] if fly.tracking_data.f1_exit_time else np.nan),
+            }
+        )
+
+        # Add all fly tracking columns (thorax positions from flytrack)
+        for i, data in enumerate(flydata):
+            # Add all columns from flytrack (typically includes x_thorax, y_thorax, etc.)
+            for col in data.columns:
+                if col not in ["time", "frame"]:
+                    dataset[f"{col}_fly_{i}"] = data[col]
+
+        # Add all ball tracking columns
+        for i, data in enumerate(balldata):
+            # Add all columns from balltrack
+            for col in data.columns:
+                if col not in ["time", "frame"]:
+                    dataset[f"{col}_ball_{i}"] = data[col]
+
+        # Add skeleton tracking data if available
+        if fly.tracking_data.skeletontrack is not None and len(fly.tracking_data.skeletontrack.objects) > 0:
+            skeleton_data = fly.tracking_data.skeletontrack.objects[0].dataset
+            # Add all skeleton keypoint columns
+            for col in skeleton_data.columns:
+                if col not in ["time", "frame"]:
+                    dataset[f"{col}_skeleton"] = skeleton_data[col]
 
         # Downsample the dataset if required
         if downsampling_factor:

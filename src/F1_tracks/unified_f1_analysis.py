@@ -22,6 +22,8 @@ from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu, kruskal
 from statsmodels.stats.multitest import multipletests
 from matplotlib.patches import Rectangle
+from itertools import combinations
+from tqdm import tqdm
 
 
 class F1AnalysisFramework:
@@ -2062,14 +2064,27 @@ class F1AnalysisFramework:
             df_coords = df_coords[df_coords["fly"].isin(common_flies)]
             print(f"   Filtered coordinates shape: {df_coords.shape}")
 
-        # Detect grouping columns
-        detected_cols = self.detect_columns(df_coords, mode)
-        if "primary" not in detected_cols or "secondary" not in detected_cols:
-            print("❌ Could not detect required grouping columns for coordinates")
+        # Detect grouping columns from summary dataset (or use coordinates if no summary)
+        detection_df = df_summary if df_summary is not None else df_coords
+        detected_cols = self.detect_columns(detection_df, mode)
+
+        # For coordinates analysis, we need Pretraining and Genotype columns
+        # Try exact column names first
+        if "Pretraining" in df_coords.columns:
+            primary_col = "Pretraining"
+        elif "primary" in detected_cols:
+            primary_col = detected_cols["primary"]
+        else:
+            print("❌ Could not find Pretraining column in coordinates dataset")
             return
 
-        primary_col = detected_cols["primary"]
-        secondary_col = detected_cols["secondary"]
+        if "Genotype" in df_coords.columns:
+            secondary_col = "Genotype"
+        elif "secondary" in detected_cols:
+            secondary_col = detected_cols["secondary"]
+        else:
+            print("❌ Could not find Genotype column in coordinates dataset")
+            return
 
         print(f"📋 Using grouping columns: {primary_col}, {secondary_col}")
 
@@ -2087,6 +2102,7 @@ class F1AnalysisFramework:
 
         # Get plotting parameters
         normalize_methods = plot_params.get("normalize_methods", ["percentage", "trimmed"])
+        run_permutation_tests = plot_params.get("run_permutation_tests", True)
 
         # Create plots for each normalization method
         for method in normalize_methods:
@@ -2096,6 +2112,51 @@ class F1AnalysisFramework:
                 self._create_percentage_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
             elif method == "trimmed":
                 self._create_trimmed_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
+
+        # Run permutation tests on percentage-normalized data
+        if run_permutation_tests and "percentage" in normalize_methods:
+            print(f"\n🔬 Running permutation tests on trajectory data...")
+
+            # Normalize to percentage time
+            df_norm = self._normalize_time_to_percentage(df_coords)
+
+            if not df_norm.empty:
+                # Run tests for each ball distance metric
+                for coord_col in coord_cols:
+                    if coord_col not in df_norm.columns:
+                        continue
+
+                    # Skip if all NaN
+                    if df_norm[coord_col].isna().all():
+                        continue
+
+                    print(f"\n📊 Testing: {coord_col}")
+
+                    # Compute permutation tests
+                    perm_results = self.compute_trajectory_permutation_tests(
+                        data=df_norm,
+                        primary_col=primary_col,
+                        secondary_col=secondary_col,
+                        metric_col=coord_col,
+                        n_permutations=10000,
+                        alpha=0.05,
+                        bin_size=8.33,  # ~12 bins across 0-100%
+                        progress=True,
+                    )
+
+                    # Plot results with significant bins highlighted
+                    self.plot_permutation_test_results(
+                        data=df_norm,
+                        perm_results=perm_results,
+                        primary_col=primary_col,
+                        secondary_col=secondary_col,
+                        metric_col=coord_col,
+                        mode=mode,
+                        bin_size=8.33,  # Match permutation test bin size
+                    )
+
+                    # Save detailed results to CSV
+                    self._save_permutation_results_to_csv(perm_results, coord_col, mode)
 
         print(f"✅ Coordinate analysis completed for mode: {mode}")
 
@@ -2339,6 +2400,336 @@ class F1AnalysisFramework:
         else:
             print("ℹ️  Skipping individual fly plots (disabled in config)")
 
+    def compute_trajectory_permutation_tests(
+        self,
+        data,
+        primary_col,
+        secondary_col,
+        metric_col,
+        n_permutations=10000,
+        alpha=0.05,
+        bin_size=8.33,
+        progress=True,
+    ):
+        """
+        Compute pairwise permutation tests for all condition combinations across time bins.
+
+        This tests differences between all 4 conditions (2 pretraining × 2 genotypes) at each
+        time bin, with FDR correction for multiple comparisons.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Normalized percentage time data with fly-level information
+        primary_col : str
+            Primary grouping column (e.g., 'Pretraining')
+        secondary_col : str
+            Secondary grouping column (e.g., 'Genotype')
+        metric_col : str
+            Column containing the metric to test (e.g., 'test_ball_euclidean_distance')
+        n_permutations : int
+            Number of permutations for each test
+        alpha : float
+            Significance level for FDR correction
+        bin_size : float
+            Size of time bins in percentage (default 8.33 gives ~12 bins across 0-100%)
+        progress : bool
+            Show progress bars
+
+        Returns
+        -------
+        dict
+            Dictionary with test results for each pairwise comparison
+        """
+        print(f"\n{'='*80}")
+        print(f"PERMUTATION TESTS: {metric_col}")
+        print(f"{'='*80}")
+        print(f"Settings:")
+        print(f"  • Permutations: {n_permutations}")
+        print(f"  • FDR alpha: {alpha}")
+        print(f"  • Time bin size: {bin_size}")
+
+        # Create combined grouping variable
+        data_copy = data.copy()
+        data_copy["combined_group"] = data_copy[primary_col].astype(str) + "_" + data_copy[secondary_col].astype(str)
+
+        # Get all unique groups
+        groups = sorted(data_copy["combined_group"].unique())
+        print(f"\nGroups: {groups}")
+
+        # Prepare data with time bins
+        data_copy["time_bin"] = np.floor(data_copy["adjusted_time"] / bin_size) * bin_size
+
+        # Get fly-level medians for each time bin (to handle repeated measures)
+        fly_medians = data_copy.groupby(["fly", "combined_group", "time_bin"])[metric_col].median().reset_index()
+
+        time_bins = sorted(fly_medians["time_bin"].unique())
+        n_bins = len(time_bins)
+        print(f"Time bins: {n_bins} bins from {time_bins[0]:.1f} to {time_bins[-1]:.1f}")
+
+        # Get all pairwise combinations
+        comparisons = list(combinations(groups, 2))
+        print(f"\nPairwise comparisons: {len(comparisons)}")
+
+        results = {}
+
+        # For each pairwise comparison
+        for group1, group2 in comparisons:
+            comparison_name = f"{group1} vs {group2}"
+            print(f"\n{'─'*80}")
+            print(f"Testing: {comparison_name}")
+
+            # Filter data for this comparison
+            comparison_data = fly_medians[fly_medians["combined_group"].isin([group1, group2])]
+
+            # Store results for each bin
+            observed_diffs = []
+            p_values_raw = []
+            n_group1_per_bin = []
+            n_group2_per_bin = []
+
+            iterator = tqdm(time_bins, desc=f"  {comparison_name}") if progress else time_bins
+
+            for time_bin in iterator:
+                bin_data = comparison_data[comparison_data["time_bin"] == time_bin]
+
+                # Get values for each group
+                group1_vals = bin_data[bin_data["combined_group"] == group1][metric_col].values
+                group2_vals = bin_data[bin_data["combined_group"] == group2][metric_col].values
+
+                n_group1_per_bin.append(len(group1_vals))
+                n_group2_per_bin.append(len(group2_vals))
+
+                if len(group1_vals) == 0 or len(group2_vals) == 0:
+                    observed_diffs.append(np.nan)
+                    p_values_raw.append(1.0)
+                    continue
+
+                # Observed difference (group2 - group1)
+                obs_diff = np.mean(group2_vals) - np.mean(group1_vals)
+                observed_diffs.append(obs_diff)
+
+                # Permutation test
+                combined = np.concatenate([group1_vals, group2_vals])
+                n1 = len(group1_vals)
+                n2 = len(group2_vals)
+
+                perm_diffs = []
+                for _ in range(n_permutations):
+                    # Shuffle and split
+                    shuffled = np.random.permutation(combined)
+                    perm_g1 = shuffled[:n1]
+                    perm_g2 = shuffled[n1:]
+                    perm_diff = np.mean(perm_g2) - np.mean(perm_g1)
+                    perm_diffs.append(perm_diff)
+
+                perm_diffs = np.array(perm_diffs)
+
+                # Two-tailed p-value
+                p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
+                p_values_raw.append(p_value)
+
+            # Apply FDR correction across all time bins for this comparison
+            p_values_raw = np.array(p_values_raw)
+            valid_mask = ~np.isnan(p_values_raw)
+
+            p_values_corrected = np.ones_like(p_values_raw)
+            if valid_mask.sum() > 0:
+                rejected, p_corrected, _, _ = multipletests(p_values_raw[valid_mask], alpha=alpha, method="fdr_bh")
+                p_values_corrected[valid_mask] = p_corrected
+                significant_mask = np.zeros(len(p_values_raw), dtype=bool)
+                significant_mask[valid_mask] = rejected
+            else:
+                significant_mask = np.zeros(len(p_values_raw), dtype=bool)
+
+            # Store results
+            results[comparison_name] = {
+                "group1": group1,
+                "group2": group2,
+                "time_bins": time_bins,
+                "observed_diffs": observed_diffs,
+                "p_values_raw": p_values_raw,
+                "p_values_corrected": p_values_corrected,
+                "significant_timepoints": np.where(significant_mask)[0],
+                "n_significant": np.sum(significant_mask),
+                "n_significant_raw": np.sum(p_values_raw < alpha),
+                "n_group1_per_bin": n_group1_per_bin,
+                "n_group2_per_bin": n_group2_per_bin,
+            }
+
+            print(f"  Raw significant bins: {results[comparison_name]['n_significant_raw']}/{n_bins}")
+            print(f"  FDR significant bins: {results[comparison_name]['n_significant']}/{n_bins} (α={alpha})")
+
+        print(f"\n{'='*80}")
+        print(f"✅ Permutation tests completed")
+        print(f"{'='*80}\n")
+
+        return results
+
+    def plot_permutation_test_results(
+        self,
+        data,
+        perm_results,
+        primary_col,
+        secondary_col,
+        metric_col,
+        mode,
+        bin_size=8.33,
+    ):
+        """
+        Plot trajectory with permutation test results highlighting significant time bins.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Normalized percentage time data
+        perm_results : dict
+            Results from compute_trajectory_permutation_tests
+        primary_col : str
+            Primary grouping column
+        secondary_col : str
+            Secondary grouping column
+        metric_col : str
+            Metric column name
+        mode : str
+            Analysis mode
+        bin_size : float
+            Time bin size (should match what was used in permutation tests)
+        """
+        # Create combined grouping
+        data_copy = data.copy()
+        data_copy["combined_group"] = data_copy[primary_col].astype(str) + "_" + data_copy[secondary_col].astype(str)
+        data_copy["time_bin"] = np.floor(data_copy["adjusted_time"] / bin_size) * bin_size
+
+        groups = sorted(data_copy["combined_group"].unique())
+
+        # Get color mapping
+        genotype_vals = [g.split("_")[1] for g in groups]
+        unique_genotypes = list(set(genotype_vals))
+        genotype_color_map = self.create_color_mapping(mode, unique_genotypes, "brain_region")
+
+        # Create figure with subplots for each pairwise comparison
+        n_comparisons = len(perm_results)
+        n_cols = 2
+        n_rows = int(np.ceil(n_comparisons / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 6 * n_rows))
+        if n_comparisons == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+
+        for idx, (comparison_name, result) in enumerate(perm_results.items()):
+            ax = axes[idx]
+
+            group1 = result["group1"]
+            group2 = result["group2"]
+
+            # Plot trajectories for these two groups
+            for group in [group1, group2]:
+                subset = data_copy[data_copy["combined_group"] == group]
+
+                # Get fly-level medians
+                fly_medians = subset.groupby(["fly", "time_bin"])[metric_col].median().reset_index()
+
+                # Calculate statistics
+                time_stats = fly_medians.groupby("time_bin")[metric_col].agg(["mean", "sem", "count"]).reset_index()
+
+                # Get color
+                pretraining_val, genotype_val = group.split("_")
+                color = genotype_color_map.get(genotype_val, "black")
+                linestyle = "-" if pretraining_val == "y" else "--"
+
+                # Plot
+                ax.plot(
+                    time_stats["time_bin"],
+                    time_stats["mean"],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2.5,
+                    alpha=0.9,
+                    label=group.replace("_", " + "),
+                )
+
+                # Add CI
+                ci = stats.t.ppf(0.975, time_stats["count"] - 1) * time_stats["sem"]
+                ax.fill_between(
+                    time_stats["time_bin"], time_stats["mean"] - ci, time_stats["mean"] + ci, color=color, alpha=0.15
+                )
+
+            # Highlight significant time bins
+            time_bins = result["time_bins"]
+            significant_bins = result["significant_timepoints"]
+
+            if len(significant_bins) > 0:
+                y_min, y_max = ax.get_ylim()
+                for sig_idx in significant_bins:
+                    t_bin = time_bins[sig_idx]
+                    ax.axvspan(t_bin - bin_size / 2, t_bin + bin_size / 2, alpha=0.2, color="red", zorder=0)
+
+            # Formatting
+            ax.set_title(
+                f"{comparison_name}\n{result['n_significant']} significant bins (FDR α=0.05)",
+                fontsize=12,
+                fontweight="bold",
+            )
+            ax.set_xlabel("Time (%)", fontsize=10)
+            ax.set_ylabel(metric_col.replace("_", " ").title(), fontsize=10)
+            ax.legend(loc="best", fontsize=9)
+            ax.grid(True, alpha=0.3)
+            ax.axvline(x=0, color="black", linestyle=":", alpha=0.7)
+
+        # Hide unused subplots
+        for idx in range(n_comparisons, len(axes)):
+            axes[idx].set_visible(False)
+
+        plt.suptitle(
+            f'Trajectory Permutation Tests: {metric_col.replace("_", " ").title()}\n'
+            f"(Red shading = FDR-corrected significant difference)",
+            fontsize=14,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        # Save
+        self._save_plot(fig, f"{metric_col}_permutation_tests", mode)
+
+    def _save_permutation_results_to_csv(self, perm_results, metric_col, mode):
+        """Save permutation test results to CSV file."""
+        output_config = self.config["output"]
+
+        # Prepare data for export
+        export_data = []
+
+        for comparison_name, result in perm_results.items():
+            for i, time_bin in enumerate(result["time_bins"]):
+                export_data.append(
+                    {
+                        "comparison": comparison_name,
+                        "group1": result["group1"],
+                        "group2": result["group2"],
+                        "time_bin": time_bin,
+                        "observed_diff": result["observed_diffs"][i],
+                        "p_value_raw": result["p_values_raw"][i],
+                        "p_value_fdr": result["p_values_corrected"][i],
+                        "significant_fdr": result["p_values_corrected"][i] < 0.05,
+                        "n_group1": result["n_group1_per_bin"][i],
+                        "n_group2": result["n_group2_per_bin"][i],
+                    }
+                )
+
+        df_export = pd.DataFrame(export_data)
+
+        # Save to CSV
+        if mode.startswith("tnt_"):
+            output_dir = Path(__file__).parent / mode.replace("tnt_", "").upper()
+            output_dir.mkdir(exist_ok=True)
+            output_path = output_dir / f"{metric_col}_permutation_results.csv"
+        else:
+            output_path = Path(__file__).parent / f"{metric_col}_permutation_results.csv"
+
+        df_export.to_csv(output_path, index=False)
+        print(f"📄 Permutation results saved to: {output_path}")
+
     def _create_coordinate_line_plots(
         self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage", var_type=None
     ):
@@ -2386,8 +2777,8 @@ class F1AnalysisFramework:
                 if subset_clean.empty:
                     continue
 
-                # Create time bins
-                bin_size = 0.1 if time_type == "percentage" else 0.1
+                # Create time bins (match permutation test bin size: 8.33 = ~12 bins across 0-100%)
+                bin_size = 8.33 if time_type == "percentage" else 8.33
                 subset_clean = subset_clean.copy()
                 subset_clean["time_bin"] = np.floor(subset_clean[x_col] / bin_size) * bin_size
 
