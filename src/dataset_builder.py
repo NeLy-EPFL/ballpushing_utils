@@ -33,6 +33,7 @@ from Ballpushing_utils import utilities, config
 
 # Available datasets:
 # - coordinates : Full coordinates of ball and fly positions over time
+# - fly_positions : Raw tracking positions for all available keypoints (fly, ball, skeleton) - useful for heatmaps and position analyses
 # - event_metrics : individual event metrics for each fly
 # - summary : Summary of all events for each fly
 # - standardized_contacts : contact data reworked to be time standardized and fly centric
@@ -77,8 +78,8 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": [Path("/mnt/upramdya_data/MD/F1_Tracks/Videos")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/F1_Tracks/Datasets"),
+        "data_root": [Path("/mnt/upramdya_data/MD/Antennae_dissection/Videos")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Antennae_dissection/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -87,10 +88,12 @@ CONFIG = {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
             # "F1_checkpoints",
-            "F1_coordinates",
+            # "F1_coordinates",  # For F1 experiments only
+            # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps)
             # "standardized_contacts",
             "summary",  # Re-enabled for testing the optimization
-            # "coordinates",
+            "coordinates",  # For regular experiments
+            # "fly_positions"
         ],  # Metrics to process (add/remove as needed)
         "memory_threshold_mb": 2048,  # Memory threshold in MB for conditional cache clearing
     },
