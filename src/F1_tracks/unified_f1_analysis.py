@@ -20,19 +20,31 @@ import sys
 from pathlib import Path
 from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu, kruskal
+from statsmodels.stats.multitest import multipletests
 from matplotlib.patches import Rectangle
 
 
 class F1AnalysisFramework:
     """Unified framework for F1 tracks analysis."""
 
-    def __init__(self, config_path=None):
-        """Initialize the framework with configuration."""
+    def __init__(self, config_path=None, output_dir=None):
+        """Initialize the framework with configuration.
+
+        Args:
+            config_path: Path to YAML configuration file
+            output_dir: Base output directory for plots. If None, uses defaults based on mode:
+                       - control: /mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New
+                       - tnt_mb247: /mnt/upramdya_data/MD/F1_Tracks/MB247
+                       - tnt_lc10_2: /mnt/upramdya_data/MD/F1_Tracks/LC10-2
+        """
         if config_path is None:
             config_path = Path(__file__).parent / "analysis_config.yaml"
 
         with open(config_path, "r") as f:
             self.config = yaml.safe_load(f)
+
+        # Store custom output directory if provided
+        self.custom_output_dir = Path(output_dir) if output_dir else None
 
         # Initialize brain region mappings if available
         self.setup_brain_region_mappings()
@@ -88,12 +100,33 @@ class F1AnalysisFramework:
 
         detected_cols = {}
 
+        # Columns to explicitly exclude from detection (never use as grouping variables)
+        excluded_cols = {"fly", "time_bin", "time_bin_center", "adjusted_time"}
+
         # Detect primary grouping variable (usually pretraining)
         primary_key = grouping_vars["primary"]
         if primary_key in detection_config:
             patterns = detection_config[primary_key]["patterns"]
             for col in df.columns:
+                # Skip excluded columns
+                if col.lower() in excluded_cols or col in excluded_cols:
+                    continue
+
+                # Skip columns with "distance" or "ball" in the name (these are measurements, not groups)
+                if "distance" in col.lower() or "euclidean" in col.lower():
+                    continue
+
                 if any(pattern.lower() in col.lower() for pattern in patterns):
+                    # prefer non-numeric columns for grouping variables (e.g., 'Pretraining')
+                    try:
+                        col_dtype = df[col].dtype
+                    except Exception:
+                        col_dtype = None
+
+                    if col_dtype is not None and np.issubdtype(col_dtype, np.number):
+                        # skip numeric columns like training distances
+                        continue
+
                     detected_cols["primary"] = col
                     break
 
@@ -102,7 +135,24 @@ class F1AnalysisFramework:
         if secondary_key in detection_config:
             patterns = detection_config[secondary_key]["patterns"]
             for col in df.columns:
+                # Skip excluded columns
+                if col.lower() in excluded_cols or col in excluded_cols:
+                    continue
+
+                # Skip columns with "distance" or "ball" in the name
+                if "distance" in col.lower() or "euclidean" in col.lower():
+                    continue
+
                 if any(pattern.lower() in col.lower() for pattern in patterns):
+                    # prefer non-numeric columns for grouping variables
+                    try:
+                        col_dtype = df[col].dtype
+                    except Exception:
+                        col_dtype = None
+
+                    if col_dtype is not None and np.issubdtype(col_dtype, np.number):
+                        continue
+
                     detected_cols["secondary"] = col
                     break
 
@@ -183,17 +233,65 @@ class F1AnalysisFramework:
             return plot_config["pretraining_colors"]
         elif variable_type == "f1_condition" and "f1_condition_colors" in plot_config:
             return plot_config["f1_condition_colors"]
-        elif variable_type == "brain_region" and "brain_region_colors" in plot_config:
-            # For genotype-based analysis, map genotypes to brain regions then to colors
+        elif variable_type in ("brain_region", "genotype") and "brain_region_colors" in plot_config:
+            # Map either brain-region names or genotypes to brain-region colors.
+            # If the provided value is already a brain-region name, use it directly;
+            # otherwise try to resolve genotype -> brain_region -> color.
             color_mapping = {}
-            for genotype in values:
-                brain_region = self.get_brain_region_for_genotype(genotype, mode)
-                color_mapping[genotype] = plot_config["brain_region_colors"].get(brain_region, "#808080")
+            for val in values:
+                # if the value directly matches a brain region entry, use it
+                if val in plot_config["brain_region_colors"]:
+                    color_mapping[val] = plot_config["brain_region_colors"].get(val)
+                    continue
+
+                # otherwise, attempt to map genotype -> brain region -> color
+                brain_region = self.get_brain_region_for_genotype(val, mode)
+                color_mapping[val] = plot_config["brain_region_colors"].get(brain_region, "#808080")
             return color_mapping
         else:
             # Fallback to seaborn palette
             colors = sns.color_palette("Set2", n_colors=len(values))
             return dict(zip(values, colors))
+
+    def create_combined_style_mapping(self, mode, genotypes, pretraining_values):
+        """
+        Create combined style mapping for genotype + pretraining.
+        Returns dict mapping (genotype, pretraining) tuples to {'color': ..., 'linestyle': ...}.
+
+        Args:
+            mode: Analysis mode
+            genotypes: List of unique genotype values
+            pretraining_values: List of unique pretraining values
+
+        Returns:
+            Dictionary with keys (genotype, pretraining) and values {'color': str, 'linestyle': str}
+        """
+        plot_config = self.config["plot_styling"][mode]
+        style_mapping = {}
+
+        # Map genotypes to brain region colors
+        genotype_colors = {}
+        if "brain_region_colors" in plot_config:
+            for genotype in genotypes:
+                brain_region = self.get_brain_region_for_genotype(genotype, mode)
+                genotype_colors[genotype] = plot_config["brain_region_colors"].get(brain_region, "#808080")
+        else:
+            # Fallback to default colors
+            colors = sns.color_palette("Set2", n_colors=len(genotypes))
+            genotype_colors = dict(zip(genotypes, colors))
+
+        # Linestyle mapping: dotted for 'n', solid for 'y'
+        linestyle_map = {"n": ":", "y": "-"}
+
+        # Create combined mapping
+        for genotype in genotypes:
+            for pretraining in pretraining_values:
+                style_mapping[(genotype, pretraining)] = {
+                    "color": genotype_colors[genotype],
+                    "linestyle": linestyle_map.get(pretraining, "-"),
+                }
+
+        return style_mapping
 
     def calculate_proportions_and_stats(self, data, group_col, binary_col):
         """Calculate proportions and statistical tests for binary data."""
@@ -395,7 +493,7 @@ class F1AnalysisFramework:
             ax.set_ylim(0, 1.1)
 
             # Add statistical annotation
-            if not np.isnan(p_value):
+            if p_value is not None and isinstance(p_value, (int, float, np.floating)) and not np.isnan(p_value):
                 ax.text(
                     0.02,
                     0.98,
@@ -461,7 +559,7 @@ class F1AnalysisFramework:
             ax.set_xticklabels(prop_data["combined_group"], rotation=45, ha="right")
 
             # Add statistical annotation
-            if not np.isnan(p_value):
+            if p_value is not None and isinstance(p_value, (int, float, np.floating)) and not np.isnan(p_value):
                 ax.text(
                     0.02,
                     0.98,
@@ -509,27 +607,213 @@ class F1AnalysisFramework:
         ax.tick_params(axis="x", rotation=45)
 
     def _save_plot(self, fig, plot_name, mode):
-        """Save plot to file."""
+        """Save plot to file in both PNG and PDF formats."""
         output_config = self.config["output"]
         if output_config["save_plots"]:
-            # Save in mode-specific subdirectory if it's a TNT mode
-            if mode.startswith("tnt_"):
-                output_dir = Path(__file__).parent / mode.replace("tnt_", "").upper()
-                output_dir.mkdir(exist_ok=True)
-                output_path = output_dir / f"{plot_name}.{output_config['plot_format']}"
+            # Determine output directory
+            if self.custom_output_dir:
+                # Use custom output directory if provided
+                output_dir = self.custom_output_dir
             else:
-                output_path = Path(__file__).parent / f"{plot_name}.{output_config['plot_format']}"
+                # Use default paths based on mode
+                if mode == "control":
+                    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
+                elif mode == "tnt_mb247":
+                    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
+                elif mode == "tnt_lc10_2":
+                    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+                else:
+                    # Fallback to current directory for unknown modes
+                    output_dir = Path(__file__).parent
 
-            plt.savefig(output_path, dpi=output_config["dpi"], bbox_inches=output_config["bbox_inches"])
-            print(f"Plot saved to: {output_path}")
+            # Create output directory if it doesn't exist
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save in both PNG and PDF formats
+            formats_to_save = ["png", "pdf"]
+
+            for fmt in formats_to_save:
+                output_path = output_dir / f"{plot_name}.{fmt}"
+
+                # Attempt save, but catch very large-image errors and retry with safer settings
+                try:
+                    plt.savefig(output_path, dpi=output_config["dpi"], bbox_inches=output_config["bbox_inches"])
+                    print(f"Plot saved to: {output_path}")
+                except Exception as e:
+                    print(f"⚠️  Save failed ({fmt}): {e}")
+                    # Try a safer save: lower DPI and no bbox trimming (for PNG only)
+                    if fmt == "png":
+                        try:
+                            safe_dpi = max(80, int(output_config.get("dpi", 300) / 2))
+                            print(f"ℹ️  Retrying PNG save with dpi={safe_dpi} and bbox_inches=None")
+                            plt.savefig(output_path, dpi=safe_dpi, bbox_inches=None)
+                            print(f"Plot saved to (safe): {output_path}")
+                        except Exception as e2:
+                            print(f"⚠️  Safe PNG save also failed: {e2}")
+                            # As a last resort, save a small thumbnail
+                            try:
+                                thumb_path = output_dir / f"{plot_name}_thumbnail.png"
+                                print(f"ℹ️  Saving thumbnail to {thumb_path} (low dpi)")
+                                plt.savefig(thumb_path, dpi=72, bbox_inches=None)
+                                print(f"Thumbnail saved to: {thumb_path}")
+                            except Exception as e3:
+                                print(f"❌ Failed to save PNG plot or thumbnail: {e3}")
+                    else:
+                        # For PDF, just try with no bbox trimming
+                        try:
+                            print(f"ℹ️  Retrying PDF save with bbox_inches=None")
+                            plt.savefig(output_path, bbox_inches=None)
+                            print(f"PDF saved to: {output_path}")
+                        except Exception as e2:
+                            print(f"❌ Failed to save PDF: {e2}")
 
         if output_config["show_plots"]:
-            plt.show()
+            try:
+                plt.show()
+            except Exception:
+                # If display fails (headless env) just close
+                plt.close()
         else:
             plt.close()
 
-    def analyze_boxplots(self, mode, metric_type="interaction_rate"):
-        """Analyze continuous metrics using boxplots with scatter overlay."""
+    def _permutation_test(self, groups, stat_func, n_permutations=10000):
+        """
+        Perform permutation test for difference between groups.
+
+        Args:
+            groups: List of arrays, one per group
+            stat_func: Function to calculate test statistic (e.g., lambda x: [np.mean(g) for g in x])
+            n_permutations: Number of permutations
+
+        Returns:
+            p_value: Two-tailed p-value
+            observed_stat: Observed test statistic
+        """
+        # Calculate observed statistic
+        observed_stat = stat_func(groups)
+
+        # For mean difference: use difference between groups
+        # For median difference: use difference between groups
+        if len(groups) == 2:
+            observed_diff = observed_stat[0] - observed_stat[1]
+        else:
+            # For >2 groups, use variance of means/medians as test statistic
+            observed_diff = np.var(observed_stat)
+
+        # Combine all data
+        all_data = np.concatenate(groups)
+        group_sizes = [len(g) for g in groups]
+
+        # Perform permutations
+        perm_stats = []
+        for _ in range(n_permutations):
+            # Shuffle data
+            shuffled = np.random.permutation(all_data)
+
+            # Split into groups
+            perm_groups = []
+            start_idx = 0
+            for size in group_sizes:
+                perm_groups.append(shuffled[start_idx : start_idx + size])
+                start_idx += size
+
+            # Calculate statistic
+            perm_stat = stat_func(perm_groups)
+
+            if len(groups) == 2:
+                perm_diff = perm_stat[0] - perm_stat[1]
+            else:
+                perm_diff = np.var(perm_stat)
+
+            perm_stats.append(perm_diff)
+
+        # Calculate p-value (two-tailed)
+        perm_stats = np.array(perm_stats)
+        p_value = np.mean(np.abs(perm_stats) >= np.abs(observed_diff))
+
+        return p_value, observed_diff
+
+    def _bootstrap_ci(self, data, stat_func=np.mean, n_bootstrap=10000, confidence=0.95):
+        """
+        Calculate bootstrap confidence interval for a statistic.
+
+        Args:
+            data: Array of data
+            stat_func: Function to calculate statistic (default: mean)
+            n_bootstrap: Number of bootstrap samples
+            confidence: Confidence level
+
+        Returns:
+            ci_low, ci_high: Confidence interval bounds
+            point_estimate: Point estimate of the statistic
+        """
+        bootstrap_stats = []
+        n = len(data)
+
+        for _ in range(n_bootstrap):
+            sample = np.random.choice(data, size=n, replace=True)
+            bootstrap_stats.append(stat_func(sample))
+
+        bootstrap_stats = np.array(bootstrap_stats)
+        alpha = 1 - confidence
+        ci_low = np.percentile(bootstrap_stats, alpha / 2 * 100)
+        ci_high = np.percentile(bootstrap_stats, (1 - alpha / 2) * 100)
+        point_estimate = stat_func(data)
+
+        return ci_low, ci_high, point_estimate
+
+    def _cohens_d(self, group1, group2):
+        """Calculate Cohen's d effect size."""
+        n1, n2 = len(group1), len(group2)
+        var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+        pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+        return (np.mean(group1) - np.mean(group2)) / pooled_std
+
+    def _fdr_correction(self, p_values, alpha=0.05):
+        """
+        Benjamini-Hochberg FDR correction for multiple comparisons.
+
+        Args:
+            p_values: List or array of p-values
+            alpha: FDR threshold
+
+        Returns:
+            rejected: Boolean array indicating which hypotheses are rejected
+            corrected_p: FDR-corrected p-values
+        """
+        p_values = np.array(p_values)
+        n = len(p_values)
+
+        # Sort p-values and keep track of original indices
+        sorted_indices = np.argsort(p_values)
+        sorted_p = p_values[sorted_indices]
+
+        # Calculate critical values
+        critical_values = (np.arange(1, n + 1) / n) * alpha
+
+        # Find largest i where p(i) <= (i/n)*alpha
+        comparisons = sorted_p <= critical_values
+        if np.any(comparisons):
+            max_idx = np.where(comparisons)[0][-1]
+            rejected_sorted = np.zeros(n, dtype=bool)
+            rejected_sorted[: max_idx + 1] = True
+        else:
+            rejected_sorted = np.zeros(n, dtype=bool)
+
+        # Restore original order
+        rejected = np.zeros(n, dtype=bool)
+        rejected[sorted_indices] = rejected_sorted
+
+        # Calculate corrected p-values (q-values)
+        corrected_p = np.minimum(1, p_values * n / np.arange(1, n + 1)[np.argsort(np.argsort(p_values))])
+
+        return rejected, corrected_p
+
+    def analyze_boxplots(self, mode, metric_type=None):
+        """Analyze continuous metrics using boxplots with scatter overlay and pairwise comparisons.
+
+        If metric_type is None, analyzes all available metrics from the config.
+        """
         # Load and prepare data
         df = self.load_dataset(mode)
         if df is None:
@@ -543,47 +827,111 @@ class F1AnalysisFramework:
         # Filter data
         df_clean = self.filter_for_test_ball(df, detected_cols["ball_condition"])
 
-        # Get metric column
-        continuous_metrics = self.config["analysis_parameters"]["continuous_metrics"]
+        # Discover available metrics
+        continuous_metrics_config = self.config["analysis_parameters"]["continuous_metrics"]
 
-        if metric_type in continuous_metrics:
-            if isinstance(continuous_metrics[metric_type], str):
-                metric_col = continuous_metrics[metric_type]
-            else:
-                metric_col = continuous_metrics[metric_type][0]  # Take first if list
+        # Collect all metrics to analyze
+        metrics_to_analyze = []
+
+        if metric_type is None:
+            # Discover all available metrics
+            print("\n🔍 Discovering available metrics...")
+
+            # Get base metrics
+            base_metrics = continuous_metrics_config.get("base_metrics", [])
+            for metric in base_metrics:
+                if metric in df_clean.columns:
+                    metrics_to_analyze.append(metric)
+                    print(f"  ✓ {metric}")
+
+            # Get pattern-based metrics
+            additional_patterns = continuous_metrics_config.get("additional_patterns", [])
+            excluded_patterns = continuous_metrics_config.get("excluded_patterns", [])
+
+            for pattern in additional_patterns:
+                pattern_cols = [col for col in df_clean.columns if pattern in col.lower()]
+                for col in pattern_cols:
+                    if col not in metrics_to_analyze and col not in [
+                        detected_cols["primary"],
+                        detected_cols["secondary"],
+                        detected_cols["ball_condition"],
+                    ]:
+                        # Check if should be excluded
+                        should_exclude = any(excl_pattern in col.lower() for excl_pattern in excluded_patterns)
+                        if should_exclude:
+                            continue
+                        # Check if numeric
+                        if pd.api.types.is_numeric_dtype(df_clean[col]):
+                            metrics_to_analyze.append(col)
+                            print(f"  ✓ {col} (pattern: '{pattern}')")
+
+            print(f"\n📊 Found {len(metrics_to_analyze)} metrics to analyze")
+
         else:
-            metric_col = metric_type  # Use as-is if not in config
+            # Single metric specified
+            if metric_type in continuous_metrics_config:
+                if isinstance(continuous_metrics_config[metric_type], str):
+                    metrics_to_analyze = [continuous_metrics_config[metric_type]]
+                else:
+                    metrics_to_analyze = continuous_metrics_config[metric_type]
+            else:
+                metrics_to_analyze = [metric_type]
 
-        if metric_col not in df_clean.columns:
-            print(f"Metric column '{metric_col}' not found in dataset")
+        if not metrics_to_analyze:
+            print("No metrics found to analyze")
             return
 
-        # Prepare analysis data
-        analysis_cols = [
-            detected_cols["primary"],
-            detected_cols["secondary"],
-            detected_cols["ball_condition"],
-            metric_col,
-        ]
-        df_analysis = df_clean[analysis_cols].dropna(
-            subset=[detected_cols["primary"], detected_cols["secondary"], detected_cols["ball_condition"]]
-        )
+        # Storage for all results (for markdown summary)
+        all_results = []
 
-        # Remove infinite values
-        mask = pd.isna(df_analysis[metric_col]) | np.isinf(df_analysis[metric_col])
-        df_analysis = df_analysis[~mask]
+        # Analyze each metric
+        for metric_idx, metric_col in enumerate(metrics_to_analyze):
+            print(f"\n{'='*60}")
+            print(f"Analyzing metric {metric_idx + 1}/{len(metrics_to_analyze)}: {metric_col}")
+            print(f"{'='*60}")
 
-        print(f"Analysis data shape: {df_analysis.shape}")
+            if metric_col not in df_clean.columns:
+                print(f"  ⚠️  Metric '{metric_col}' not found in dataset, skipping")
+                continue
 
-        if len(df_analysis) < 2:
-            print("Insufficient data for analysis")
-            return
+            # Prepare analysis data for this metric
+            analysis_cols = [
+                detected_cols["primary"],
+                detected_cols["secondary"],
+                detected_cols["ball_condition"],
+                metric_col,
+            ]
+            df_metric = df_clean[analysis_cols].dropna(
+                subset=[detected_cols["primary"], detected_cols["secondary"], detected_cols["ball_condition"]]
+            )
 
-        # Create plots based on mode
-        if mode == "control":
-            self._create_control_boxplots(df_analysis, detected_cols, metric_col, mode)
-        else:  # TNT modes
-            self._create_tnt_boxplots(df_analysis, detected_cols, metric_col, mode)
+            # Remove infinite values
+            mask = pd.isna(df_metric[metric_col]) | np.isinf(df_metric[metric_col])
+            df_metric = df_metric[~mask]
+
+            if len(df_metric) < 2:
+                print(f"  ⚠️  Insufficient data for '{metric_col}', skipping")
+                continue
+
+            print(f"  Data shape: {df_metric.shape}")
+
+            # Perform pairwise comparisons and create plots
+            if mode == "control":
+                metric_results = self._create_control_boxplots_with_pairwise(df_metric, detected_cols, metric_col, mode)
+            else:  # TNT modes
+                metric_results = self._create_tnt_boxplots_with_pairwise(df_metric, detected_cols, metric_col, mode)
+
+            # Store results
+            if metric_results:
+                all_results.append({"metric": metric_col, "results": metric_results})
+
+        # Generate markdown summary
+        if all_results:
+            self._generate_boxplot_summary_markdown(all_results, mode, detected_cols)
+
+        print(f"\n{'='*60}")
+        print(f"✅ Boxplot analysis complete! Analyzed {len(all_results)} metrics")
+        print(f"{'='*60}\n")
 
     def _create_control_boxplots(self, data, cols, metric_col, mode):
         """Create boxplots for control mode."""
@@ -680,25 +1028,92 @@ class F1AnalysisFramework:
             n = len(data[data[x_col] == condition])
             ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
 
-        # Statistical test
+        # Statistical testing with permutation tests
         groups = [data[data[x_col] == condition][y_col].values for condition in unique_values]
-        if len(groups) == 2:
-            stat, p_value = stats.mannwhitneyu(groups[0], groups[1], alternative="two-sided")
-            test_name = "Mann-Whitney U"
-        elif len(groups) > 2:
-            stat, p_value = stats.kruskal(*groups)
-            test_name = "Kruskal-Wallis"
-        else:
+
+        if len(groups) < 2:
             return ax
 
+        # Perform permutation tests for mean and median
+        p_mean, diff_mean = self._permutation_test(groups, lambda x: [np.mean(g) for g in x])
+        p_median, diff_median = self._permutation_test(groups, lambda x: [np.median(g) for g in x])
+
+        # For multiple groups, apply FDR correction
+        if len(groups) > 2:
+            # Pairwise comparisons
+            p_values_mean = []
+            p_values_median = []
+            comparisons = []
+
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    p_m, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.mean(g) for g in x])
+                    p_md, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.median(g) for g in x])
+                    p_values_mean.append(p_m)
+                    p_values_median.append(p_md)
+                    comparisons.append(f"{unique_values[i]} vs {unique_values[j]}")
+
+            # FDR correction
+            _, p_mean_corrected = self._fdr_correction(p_values_mean)
+            _, p_median_corrected = self._fdr_correction(p_values_median)
+
+            # Use the minimum corrected p-value for display
+            p_mean_display = np.min(p_mean_corrected)
+            p_median_display = np.min(p_median_corrected)
+            test_label = "Permutation (FDR corrected)"
+        else:
+            p_mean_display = p_mean
+            p_median_display = p_median
+            test_label = "Permutation test"
+
+        # Bootstrap confidence intervals for mean and median
+        ci_text_lines = []
+        for i, condition in enumerate(unique_values):
+            group_data = groups[i]
+            # Mean CI
+            ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data, np.mean)
+            # Median CI
+            ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data, np.median)
+            ci_text_lines.append(f"{condition}:")
+            ci_text_lines.append(f"  μ={mean_est:.3f} [{ci_low_mean:.3f}, {ci_high_mean:.3f}]")
+            ci_text_lines.append(f"  M={median_est:.3f} [{ci_low_median:.3f}, {ci_high_median:.3f}]")
+
+        # Calculate effect size for 2-group comparison
+        if len(groups) == 2:
+            cohens_d = self._cohens_d(groups[0], groups[1])
+            effect_text = f"Cohen's d = {cohens_d:.3f}"
+        else:
+            effect_text = ""
+
+        # Create annotation text
+        stat_text = f"{test_label}\n"
+        stat_text += f"Mean: p = {p_mean_display:.4f}\n"
+        stat_text += f"Median: p = {p_median_display:.4f}"
+        if effect_text:
+            stat_text += f"\n{effect_text}"
+
+        # Add statistical annotation box
         ax.text(
             0.02,
             0.98,
-            f"{test_name}: p = {p_value:.4f}",
+            stat_text,
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=9,
             va="top",
             bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+        )
+
+        # Add bootstrap CI information
+        ci_full_text = "Bootstrap 95% CI:\n" + "\n".join(ci_text_lines)
+        ax.text(
+            0.98,
+            0.98,
+            ci_full_text,
+            transform=ax.transAxes,
+            fontsize=7,
+            va="top",
+            ha="right",
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8),
         )
 
         return ax
@@ -784,28 +1199,803 @@ class F1AnalysisFramework:
             n = len(data_copy[data_copy["combined_group"] == group])
             ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
 
-        # Statistical test
+        # Statistical testing with permutation tests
         groups = [data_copy[data_copy["combined_group"] == group][y_col].values for group in unique_groups]
-        if len(groups) == 2:
-            stat, p_value = stats.mannwhitneyu(groups[0], groups[1], alternative="two-sided")
-            test_name = "Mann-Whitney U"
-        elif len(groups) > 2:
-            stat, p_value = stats.kruskal(*groups)
-            test_name = "Kruskal-Wallis"
-        else:
+
+        if len(groups) < 2:
             return ax
 
+        # Perform permutation tests for mean and median
+        p_mean, diff_mean = self._permutation_test(groups, lambda x: [np.mean(g) for g in x])
+        p_median, diff_median = self._permutation_test(groups, lambda x: [np.median(g) for g in x])
+
+        # For multiple groups, apply FDR correction
+        if len(groups) > 2:
+            # Pairwise comparisons
+            p_values_mean = []
+            p_values_median = []
+
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    p_m, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.mean(g) for g in x])
+                    p_md, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.median(g) for g in x])
+                    p_values_mean.append(p_m)
+                    p_values_median.append(p_md)
+
+            # FDR correction
+            _, p_mean_corrected = self._fdr_correction(p_values_mean)
+            _, p_median_corrected = self._fdr_correction(p_values_median)
+
+            # Use the minimum corrected p-value for display
+            p_mean_display = np.min(p_mean_corrected)
+            p_median_display = np.min(p_median_corrected)
+            test_label = "Permutation (FDR corrected)"
+        else:
+            p_mean_display = p_mean
+            p_median_display = p_median
+            test_label = "Permutation test"
+
+        # Bootstrap confidence intervals for mean and median (for 2 groups only, to keep annotation manageable)
+        if len(groups) == 2:
+            ci_text_lines = []
+            for i, group in enumerate(unique_groups):
+                group_data = groups[i]
+                # Mean CI
+                ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data, np.mean)
+                # Median CI
+                ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data, np.median)
+                ci_text_lines.append(f"{group}:")
+                ci_text_lines.append(f"  μ={mean_est:.3f} [{ci_low_mean:.3f}, {ci_high_mean:.3f}]")
+                ci_text_lines.append(f"  M={median_est:.3f} [{ci_low_median:.3f}, {ci_high_median:.3f}]")
+
+            # Add bootstrap CI box
+            ci_full_text = "Bootstrap 95% CI:\n" + "\n".join(ci_text_lines)
+            ax.text(
+                0.98,
+                0.98,
+                ci_full_text,
+                transform=ax.transAxes,
+                fontsize=7,
+                va="top",
+                ha="right",
+                bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8),
+            )
+
+        # Calculate effect size for 2-group comparison
+        if len(groups) == 2:
+            cohens_d = self._cohens_d(groups[0], groups[1])
+            effect_text = f"Cohen's d = {cohens_d:.3f}"
+        else:
+            effect_text = ""
+
+        # Create annotation text
+        stat_text = f"{test_label}\n"
+        stat_text += f"Mean: p = {p_mean_display:.4f}\n"
+        stat_text += f"Median: p = {p_median_display:.4f}"
+        if effect_text:
+            stat_text += f"\n{effect_text}"
+
+        # Add statistical annotation
         ax.text(
             0.02,
             0.98,
-            f"{test_name}: p = {p_value:.4f}",
+            stat_text,
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=9,
             va="top",
             bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
         )
 
         return ax
+
+    def _create_control_boxplots_with_pairwise(self, data, cols, metric_col, mode):
+        """Create boxplots for control mode with pairwise comparisons."""
+        plot_config = self.config["plot_styling"][mode]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+        # Plot by primary grouping with pairwise stats
+        results_primary = self._create_boxplot_with_pairwise(
+            data,
+            cols["primary"],
+            metric_col,
+            f"{metric_col.replace('_', ' ').title()} by {cols['primary'].title()}",
+            ax1,
+            mode,
+            "pretraining",
+        )
+
+        # Plot by secondary grouping with pairwise stats
+        results_secondary = self._create_boxplot_with_pairwise(
+            data,
+            cols["secondary"],
+            metric_col,
+            f"{metric_col.replace('_', ' ').title()} by {cols['secondary'].replace('_', ' ').title()}",
+            ax2,
+            mode,
+            "f1_condition",
+        )
+
+        plt.tight_layout()
+        self._save_plot(fig, f"{metric_col}_boxplots", mode)
+
+        return {
+            "primary": results_primary,
+            "secondary": results_secondary,
+        }
+
+    def _create_tnt_boxplots_with_pairwise(self, data, cols, metric_col, mode):
+        """Create boxplots for TNT modes with pairwise comparisons."""
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+        # Combined plot with pairwise stats
+        results_combined = self._create_combined_boxplot_with_pairwise(
+            data,
+            cols["primary"],
+            cols["secondary"],
+            metric_col,
+            f"{metric_col.replace('_', ' ').title()} by {cols['primary'].title()} + {cols['secondary'].title()}",
+            ax,
+            mode,
+        )
+
+        plt.tight_layout()
+        self._save_plot(fig, f"{metric_col}_boxplots", mode)
+
+        return {
+            "combined": results_combined,
+        }
+
+    def _create_boxplot_with_pairwise(self, data, x_col, y_col, title, ax, mode, var_type):
+        """Create boxplot with scatter overlay and pairwise comparisons."""
+        # Get ordering and colors
+        unique_values = sorted(data[x_col].unique())
+        color_mapping = self.create_color_mapping(mode, unique_values, var_type)
+
+        # Create boxplot
+        box_plot = sns.boxplot(
+            data=data,
+            x=x_col,
+            y=y_col,
+            ax=ax,
+            order=unique_values,
+            palette=[color_mapping.get(v, "gray") for v in unique_values],
+        )
+
+        # Style boxplot
+        for patch in box_plot.patches:
+            patch.set_facecolor("none")
+            patch.set_edgecolor("black")
+            patch.set_linewidth(1.5)
+
+        for line in ax.lines:
+            line.set_color("black")
+            line.set_linewidth(1.5)
+
+        # Add scatter
+        for i, condition in enumerate(unique_values):
+            condition_data = data[data[x_col] == condition]
+            color = color_mapping.get(condition, "black")
+
+            y_values = condition_data[y_col].values
+            x_positions = np.random.normal(i, 0.1, size=len(y_values))
+
+            ax.scatter(x_positions, y_values, c=color, s=30, alpha=0.7, edgecolors="black", linewidth=0.5)
+
+        # Formatting
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12)
+        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
+
+        # Add sample sizes
+        for i, condition in enumerate(unique_values):
+            n = len(data[data[x_col] == condition])
+            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
+
+        # Statistical testing with pairwise comparisons
+        groups = [data[data[x_col] == condition][y_col].values for condition in unique_values]
+        group_names = unique_values
+
+        pairwise_results = []
+
+        if len(groups) >= 2:
+            # Perform all pairwise comparisons
+            p_values_mean = []
+            p_values_median = []
+            comparisons = []
+
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    # Permutation tests for this pair
+                    p_mean, diff_mean = self._permutation_test(
+                        [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                    )
+                    p_median, diff_median = self._permutation_test(
+                        [groups[i], groups[j]], lambda x: [np.median(g) for g in x]
+                    )
+
+                    p_values_mean.append(p_mean)
+                    p_values_median.append(p_median)
+                    comparisons.append((group_names[i], group_names[j]))
+
+                    # Store detailed results
+                    pairwise_results.append(
+                        {
+                            "group1": group_names[i],
+                            "group2": group_names[j],
+                            "n1": len(groups[i]),
+                            "n2": len(groups[j]),
+                            "mean1": np.mean(groups[i]),
+                            "mean2": np.mean(groups[j]),
+                            "median1": np.median(groups[i]),
+                            "median2": np.median(groups[j]),
+                            "p_mean_raw": p_mean,
+                            "p_median_raw": p_median,
+                            "mean_diff": diff_mean,
+                            "median_diff": diff_median,
+                        }
+                    )
+
+            # Apply FDR correction
+            if len(p_values_mean) > 0:
+                _, p_mean_corrected, _, _ = multipletests(p_values_mean, alpha=0.05, method="fdr_bh")
+                _, p_median_corrected, _, _ = multipletests(p_values_median, alpha=0.05, method="fdr_bh")
+
+                # Update pairwise results with corrected p-values
+                for idx, result in enumerate(pairwise_results):
+                    result["p_mean_fdr"] = p_mean_corrected[idx]
+                    result["p_median_fdr"] = p_median_corrected[idx]
+                    result["significant_mean"] = p_mean_corrected[idx] < 0.05
+                    result["significant_median"] = p_median_corrected[idx] < 0.05
+
+                # Draw significance bars on plot
+                y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
+                y_max = ax.get_ylim()[1]
+                bar_height = y_range * 0.02
+
+                # Track which vertical positions we've used for bars
+                bar_y_positions = []
+
+                for idx, (comp_i, comp_j) in enumerate(comparisons):
+                    result = pairwise_results[idx]
+                    if result["significant_mean"] or result["significant_median"]:
+                        # Find group indices
+                        i = group_names.index(comp_i)
+                        j = group_names.index(comp_j)
+
+                        # Find a good y position for this bar
+                        max_overlap_level = 0
+                        for existing_i, existing_j, level in bar_y_positions:
+                            # Check if bars would overlap
+                            if not (j < existing_i or i > existing_j):
+                                max_overlap_level = max(max_overlap_level, level + 1)
+
+                        bar_level = max_overlap_level
+                        y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
+                        bar_y_positions.append((i, j, bar_level))
+
+                        # Draw mean significance bar (red) if significant
+                        if result["significant_mean"]:
+                            ax.plot([i, j], [y_bar, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                            ax.plot([i, i], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                            ax.plot([j, j], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+
+                            # Add significance stars for mean
+                            p_val = result["p_mean_fdr"]
+                            if p_val < 0.001:
+                                stars = "***"
+                            elif p_val < 0.01:
+                                stars = "**"
+                            elif p_val < 0.05:
+                                stars = "*"
+                            else:
+                                stars = ""
+
+                            if stars:
+                                ax.text(
+                                    (i + j) / 2,
+                                    y_bar + bar_height,
+                                    stars,
+                                    ha="center",
+                                    va="bottom",
+                                    fontsize=10,
+                                    color="red",
+                                    fontweight="bold",
+                                )
+
+                        # Draw median significance bar (blue) if significant
+                        if result["significant_median"]:
+                            # Offset slightly if both mean and median are significant
+                            y_bar_median = y_bar + bar_height * 2 if result["significant_mean"] else y_bar
+
+                            ax.plot([i, j], [y_bar_median, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+                            ax.plot([i, i], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+                            ax.plot([j, j], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+
+                            # Add significance stars for median
+                            p_val = result["p_median_fdr"]
+                            if p_val < 0.001:
+                                stars = "***"
+                            elif p_val < 0.01:
+                                stars = "**"
+                            elif p_val < 0.05:
+                                stars = "*"
+                            else:
+                                stars = ""
+
+                            if stars:
+                                ax.text(
+                                    (i + j) / 2,
+                                    y_bar_median + bar_height,
+                                    stars,
+                                    ha="center",
+                                    va="bottom",
+                                    fontsize=10,
+                                    color="blue",
+                                    fontweight="bold",
+                                )
+
+                # Adjust y-axis limits to accommodate significance bars
+                if pairwise_results and any(r["significant_mean"] or r["significant_median"] for r in pairwise_results):
+                    max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
+                    ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
+
+            # Create annotation text summarizing significant comparisons
+            sig_comparisons_mean = [
+                f"{comp[0]} vs {comp[1]}: p={p_mean_corrected[idx]:.4f}"
+                for idx, comp in enumerate(comparisons)
+                if p_mean_corrected[idx] < 0.05
+            ]
+
+            sig_comparisons_median = [
+                f"{comp[0]} vs {comp[1]}: p={p_median_corrected[idx]:.4f}"
+                for idx, comp in enumerate(comparisons)
+                if p_median_corrected[idx] < 0.05
+            ]
+
+            # Statistics are now in the markdown summary - no need for text box on plot
+
+        return {
+            "groups": group_names,
+            "n_samples": [len(g) for g in groups],
+            "means": [np.mean(g) for g in groups],
+            "medians": [np.median(g) for g in groups],
+            "pairwise": pairwise_results,
+        }
+
+    def _create_combined_boxplot_with_pairwise(self, data, primary_col, secondary_col, y_col, title, ax, mode):
+        """Create combined boxplot for TNT modes with pairwise comparisons."""
+        # Create combined grouping
+        data_copy = data.copy()
+        data_copy["combined_group"] = data_copy[secondary_col].astype(str) + " + " + data_copy[primary_col].astype(str)
+
+        unique_groups = sorted(data_copy["combined_group"].unique())
+
+        # Get colors based on genotype brain regions
+        genotype_vals = [group.split(" + ")[0] for group in unique_groups]
+        unique_genotypes = list(set(genotype_vals))
+        genotype_color_map = self.create_color_mapping(mode, unique_genotypes, "brain_region")
+
+        # Create boxplot
+        colors = []
+        for group in unique_groups:
+            genotype = group.split(" + ")[0]
+            colors.append(genotype_color_map.get(genotype, "gray"))
+
+        box_plot = sns.boxplot(data=data_copy, x="combined_group", y=y_col, ax=ax, order=unique_groups, palette=colors)
+
+        # Style based on pretraining
+        for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
+            pretraining = group.split(" + ")[1]
+            if pretraining == "n":
+                patch.set_facecolor("white")
+                patch.set_edgecolor(colors[i])
+                patch.set_linewidth(2)
+            else:
+                patch.set_facecolor(colors[i])
+                patch.set_edgecolor("black")
+                patch.set_linewidth(1.5)
+
+        # Style whiskers and medians
+        for i, group in enumerate(unique_groups):
+            pretraining = group.split(" + ")[1]
+            color = colors[i]
+            for j in range(i * 6, (i + 1) * 6):
+                if j < len(ax.lines):
+                    line = ax.lines[j]
+                    if pretraining == "n":
+                        line.set_color(color)
+                        line.set_linewidth(2)
+                    else:
+                        line.set_color("black")
+                        line.set_linewidth(1.5)
+
+        # Add scatter
+        sns.stripplot(
+            data=data_copy,
+            x="combined_group",
+            y=y_col,
+            ax=ax,
+            size=6,
+            alpha=0.7,
+            jitter=True,
+            dodge=False,
+            color="black",
+            order=unique_groups,
+        )
+
+        # Formatting
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Genotype + Pretraining", fontsize=12)
+        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
+        ax.tick_params(axis="x", rotation=45)
+
+        # Add sample sizes
+        for i, group in enumerate(unique_groups):
+            n = len(data_copy[data_copy["combined_group"] == group])
+            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=9, fontweight="bold")
+
+        # Statistical testing with SMART pairwise comparisons
+        # Only compare:
+        # 1. Within genotype, across pretraining (e.g., ctrl_n vs ctrl_y)
+        # 2. Within pretraining, across genotypes (e.g., ctrl_n vs tnt_n)
+        groups = [data_copy[data_copy["combined_group"] == group][y_col].values for group in unique_groups]
+        group_names = unique_groups
+
+        pairwise_results = []
+
+        if len(groups) >= 2:
+            # Build a mapping of group indices
+            group_info = {}
+            for i, group_name in enumerate(group_names):
+                genotype = group_name.split(" + ")[0]
+                pretraining = group_name.split(" + ")[1]
+                group_info[group_name] = {"idx": i, "genotype": genotype, "pretraining": pretraining}
+
+            # Perform SMART pairwise comparisons
+            p_values_mean = []
+            p_values_median = []
+            comparisons = []
+
+            for i in range(len(groups)):
+                for j in range(i + 1, len(groups)):
+                    group1_name = group_names[i]
+                    group2_name = group_names[j]
+
+                    g1_info = group_info[group1_name]
+                    g2_info = group_info[group2_name]
+
+                    # Check if this is a meaningful comparison
+                    # Case 1: Same genotype, different pretraining
+                    same_genotype = g1_info["genotype"] == g2_info["genotype"]
+                    diff_pretraining = g1_info["pretraining"] != g2_info["pretraining"]
+
+                    # Case 2: Same pretraining, different genotype
+                    same_pretraining = g1_info["pretraining"] == g2_info["pretraining"]
+                    diff_genotype = g1_info["genotype"] != g2_info["genotype"]
+
+                    # Only perform comparison if it's meaningful
+                    if (same_genotype and diff_pretraining) or (same_pretraining and diff_genotype):
+                        # Permutation tests for this pair
+                        p_mean, diff_mean = self._permutation_test(
+                            [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                        )
+                        p_median, diff_median = self._permutation_test(
+                            [groups[i], groups[j]], lambda x: [np.median(g) for g in x]
+                        )
+
+                        p_values_mean.append(p_mean)
+                        p_values_median.append(p_median)
+                        comparisons.append((group_names[i], group_names[j], i, j))
+
+                        # Store detailed results
+                        pairwise_results.append(
+                            {
+                                "group1": group_names[i],
+                                "group2": group_names[j],
+                                "group1_idx": i,
+                                "group2_idx": j,
+                                "n1": len(groups[i]),
+                                "n2": len(groups[j]),
+                                "mean1": np.mean(groups[i]),
+                                "mean2": np.mean(groups[j]),
+                                "median1": np.median(groups[i]),
+                                "median2": np.median(groups[j]),
+                                "p_mean_raw": p_mean,
+                                "p_median_raw": p_median,
+                                "mean_diff": diff_mean,
+                                "median_diff": diff_median,
+                                "comparison_type": "within_genotype" if same_genotype else "within_pretraining",
+                            }
+                        )
+
+            # Apply FDR correction
+            if len(p_values_mean) > 0:
+                _, p_mean_corrected, _, _ = multipletests(p_values_mean, alpha=0.05, method="fdr_bh")
+                _, p_median_corrected, _, _ = multipletests(p_values_median, alpha=0.05, method="fdr_bh")
+
+                # Update pairwise results with corrected p-values
+                for idx, result in enumerate(pairwise_results):
+                    result["p_mean_fdr"] = p_mean_corrected[idx]
+                    result["p_median_fdr"] = p_median_corrected[idx]
+                    result["significant_mean"] = p_mean_corrected[idx] < 0.05
+                    result["significant_median"] = p_median_corrected[idx] < 0.05
+
+                # Draw significance bars on plot
+                y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
+                y_max = ax.get_ylim()[1]
+                bar_height = y_range * 0.02
+
+                # Track which vertical positions we've used for bars
+                bar_y_positions = {}
+                current_bar_level = 0
+
+                for idx, result in enumerate(pairwise_results):
+                    if result["significant_mean"] or result["significant_median"]:
+                        i = result["group1_idx"]
+                        j = result["group2_idx"]
+
+                        # Find a good y position for this bar
+                        max_overlap_level = 0
+                        for existing_i, existing_j, level in bar_y_positions.get("used", []):
+                            # Check if bars would overlap
+                            if not (j < existing_i or i > existing_j):
+                                max_overlap_level = max(max_overlap_level, level + 1)
+
+                        bar_level = max_overlap_level
+                        y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
+
+                        # Store this bar's position
+                        if "used" not in bar_y_positions:
+                            bar_y_positions["used"] = []
+                        bar_y_positions["used"].append((i, j, bar_level))
+
+                        # Draw mean significance bar (red) if significant
+                        if result["significant_mean"]:
+                            ax.plot([i, j], [y_bar, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                            ax.plot([i, i], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                            ax.plot([j, j], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+
+                            # Add significance stars for mean
+                            p_val = result["p_mean_fdr"]
+                            if p_val < 0.001:
+                                stars = "***"
+                            elif p_val < 0.01:
+                                stars = "**"
+                            elif p_val < 0.05:
+                                stars = "*"
+                            else:
+                                stars = ""
+
+                            if stars:
+                                ax.text(
+                                    (i + j) / 2,
+                                    y_bar + bar_height,
+                                    stars,
+                                    ha="center",
+                                    va="bottom",
+                                    fontsize=10,
+                                    color="red",
+                                    fontweight="bold",
+                                )
+
+                        # Draw median significance bar (blue) if significant
+                        if result["significant_median"]:
+                            # Offset slightly if both mean and median are significant
+                            y_bar_median = y_bar + bar_height * 2 if result["significant_mean"] else y_bar
+
+                            ax.plot([i, j], [y_bar_median, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+                            ax.plot([i, i], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+                            ax.plot([j, j], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
+
+                            # Add significance stars for median
+                            p_val = result["p_median_fdr"]
+                            if p_val < 0.001:
+                                stars = "***"
+                            elif p_val < 0.01:
+                                stars = "**"
+                            elif p_val < 0.05:
+                                stars = "*"
+                            else:
+                                stars = ""
+
+                            if stars:
+                                ax.text(
+                                    (i + j) / 2,
+                                    y_bar_median + bar_height,
+                                    stars,
+                                    ha="center",
+                                    va="bottom",
+                                    fontsize=10,
+                                    color="blue",
+                                    fontweight="bold",
+                                )
+
+                # Adjust y-axis limits to accommodate significance bars
+                if pairwise_results and any(r["significant_mean"] or r["significant_median"] for r in pairwise_results):
+                    max_bar_level = max((level for _, _, level in bar_y_positions.get("used", [])), default=0)
+                    ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
+
+                # Count significant comparisons (for logging/debugging if needed)
+                sig_comparisons_mean = sum(1 for p in p_mean_corrected if p < 0.05)
+                sig_comparisons_median = sum(1 for p in p_median_corrected if p < 0.05)
+
+                # Statistics are now in the markdown summary - no need for text box on plot
+
+        return {
+            "groups": group_names,
+            "n_samples": [len(g) for g in groups],
+            "means": [np.mean(g) for g in groups],
+            "medians": [np.median(g) for g in groups],
+            "pairwise": pairwise_results,
+        }
+
+    def _generate_boxplot_summary_markdown(self, all_results, mode, detected_cols):
+        """Generate markdown summary of boxplot pairwise comparisons."""
+        # Determine output directory
+        if self.custom_output_dir:
+            output_dir = self.custom_output_dir
+        elif mode == "control":
+            output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
+        elif mode == "tnt_mb247":
+            output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
+        elif mode == "tnt_lc10_2":
+            output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+        else:
+            output_dir = Path(".")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        summary_file = output_dir / f"boxplot_pairwise_summary_{mode}.md"
+
+        # Check if this is an append operation
+        is_appending = summary_file.exists()
+
+        lines = []
+
+        if not is_appending:
+            # Full header for new file
+            lines.append(f"# Boxplot Pairwise Comparison Summary - {mode.replace('_', ' ').title()}")
+            lines.append("")
+            lines.append(f"**Analysis Mode:** {mode}")
+            lines.append(f"**Date:** {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(
+                f"**Note:** This file contains cumulative results. New metrics are appended as they are analyzed."
+            )
+            lines.append("")
+            lines.append("## Overview")
+            lines.append("")
+            lines.append(f"- **Total metrics analyzed:** {len(all_results)}")
+            lines.append(f"- **Statistical method:** Permutation tests with FDR correction (Benjamini-Hochberg)")
+            lines.append(f"- **Significance threshold:** α = 0.05 (FDR-corrected)")
+            lines.append("")
+        else:
+            # Just add a separator and timestamp for appended content
+            lines.append("")
+            lines.append(f"<!-- Metrics added: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')} -->")
+            lines.append("")
+
+        # Count total significant results
+        total_sig_mean = 0
+        total_sig_median = 0
+        total_comparisons = 0
+
+        for metric_result in all_results:
+            for key, results in metric_result["results"].items():
+                if "pairwise" in results:
+                    for pw in results["pairwise"]:
+                        total_comparisons += 1
+                        if pw.get("significant_mean", False):
+                            total_sig_mean += 1
+                        if pw.get("significant_median", False):
+                            total_sig_median += 1
+
+        if not is_appending:
+            # Add overview statistics for new file
+            lines.append(f"- **Total pairwise comparisons:** {total_comparisons}")
+            lines.append(
+                f"- **Significant (mean):** {total_sig_mean} ({100*total_sig_mean/max(1, total_comparisons):.1f}%)"
+            )
+            lines.append(
+                f"- **Significant (median):** {total_sig_median} ({100*total_sig_median/max(1, total_comparisons):.1f}%)"
+            )
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+
+        # Per-metric detailed results
+        for metric_result in all_results:
+            metric = metric_result["metric"]
+            results = metric_result["results"]
+
+            lines.append(f"## {metric.replace('_', ' ').title()}")
+            lines.append("")
+
+            for key, result_data in results.items():
+                if key == "primary":
+                    section_title = f"By {detected_cols['primary'].title()}"
+                elif key == "secondary":
+                    section_title = f"By {detected_cols['secondary'].replace('_', ' ').title()}"
+                else:
+                    section_title = "Combined Analysis"
+
+                lines.append(f"### {section_title}")
+                lines.append("")
+
+                # Summary statistics
+                lines.append("**Group Statistics:**")
+                lines.append("")
+                lines.append("| Group | N | Mean | Median |")
+                lines.append("|-------|---|------|--------|")
+                for i, group in enumerate(result_data["groups"]):
+                    n = result_data["n_samples"][i]
+                    mean = result_data["means"][i]
+                    median = result_data["medians"][i]
+                    lines.append(f"| {group} | {n} | {mean:.4f} | {median:.4f} |")
+                lines.append("")
+
+                # Pairwise comparisons
+                if "pairwise" in result_data and len(result_data["pairwise"]) > 0:
+                    lines.append("**Pairwise Comparisons (FDR-corrected):**")
+                    lines.append("")
+                    lines.append(
+                        "| Comparison | N1 vs N2 | Mean Diff | p (mean) | Median Diff | p (median) | Sig. Mean | Sig. Median |"
+                    )
+                    lines.append(
+                        "|------------|----------|-----------|----------|-------------|------------|-----------|-------------|"
+                    )
+
+                    for pw in result_data["pairwise"]:
+                        group1 = pw["group1"]
+                        group2 = pw["group2"]
+                        n_comp = f"{pw['n1']} vs {pw['n2']}"
+                        mean_diff = pw["mean_diff"]
+                        median_diff = pw["median_diff"]
+                        p_mean = pw["p_mean_fdr"]
+                        p_median = pw["p_median_fdr"]
+                        sig_mean = "✓" if pw.get("significant_mean", False) else ""
+                        sig_median = "✓" if pw.get("significant_median", False) else ""
+
+                        lines.append(
+                            f"| {group1} vs {group2} | {n_comp} | {mean_diff:.4f} | {p_mean:.4f} | {median_diff:.4f} | {p_median:.4f} | {sig_mean} | {sig_median} |"
+                        )
+                    lines.append("")
+
+                    # Highlight significant comparisons
+                    sig_mean_comps = [pw for pw in result_data["pairwise"] if pw.get("significant_mean", False)]
+                    sig_median_comps = [pw for pw in result_data["pairwise"] if pw.get("significant_median", False)]
+
+                    if sig_mean_comps:
+                        lines.append("**Significant Mean Differences:**")
+                        for pw in sig_mean_comps:
+                            direction = "↑" if pw["mean_diff"] > 0 else "↓"
+                            lines.append(
+                                f"- {pw['group1']} vs {pw['group2']}: {direction} {abs(pw['mean_diff']):.4f} (p = {pw['p_mean_fdr']:.4f})"
+                            )
+                        lines.append("")
+
+                    if sig_median_comps:
+                        lines.append("**Significant Median Differences:**")
+                        for pw in sig_median_comps:
+                            direction = "↑" if pw["median_diff"] > 0 else "↓"
+                            lines.append(
+                                f"- {pw['group1']} vs {pw['group2']}: {direction} {abs(pw['median_diff']):.4f} (p = {pw['p_median_fdr']:.4f})"
+                            )
+                        lines.append("")
+
+                lines.append("---")
+                lines.append("")
+
+        # Write to file - append if exists, create new otherwise
+        if is_appending:
+            # Append to existing file
+            with open(summary_file, "a") as f:
+                f.write("\n".join(lines))
+            print(f"\n📄 Markdown summary appended to: {summary_file} ({len(all_results)} new metrics)")
+        else:
+            # Create new file
+            with open(summary_file, "w") as f:
+                f.write("\n".join(lines))
+            print(f"\n📄 Markdown summary created: {summary_file} ({len(all_results)} metrics)")
 
     def analyze_coordinates(self, mode):
         """Analyze coordinate data and create trajectory plots."""
@@ -884,17 +2074,14 @@ class F1AnalysisFramework:
         print(f"📋 Using grouping columns: {primary_col}, {secondary_col}")
 
         # Check for required coordinate columns
-        coord_cols = ["training_ball_euclidean_distance", "test_ball_euclidean_distance"]
-        missing_cols = [col for col in coord_cols if col not in df_coords.columns]
-        if missing_cols:
-            # Try alternative column names
-            alt_coord_cols = ["training_ball", "test_ball"]
-            missing_alt = [col for col in alt_coord_cols if col not in df_coords.columns]
-            if not missing_alt:
-                coord_cols = alt_coord_cols
-                print(f"📋 Using alternative coordinate columns: {coord_cols}")
+        coord_cols = ["test_ball_euclidean_distance"]  # Only test ball - training ball not needed
+
+        # Try alternative column names
+        if "test_ball_euclidean_distance" not in df_coords.columns:
+            if "test_ball" in df_coords.columns:
+                coord_cols = ["test_ball"]
             else:
-                print(f"❌ Missing coordinate columns: {missing_cols}")
+                print(f"❌ Could not find test ball distance column")
                 print(f"   Available columns: {list(df_coords.columns)}")
                 return
 
@@ -919,7 +2106,8 @@ class F1AnalysisFramework:
             return df
 
         print(f"🔄 Normalizing time to percentage...")
-        standard_time_grid = np.arange(0, 100.1, 0.1)
+
+        # More efficient approach: normalize in-place without interpolation
         normalized_data = []
 
         for fly_id in df["fly"].unique():
@@ -937,43 +2125,20 @@ class F1AnalysisFramework:
             min_time = valid_times.min()
             max_time = valid_times.max()
 
-            if max_time <= min_time or valid_mask.sum() < 2:
+            if max_time <= min_time:
                 continue
 
-            # Normalize to 0-100%
-            normalized_time = ((fly_data["adjusted_time"] - min_time) / (max_time - min_time)) * 100
+            # Normalize to 0-100% in-place (no interpolation to grid)
+            fly_data.loc[:, "adjusted_time"] = ((fly_data["adjusted_time"] - min_time) / (max_time - min_time)) * 100
 
-            # Create DataFrame with standard time grid
-            fly_normalized = pd.DataFrame({"adjusted_time": standard_time_grid})
-
-            # Add metadata columns
-            for col in ["fly", "Pretraining", "Genotype", "F1_condition"]:
-                if col in fly_data.columns:
-                    fly_normalized[col] = fly_data[col].iloc[0]
-
-            # Interpolate ball distances
-            for ball_col in [
-                "training_ball_euclidean_distance",
-                "test_ball_euclidean_distance",
-                "training_ball",
-                "test_ball",
-            ]:
-                if ball_col in fly_data.columns:
-                    if valid_mask.sum() > 1:
-                        fly_normalized[ball_col] = np.interp(
-                            standard_time_grid, normalized_time[valid_mask], fly_data.loc[valid_mask, ball_col]
-                        )
-                    else:
-                        fly_normalized[ball_col] = np.nan
-
-            normalized_data.append(fly_normalized)
+            normalized_data.append(fly_data)
 
         if not normalized_data:
             print("⚠️  No flies could be normalized")
             return df
 
         result_df = pd.concat(normalized_data, ignore_index=True)
-        print(f"✅ Normalized {len(df['fly'].unique())} flies to 0-100% time grid")
+        print(f"✅ Normalized {len(df['fly'].unique())} flies to 0-100% (original data points preserved)")
         return result_df
 
     def _find_maximum_shared_time(self, df):
@@ -998,7 +2163,13 @@ class F1AnalysisFramework:
             print("⚠️  No data after percentage normalization")
             return
 
-        # Create plots grouped by primary variable (pretraining)
+        # Get plot configuration
+        mode_config = self.config["analysis_modes"][mode]
+        coordinates_config = mode_config.get("coordinates", {})
+        plot_params = coordinates_config.get("coordinates_plot_params", {})
+        create_individual_plots = plot_params.get("create_individual_fly_plots", False)
+
+        # Create averaged plots grouped by primary variable (pretraining)
         self._create_coordinate_line_plots(
             df_norm,
             "adjusted_time",
@@ -1009,9 +2180,11 @@ class F1AnalysisFramework:
             mode,
             xlabel="Adjusted Time (%)",
             time_type="percentage",
+            var_type="pretraining",  # Pass the variable type for correct colors
         )
 
-        # Create plots grouped by secondary variable (F1_condition or Genotype)
+        # Create averaged plots grouped by secondary variable (F1_condition or Genotype)
+        var_type_secondary = "genotype" if mode.startswith("tnt_") else "f1_condition"
         self._create_coordinate_line_plots(
             df_norm,
             "adjusted_time",
@@ -1022,7 +2195,57 @@ class F1AnalysisFramework:
             mode,
             xlabel="Adjusted Time (%)",
             time_type="percentage",
+            var_type=var_type_secondary,  # Pass the correct variable type
         )
+
+        # For TNT modes, create combined pretraining + genotype plots
+        if mode.startswith("tnt_"):
+            print("📊 Creating combined pretraining + genotype plots (percentage)...")
+            self._create_combined_coordinate_plots(
+                df_norm,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                secondary_col,
+                f"F1 Coordinates by Pretraining + Genotype (Percentage Time)",
+                "f1_coordinates_percentage_time_combined.png",
+                mode,
+                xlabel="Adjusted Time (%)",
+                time_type="percentage",
+            )
+
+        # Create individual fly plots only if enabled in config
+        if create_individual_plots:
+            print("📊 Creating individual fly plots (percentage)...")
+            # Create individual fly plots grouped by primary variable
+            self._create_individual_fly_plots(
+                df_norm,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                f"F1 Coordinates by {primary_col.title()} - Individual Flies (Percentage Time)",
+                "f1_coordinates_percentage_time_pretraining_individual.png",
+                mode,
+                xlabel="Adjusted Time (%)",
+                time_type="percentage",
+                var_type="pretraining",
+            )
+
+            # Create individual fly plots grouped by secondary variable
+            self._create_individual_fly_plots(
+                df_norm,
+                "adjusted_time",
+                coord_cols,
+                secondary_col,
+                f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} - Individual Flies (Percentage Time)",
+                "f1_coordinates_percentage_time_f1condition_individual.png",
+                mode,
+                xlabel="Adjusted Time (%)",
+                time_type="percentage",
+                var_type=var_type_secondary,
+            )
+        else:
+            print("ℹ️  Skipping individual fly plots (disabled in config)")
 
     def _create_trimmed_coordinate_plots(self, df, primary_col, secondary_col, coord_cols, mode):
         """Create trimmed-time coordinate plots."""
@@ -1032,7 +2255,13 @@ class F1AnalysisFramework:
 
         print(f"📊 Trimmed data: {df_trimmed.shape[0]} points from {df_trimmed['fly'].nunique()} flies")
 
-        # Create plots grouped by primary variable
+        # Get plot configuration
+        mode_config = self.config["analysis_modes"][mode]
+        coordinates_config = mode_config.get("coordinates", {})
+        plot_params = coordinates_config.get("coordinates_plot_params", {})
+        create_individual_plots = plot_params.get("create_individual_fly_plots", False)
+
+        # Create averaged plots grouped by primary variable
         self._create_coordinate_line_plots(
             df_trimmed,
             "adjusted_time",
@@ -1043,9 +2272,11 @@ class F1AnalysisFramework:
             mode,
             xlabel="Adjusted Time (seconds)",
             time_type="trimmed",
+            var_type="pretraining",
         )
 
-        # Create plots grouped by secondary variable
+        # Create averaged plots grouped by secondary variable
+        var_type_secondary = "genotype" if mode.startswith("tnt_") else "f1_condition"
         self._create_coordinate_line_plots(
             df_trimmed,
             "adjusted_time",
@@ -1056,10 +2287,60 @@ class F1AnalysisFramework:
             mode,
             xlabel="Adjusted Time (seconds)",
             time_type="trimmed",
+            var_type=var_type_secondary,
         )
 
+        # For TNT modes, create combined pretraining + genotype plots
+        if mode.startswith("tnt_"):
+            print("📊 Creating combined pretraining + genotype plots (trimmed)...")
+            self._create_combined_coordinate_plots(
+                df_trimmed,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                secondary_col,
+                f"F1 Coordinates by Pretraining + Genotype (Trimmed Time)",
+                "f1_coordinates_trimmed_time_combined.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="trimmed",
+            )
+
+        # Create individual fly plots only if enabled in config
+        if create_individual_plots:
+            print("📊 Creating individual fly plots (trimmed)...")
+            # Create individual fly plots grouped by primary variable
+            self._create_individual_fly_plots(
+                df_trimmed,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                f"F1 Coordinates by {primary_col.title()} - Individual Flies (Trimmed Time)",
+                "f1_coordinates_trimmed_time_pretraining_individual.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="trimmed",
+                var_type="pretraining",
+            )
+
+            # Create individual fly plots grouped by secondary variable
+            self._create_individual_fly_plots(
+                df_trimmed,
+                "adjusted_time",
+                coord_cols,
+                secondary_col,
+                f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} - Individual Flies (Trimmed Time)",
+                "f1_coordinates_trimmed_time_f1condition_individual.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="trimmed",
+                var_type=var_type_secondary,
+            )
+        else:
+            print("ℹ️  Skipping individual fly plots (disabled in config)")
+
     def _create_coordinate_line_plots(
-        self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage"
+        self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage", var_type=None
     ):
         """Create line plots for coordinate data with confidence intervals."""
         if data.empty:
@@ -1071,9 +2352,12 @@ class F1AnalysisFramework:
         if len(y_cols) == 1:
             axes = [axes]
 
-        # Get color mapping
+        # Get color mapping - use var_type if provided, otherwise infer from mode
         unique_values = data[hue_col].unique()
-        if mode.startswith("tnt_"):
+        if var_type:
+            # Use the explicitly provided variable type
+            color_mapping = self.create_color_mapping(mode, unique_values, var_type)
+        elif mode.startswith("tnt_"):
             # Use brain region colors for TNT modes
             color_mapping = self.create_color_mapping(mode, unique_values, "brain_region")
         else:
@@ -1113,6 +2397,29 @@ class F1AnalysisFramework:
                 # Calculate statistics across flies for each time bin
                 time_stats = fly_medians.groupby("time_bin")[y_col].agg(["mean", "std", "count", "sem"]).reset_index()
 
+                # Filter out bins with too few flies (prevents artifacts at the end)
+                # Use 50% threshold for trimmed plots (more aggressive), 30% for percentage
+                threshold = 0.5 if time_type == "trimmed" else 0.3
+                min_flies_per_bin = max(3, int(subset["fly"].nunique() * threshold))
+                time_stats = time_stats[time_stats["count"] >= min_flies_per_bin].copy()
+
+                if time_stats.empty:
+                    continue
+
+                # Additional safeguard: Remove last bin if it shows suspicious drop
+                # (mean drops by >15% from second-to-last bin)
+                if len(time_stats) >= 2:
+                    last_mean = time_stats.iloc[-1]["mean"]
+                    second_last_mean = time_stats.iloc[-2]["mean"]
+                    if last_mean < second_last_mean * 0.85:  # 15% drop threshold
+                        print(
+                            f"  ⚠️  Removing last bin for {hue_val} (suspicious {((second_last_mean - last_mean) / second_last_mean * 100):.1f}% drop)"
+                        )
+                        time_stats = time_stats.iloc[:-1].copy()
+
+                if time_stats.empty:
+                    continue
+
                 # Calculate confidence intervals
                 confidence_level = 0.95
                 alpha = 1 - confidence_level
@@ -1140,23 +2447,337 @@ class F1AnalysisFramework:
             ax.set_title(f"{y_col.replace('_', ' ').title()}", fontsize=12, fontweight="bold")
             ax.set_xlabel(xlabel, fontsize=10)
             ax.set_ylabel("Distance (pixels)", fontsize=10)
-            ax.legend()
+
+            # Avoid very large legends which can blow up figure layout and slow rendering.
+            max_legend_entries = 25
+            try:
+                n_entries = len(unique_values)
+            except Exception:
+                n_entries = 0
+
+            if n_entries and n_entries <= max_legend_entries:
+                ax.legend(loc="upper right", framealpha=0.9)
+            elif n_entries and n_entries > max_legend_entries:
+                ax.text(
+                    0.02,
+                    0.85,
+                    f"{n_entries} groups — legend omitted for performance",
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.8),
+                )
+
             ax.grid(True, alpha=0.3)
 
             # Add vertical line at time 0
             ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time")
 
-            # Add sample size
-            n_flies = data["fly"].nunique() if "fly" in data.columns else len(data)
+            # Add sample sizes per condition
+            if "fly" in data.columns and hue_col in data.columns:
+                # Calculate sample size for each condition
+                condition_counts = data.groupby(hue_col)["fly"].nunique().to_dict()
+                # Format as "condition1: n1, condition2: n2, ..."
+                sample_text = ", ".join([f"{cond}: n={count}" for cond, count in sorted(condition_counts.items())])
+                ax.text(
+                    0.02,
+                    0.98,
+                    sample_text,
+                    transform=ax.transAxes,
+                    fontsize=9,
+                    va="top",
+                    bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+                )
+            else:
+                # Fallback to total if fly column not available
+                n_flies = data["fly"].nunique() if "fly" in data.columns else len(data)
+                ax.text(
+                    0.02,
+                    0.98,
+                    f"N flies = {n_flies}",
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    va="top",
+                    bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+                )
+
+        plt.suptitle(title, fontsize=14, fontweight="bold")
+        plt.tight_layout()
+
+        # Save plot
+        self._save_plot(fig, filename.replace(".png", ""), mode)
+
+    def _create_individual_fly_plots(
+        self, data, x_col, y_cols, hue_col, title, filename, mode, xlabel="Time", time_type="percentage", var_type=None
+    ):
+        """Create line plots showing individual fly trajectories with no averaging."""
+        if data.empty:
+            print(f"⚠️  No data for {filename}")
+            return
+
+        if "fly" not in data.columns:
+            print(f"⚠️  No 'fly' column found - cannot create individual fly plots")
+            return
+
+        # Create figure
+        fig, axes = plt.subplots(len(y_cols), 1, figsize=(12, 6 * len(y_cols)))
+        if len(y_cols) == 1:
+            axes = [axes]
+
+        # Get color mapping based on var_type (explicit takes priority)
+        unique_values = data[hue_col].unique()
+        if var_type:
+            # Use explicit var_type (pretraining, f1_condition, genotype, etc.)
+            color_mapping = self.create_color_mapping(mode, unique_values, var_type)
+        elif mode.startswith("tnt_"):
+            # Use brain region colors for TNT modes
+            color_mapping = self.create_color_mapping(mode, unique_values, "brain_region")
+        else:
+            # Use F1_condition colors for control mode
+            color_mapping = self.create_color_mapping(mode, unique_values, "f1_condition")
+
+        for i, y_col in enumerate(y_cols):
+            ax = axes[i]
+
+            if y_col not in data.columns:
+                ax.text(0.5, 0.5, f"Column '{y_col}' not found", ha="center", va="center", transform=ax.transAxes)
+                continue
+
+            # Simple direct plotting: iterate through flies and plot raw coordinates
+            fly_count_per_group = {}
+            legend_handles = {}
+
+            # Get max flies per group from config
+            mode_config = self.config["analysis_modes"].get(mode, {})
+            plot_params = mode_config.get("coordinates", {}).get("coordinates_plot_params", {})
+            per_group_cap = int(plot_params.get("max_individual_lines_per_group", 50))
+
+            # Group flies by condition for organized plotting
+            condition_groups = data.groupby(hue_col)
+
+            for hue_val, group_data in condition_groups:
+                # Get color for this condition
+                color = color_mapping.get(hue_val, "black")
+
+                # Get all flies in this condition
+                fly_ids = group_data["fly"].unique()
+                n_flies = len(fly_ids)
+
+                # Cap number of flies if needed (sample uniformly)
+                if n_flies > per_group_cap:
+                    indices = np.linspace(0, n_flies - 1, per_group_cap, dtype=int)
+                    fly_ids = fly_ids[indices]
+
+                # Plot each fly
+                for fly_id in fly_ids:
+                    fly_data = group_data[group_data["fly"] == fly_id]
+
+                    # Clean data (remove NaNs)
+                    fly_clean = fly_data.dropna(subset=[y_col, x_col])
+                    if fly_clean.empty:
+                        continue
+
+                    # Plot this fly's trajectory
+                    line = ax.plot(
+                        fly_clean[x_col],
+                        fly_clean[y_col],
+                        color=color,
+                        linewidth=1.5,
+                        alpha=0.15,
+                    )
+
+                    # Track for legend (one entry per condition)
+                    if hue_val not in legend_handles:
+                        legend_handles[hue_val] = line[0]
+
+                    fly_count_per_group[hue_val] = fly_count_per_group.get(hue_val, 0) + 1
+
+            # Create legend with one entry per condition
+            if legend_handles:
+                handles = [legend_handles[hue_val] for hue_val in sorted(legend_handles.keys())]
+                labels = [f"{hue_val} (n={fly_count_per_group[hue_val]})" for hue_val in sorted(legend_handles.keys())]
+                ax.legend(handles, labels, loc="upper right", framealpha=0.9)
+
+            # Formatting
+            ax.set_title(f"{y_col.replace('_', ' ').title()}", fontsize=12, fontweight="bold")
+            ax.set_xlabel(xlabel, fontsize=10)
+            ax.set_ylabel("Distance (pixels)", fontsize=10)
+            ax.grid(True, alpha=0.3)
+
+            # Add vertical line at time 0
+            ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, linewidth=1.5)
+
+            # Add sample sizes per condition
+            condition_counts = data.groupby(hue_col)["fly"].nunique().to_dict()
+            # Format as "condition1: n1, condition2: n2, ..."
+            sample_text = ", ".join([f"{cond}: n={count}" for cond, count in sorted(condition_counts.items())])
             ax.text(
                 0.02,
                 0.98,
-                f"N flies = {n_flies}",
+                sample_text,
                 transform=ax.transAxes,
-                fontsize=10,
+                fontsize=9,
                 va="top",
                 bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
             )
+
+        plt.suptitle(title, fontsize=14, fontweight="bold")
+        plt.tight_layout()
+
+        # Save plot
+        self._save_plot(fig, filename.replace(".png", ""), mode)
+
+    def _create_combined_coordinate_plots(
+        self,
+        data,
+        x_col,
+        y_cols,
+        primary_col,
+        secondary_col,
+        title,
+        filename,
+        mode,
+        xlabel="Time",
+        time_type="percentage",
+    ):
+        """
+        Create combined coordinate plots showing genotype (color) + pretraining (linestyle).
+        For TNT modes: genotype determines color (via brain region), pretraining determines linestyle.
+        """
+        if data.empty:
+            print(f"⚠️  No data for {filename}")
+            return
+
+        if "fly" not in data.columns:
+            print(f"⚠️  No 'fly' column found - cannot create combined plots")
+            return
+
+        # Create combined grouping variable
+        data = data.copy()
+        data["combined_group"] = data[secondary_col].astype(str) + " + " + data[primary_col].astype(str)
+
+        # Get unique genotypes and pretraining values
+        unique_genotypes = data[secondary_col].unique()
+        unique_pretraining = data[primary_col].unique()
+
+        # Create combined style mapping
+        style_mapping = self.create_combined_style_mapping(mode, unique_genotypes, unique_pretraining)
+
+        # Create figure
+        fig, axes = plt.subplots(len(y_cols), 1, figsize=(12, 6 * len(y_cols)))
+        if len(y_cols) == 1:
+            axes = [axes]
+
+        for i, y_col in enumerate(y_cols):
+            ax = axes[i]
+
+            if y_col not in data.columns:
+                ax.text(0.5, 0.5, f"Column '{y_col}' not found", ha="center", va="center", transform=ax.transAxes)
+                continue
+
+            # Plot each genotype + pretraining combination
+            for genotype in unique_genotypes:
+                for pretraining in unique_pretraining:
+                    subset = data[(data[secondary_col] == genotype) & (data[primary_col] == pretraining)]
+                    if subset.empty or subset[y_col].isna().all():
+                        continue
+
+                    # Get style for this combination
+                    style_info = style_mapping.get((genotype, pretraining), {"color": "gray", "linestyle": "-"})
+                    color = style_info["color"]
+                    linestyle = style_info["linestyle"]
+
+                    # Bin data and calculate statistics
+                    subset_clean = subset.dropna(subset=[y_col])
+                    if subset_clean.empty:
+                        continue
+
+                    # Create time bins
+                    bin_size = 0.1 if time_type == "percentage" else 0.1
+                    subset_clean = subset_clean.copy()
+                    subset_clean["time_bin"] = np.floor(subset_clean[x_col] / bin_size) * bin_size
+
+                    # Get median per fly per time bin
+                    fly_medians = subset_clean.groupby(["fly", "time_bin"])[y_col].median().reset_index()
+
+                    # Calculate statistics across flies for each time bin
+                    time_stats = (
+                        fly_medians.groupby("time_bin")[y_col].agg(["mean", "std", "count", "sem"]).reset_index()
+                    )
+
+                    # Filter out bins with too few flies
+                    threshold = 0.5 if time_type == "trimmed" else 0.3
+                    min_flies_per_bin = max(3, int(subset["fly"].nunique() * threshold))
+                    time_stats = time_stats[time_stats["count"] >= min_flies_per_bin].copy()
+
+                    if time_stats.empty:
+                        continue
+
+                    # Remove last bin if suspicious drop
+                    if len(time_stats) >= 2:
+                        last_mean = time_stats.iloc[-1]["mean"]
+                        second_last_mean = time_stats.iloc[-2]["mean"]
+                        if last_mean < second_last_mean * 0.85:
+                            time_stats = time_stats.iloc[:-1].copy()
+
+                    if time_stats.empty:
+                        continue
+
+                    # Calculate confidence intervals
+                    confidence_level = 0.95
+                    alpha = 1 - confidence_level
+                    time_stats["ci"] = time_stats.apply(
+                        lambda row: (
+                            stats.t.ppf(1 - alpha / 2, row["count"] - 1) * row["sem"] if row["count"] > 1 else 0
+                        ),
+                        axis=1,
+                    )
+
+                    # Create label
+                    label = f"{genotype} + {pretraining}"
+
+                    # Plot mean trajectory with specific linestyle
+                    ax.plot(
+                        time_stats["time_bin"],
+                        time_stats["mean"],
+                        color=color,
+                        linestyle=linestyle,
+                        linewidth=2,
+                        alpha=0.8,
+                        label=label,
+                    )
+
+                    # Add confidence intervals
+                    ax.fill_between(
+                        time_stats["time_bin"],
+                        time_stats["mean"] - time_stats["ci"],
+                        time_stats["mean"] + time_stats["ci"],
+                        color=color,
+                        alpha=0.15,
+                    )
+
+            # Formatting
+            ax.set_title(f"{y_col.replace('_', ' ').title()}", fontsize=12, fontweight="bold")
+            ax.set_xlabel(xlabel, fontsize=10)
+            ax.set_ylabel("Distance (pixels)", fontsize=10)
+            ax.legend(loc="upper right", framealpha=0.9, fontsize=9)
+            ax.grid(True, alpha=0.3)
+
+            # Add vertical line at time 0
+            ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time")
+
+            # Add sample sizes per combined group
+            if "combined_group" in data.columns:
+                condition_counts = data.groupby("combined_group")["fly"].nunique().to_dict()
+                sample_text = ", ".join([f"{cond}: n={count}" for cond, count in sorted(condition_counts.items())])
+                ax.text(
+                    0.02,
+                    0.98,
+                    sample_text,
+                    transform=ax.transAxes,
+                    fontsize=8,
+                    va="top",
+                    bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.8),
+                )
 
         plt.suptitle(title, fontsize=14, fontweight="bold")
         plt.tight_layout()
@@ -1178,38 +2799,14 @@ class F1AnalysisFramework:
         except Exception as e:
             print(f"❌ Binary metrics analysis failed: {e}")
 
-        # 2. Boxplot analyses for multiple metrics
-        continuous_metrics = self.config["analysis_parameters"]["continuous_metrics"]
-
-        # Get list of metrics to analyze
-        metrics_to_analyze = []
-        if metric:
-            # If specific metric provided, use it
-            metrics_to_analyze = [metric]
-        else:
-            # Otherwise, analyze key metrics
-            metrics_to_analyze = ["interaction_rate"]
-
-            # Add distance metrics if available
-            if "distance_metrics" in continuous_metrics:
-                dist_metrics = continuous_metrics["distance_metrics"]
-                if isinstance(dist_metrics, list):
-                    metrics_to_analyze.extend(dist_metrics[:2])  # Take first 2 to avoid too many plots
-
-            # Add pulling metrics if available
-            if "pulling_metrics" in continuous_metrics:
-                pull_metrics = continuous_metrics["pulling_metrics"]
-                if isinstance(pull_metrics, list):
-                    metrics_to_analyze.extend(pull_metrics[:2])  # Take first 2
-
-        # Run boxplot analysis for each metric
-        for metric_name in metrics_to_analyze:
-            print(f"\n📊 Running boxplot analysis for {metric_name}...")
-            try:
-                self.analyze_boxplots(mode, metric_name)
-                print(f"✅ Boxplot analysis for {metric_name} completed")
-            except Exception as e:
-                print(f"❌ Boxplot analysis for {metric_name} failed: {e}")
+        # 2. Boxplot analyses - analyze ALL discovered metrics
+        print(f"\n📊 Running comprehensive boxplot analysis...")
+        try:
+            # Pass metric=None to analyze all available metrics
+            self.analyze_boxplots(mode, metric_type=metric)
+            print(f"✅ Boxplot analysis completed")
+        except Exception as e:
+            print(f"❌ Boxplot analysis failed: {e}")
 
         # 3. Coordinate analysis
         print(f"\n📈 Running coordinate analysis...")
@@ -1233,13 +2830,47 @@ def main():
         choices=["binary_metrics", "boxplots", "coordinates", "all"],
         help="Type of analysis to perform. If not specified, runs all available analyses.",
     )
-    parser.add_argument("--metric", help="Specific metric for boxplot analysis")
+    parser.add_argument(
+        "--metric", help="Specific metric for boxplot analysis. If not specified, analyzes all available metrics."
+    )
     parser.add_argument("--config", help="Path to configuration file")
+    parser.add_argument(
+        "--output-dir",
+        help=(
+            "Output directory for plots. Defaults based on mode: "
+            "control=/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New, "
+            "tnt_mb247=/mnt/upramdya_data/MD/F1_Tracks/MB247, "
+            "tnt_lc10_2=/mnt/upramdya_data/MD/F1_Tracks/LC10-2"
+        ),
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Display plots in addition to saving them. By default, plots are only saved.",
+    )
 
     args = parser.parse_args()
 
     # Initialize framework
-    framework = F1AnalysisFramework(args.config)
+    framework = F1AnalysisFramework(args.config, args.output_dir)
+
+    # Override show_plots config based on --show argument
+    framework.config["output"]["show_plots"] = args.show
+
+    # Determine and display output directory
+    if framework.custom_output_dir:
+        output_dir = framework.custom_output_dir
+    elif args.mode == "control":
+        output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
+    elif args.mode == "tnt_mb247":
+        output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
+    elif args.mode == "tnt_lc10_2":
+        output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+    else:
+        output_dir = Path(__file__).parent
+
+    print(f"\n📁 Output directory: {output_dir}")
+    print(f"{'='*60}\n")
 
     # If no analysis specified, run all available analyses
     if args.analysis is None or args.analysis == "all":
@@ -1250,7 +2881,13 @@ def main():
         if args.analysis == "binary_metrics":
             framework.analyze_binary_metrics(args.mode)
         elif args.analysis == "boxplots":
-            framework.analyze_boxplots(args.mode, args.metric or "interaction_rate")
+            if args.metric:
+                # Single metric specified
+                framework.analyze_boxplots(args.mode, args.metric)
+            else:
+                # No metric specified - analyze ALL available metrics using auto-discovery
+                print(f"\nNo specific metric provided. Using auto-discovery to analyze all available metrics...")
+                framework.analyze_boxplots(args.mode, metric_type=None)
         elif args.analysis == "coordinates":
             framework.analyze_coordinates(args.mode)
 

@@ -26,10 +26,12 @@ analysis_modes:
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
+        max_individual_lines_per_group: 50  # Cap number of individual fly lines plotted per group
 
   tnt_mb247:
     description: "TNT MB247 flies tested across pretraining and genotype"
-    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -40,8 +42,8 @@ analysis_modes:
       "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for MB247
     coordinates:
-      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_17_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
-      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
       alternative_coordinates_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
       alternative_summary_paths:
@@ -51,10 +53,11 @@ analysis_modes:
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
 
   tnt_lc10_2:
     description: "TNT LC10-2 flies tested across pretraining and genotype"
-    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -65,8 +68,8 @@ analysis_modes:
       "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for LC10-2
     coordinates:
-      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
-      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_14_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
       alternative_coordinates_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
       alternative_summary_paths:
@@ -76,6 +79,7 @@ analysis_modes:
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
 
 # Common analysis parameters
 analysis_parameters:
@@ -90,6 +94,58 @@ analysis_parameters:
 
   # Continuous metrics for boxplots
   continuous_metrics:
+    # Core base metrics from comprehensive analysis
+    base_metrics:
+      - "nb_events"
+      - "max_event"
+      - "max_event_time"
+      - "max_distance"
+      - "final_event"
+      - "final_event_time"
+      - "nb_significant_events"
+      - "significant_ratio"
+      - "first_significant_event"
+      - "first_significant_event_time"
+      - "first_major_event"
+      - "first_major_event_time"
+      - "major_event"
+      - "major_event_time"
+      - "pulled"
+      - "pulling_ratio"
+      - "interaction_persistence"
+      - "distance_moved"
+      - "distance_ratio"
+      - "chamber_exit_time"
+      - "normalized_velocity"
+      - "auc"
+      - "overall_interaction_rate"
+
+    # Pattern-based metric search patterns
+    additional_patterns:
+      - "velocity"
+      - "speed"
+      - "pause"
+      - "freeze"
+      - "persistence"
+      - "trend"
+      - "interaction_rate"
+      - "finished"
+      - "chamber"
+      - "facing"
+      - "flailing"
+      - "head"
+      - "median_"
+      - "mean_"
+
+    # Patterns to exclude from analysis
+    excluded_patterns:
+      - "binned_"
+      - "r2"
+      - "slope"
+      - "_bin_"
+      - "logistic_"
+
+    # Legacy shortcuts for backward compatibility
     interaction_rate: "overall_interaction_rate"
     distance_metrics: ["distance_moved", "max_distance", "distance_ratio"]
     pulling_metrics: ["pulled", "pulling_ratio", "significant_ratio"]
@@ -144,7 +200,7 @@ output:
   plot_format: "png"
   dpi: 300
   bbox_inches: "tight"
-  show_plots: true
+  show_plots: false  # Default to not showing plots (save only). Use --show flag to display.
 
   # Summary statistics
   print_detailed_stats: true
@@ -153,19 +209,19 @@ output:
 # Column name detection patterns
 column_detection:
   pretraining:
-    patterns: ["pretrain", "training"]
+    patterns: ["pretrain", "Pretraining"]  # More specific patterns
     case_insensitive: true
 
   f1_condition:
-    patterns: ["f1_condition", "f1condition", "f1 condition", "F1_condition", "F1condition"]
-    case_insensitive: true
+    patterns: ["F1_condition", "F1condition", "F1 condition", "f1_condition", "f1condition"]  # Avoid matching "fly"
+    case_insensitive: false  # Use exact case to avoid false matches
 
   genotype:
-    patterns: ["genotype", "strain"]
+    patterns: ["genotype", "Genotype", "strain"]
     case_insensitive: true
 
   ball_condition:
-    patterns: ["ball_condition", "ball_identity", "ball"]
+    patterns: ["ball_condition", "ball_identity"]  # Removed generic "ball" to avoid matching measurement columns
     priority: ["ball_condition", "ball_identity"]  # Check in this order
     case_insensitive: true
 
