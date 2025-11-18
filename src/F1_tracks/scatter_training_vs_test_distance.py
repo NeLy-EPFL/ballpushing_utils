@@ -43,101 +43,21 @@ def main():
     for i, col in enumerate(df.columns):
         print(f"  {i+1:2d}. {col}")
 
-    # Try to identify the correct column names
-    distance_col = None
-    pretraining_col = None
-    ball_condition_col = None
-    f1_condition_col = None
+    # --- Generalize: Find all metrics that exist for both test and training ball conditions ---
+    # Identify key columns
 
-    # Look for distance column - prioritize ball-specific distance over fly distance
-    for col in df.columns:
-        if col.lower() == "distance_moved":  # Exact match for ball-specific distance
-            distance_col = col
-            break
-        elif "distance" in col.lower() and "move" in col.lower() and "fly" not in col.lower():
-            distance_col = col
-            break
+    # Use explicit column names based on your dataset
+    pretraining_col = "Pretraining"
+    ball_condition_col = "ball_identity"
+    f1_condition_col = "F1_condition"
 
-    # If still no distance column found, try any distance column as fallback
-    if distance_col is None:
-        for col in df.columns:
-            if "distance" in col.lower() and ("move" in col.lower() or "total" in col.lower()):
-                distance_col = col
-                break
-
-    # Look for pretraining column
-    for col in df.columns:
-        if "pretrain" in col.lower() or "training" in col.lower():
-            pretraining_col = col
-            break
-
-    # Look for ball condition column - prioritize ball_condition over ball_identity
-    if "ball_condition" in df.columns:
-        ball_condition_col = "ball_condition"
-    elif "ball_identity" in df.columns:
-        ball_condition_col = "ball_identity"
-    else:
-        for col in df.columns:
-            if "ball" in col.lower() and ("condition" in col.lower() or "identity" in col.lower()):
-                ball_condition_col = col
-                break
-
-    # Look for F1_condition column
-    for col in df.columns:
-        if "f1" in col.lower() and "condition" in col.lower():
-            f1_condition_col = col
-            break
-
-    # If exact matches not found, use manual mapping based on your dataset structure
-    if distance_col is None:
-        # Look for any distance column
-        distance_cols = [col for col in df.columns if "distance" in col.lower()]
-        if distance_cols:
-            distance_col = distance_cols[0]
-            print(f"Using '{distance_col}' as distance column")
-
-    if pretraining_col is None:
-        # Look for any training-related column
-        train_cols = [col for col in df.columns if "train" in col.lower()]
-        if train_cols:
-            pretraining_col = train_cols[0]
-            print(f"Using '{pretraining_col}' as pretraining column")
-
-    if ball_condition_col is None:
-        # Check if there's a direct 'ball_condition' column
-        if "ball_condition" in df.columns:
-            ball_condition_col = "ball_condition"
-        else:
-            # Look for any ball-related column
-            ball_cols = [col for col in df.columns if "ball" in col.lower()]
-            if ball_cols:
-                ball_condition_col = ball_cols[0]
-                print(f"Using '{ball_condition_col}' as ball condition column")
-
-    # Check if we found all required columns
-    required_columns = {
-        "distance": distance_col,
-        "pretraining": pretraining_col,
-        "ball_condition": ball_condition_col,
-        "f1_condition": f1_condition_col,
-    }
-
-    missing = [name for name, col in required_columns.items() if col is None]
-    if missing:
-        print(f"Could not find columns for: {missing}")
-        print("Please check the column names in your dataset.")
+    if not all([pretraining_col, ball_condition_col, f1_condition_col]):
+        print("Could not find required columns for pretraining, ball_condition, or f1_condition.")
         return
-
-    print(f"Using columns:")
-    print(f"  Distance: {distance_col}")
-    print(f"  Pretraining: {pretraining_col}")
-    print(f"  Ball condition: {ball_condition_col}")
-    print(f"  F1 condition: {f1_condition_col}")
 
     # Add fly identifier column if it doesn't exist
     fly_id_col = "fly"
     if fly_id_col not in df.columns:
-        # Look for fly identifier column
         fly_cols = [col for col in df.columns if "fly" in col.lower()]
         if fly_cols:
             fly_id_col = fly_cols[0]
@@ -147,277 +67,183 @@ def main():
             df["fly"] = df.index
             fly_id_col = "fly"
 
-    # Clean the data
-    df_clean = df[[distance_col, pretraining_col, ball_condition_col, f1_condition_col, fly_id_col]].dropna()
-    print(f"Data shape after removing NaNs: {df_clean.shape}")
+    # Find all metric columns that are numeric and not grouping columns
+    exclude_cols = {pretraining_col, ball_condition_col, f1_condition_col, fly_id_col, "Date"}
+    metric_candidates = [
+        col for col in df.columns if col not in exclude_cols and pd.api.types.is_numeric_dtype(df[col])
+    ]
 
-    # Debug: Show some sample data to verify the distance values are different
-    sample_data = df_clean[[distance_col, ball_condition_col, f1_condition_col, fly_id_col]].head(10)
-    print(f"\nSample data to verify distance values:")
-    print(sample_data)
+    # For each metric, check if it exists for both test and training ball conditions
+    # We'll do this by pivoting for each metric and checking columns
+    available_metrics = []
+    for metric in metric_candidates:
+        pivot = df.pivot_table(index=fly_id_col, columns=ball_condition_col, values=metric, aggfunc="first")
+        if "training" in pivot.columns and "test" in pivot.columns:
+            available_metrics.append(metric)
 
-    # Print unique values
-    print(f"Unique {pretraining_col} values: {df_clean[pretraining_col].unique()}")
-    print(f"Unique {ball_condition_col} values: {df_clean[ball_condition_col].unique()}")
-    print(f"Unique {f1_condition_col} values: {df_clean[f1_condition_col].unique()}")
-
-    # Filter for Pretraining == "y" flies
-    pretrained_flies = df_clean[df_clean[pretraining_col] == "y"]
-    print(f"Number of pretrained flies: {len(pretrained_flies[fly_id_col].unique())}")
-
-    if pretrained_flies.empty:
-        print("No flies with Pretraining == 'y' found. Available pretraining values:")
-        print(df_clean[pretraining_col].value_counts())
+    if not available_metrics:
+        print("No metrics found that exist for both test and training ball conditions.")
         return
 
-    # Print F1_condition distribution for pretrained flies
-    print(f"F1_condition distribution for pretrained flies:")
-    print(pretrained_flies[f1_condition_col].value_counts())
+    print(f"Metrics available for scatter: {available_metrics}")
 
-    # Get unique F1 conditions for pretrained flies
-    f1_conditions = pretrained_flies[f1_condition_col].unique()
-    print(f"F1 conditions found: {f1_conditions}")
-
-    # Create a figure with subplots for each F1_condition
-    n_conditions = len(f1_conditions)
-    fig, axes = plt.subplots(1, n_conditions + 1, figsize=(6 * (n_conditions + 1), 6))
-
-    # Ensure axes is always a list for consistent indexing
-    if n_conditions == 0:
-        axes = [axes]
-    elif n_conditions == 1:
-        axes = [axes[0], axes[1]]
-
-    # Store results for comparison
-    results = {}
-    all_complete_data = []
-
-    # Define colors for consistency across plots
+    # --- For each metric, plot by F1_condition for all unique pretraining groups in the data ---
     colors = ["steelblue", "orange", "green", "red", "purple"]
 
-    # Plot for each F1_condition separately
-    for i, f1_condition in enumerate(f1_conditions):
-        ax = axes[i]
+    # Get all unique pretraining group values in the data
+    pretraining_groups = df[pretraining_col].dropna().unique()
 
-        # Filter data for this F1_condition
-        condition_data = pretrained_flies[pretrained_flies[f1_condition_col] == f1_condition]
-
-        # Pivot the data to get training and test distances for each fly
-        pivot_data = condition_data.pivot_table(
-            index=fly_id_col,
-            columns=ball_condition_col,
-            values=distance_col,
-            aggfunc="first",  # In case there are duplicates, take the first value
-        )
-
-        print(f"\nF1_condition '{f1_condition}':")
-        print(f"  Pivot table shape: {pivot_data.shape}")
-        print(f"  Pivot table columns: {pivot_data.columns.tolist()}")
-
-        # Check if we have both training and test conditions
-        if "training" not in pivot_data.columns or "test" not in pivot_data.columns:
-            print(f"  Missing 'training' or 'test' ball conditions for {f1_condition}")
-            ax.text(0.5, 0.5, f"No data for {f1_condition}", ha="center", va="center", transform=ax.transAxes)
-            ax.set_title(f"F1_condition: {f1_condition}")
-            continue
-
-        # Remove flies that don't have both training and test data
-        complete_data = pivot_data.dropna(subset=["training", "test"])
-        print(f"  Number of flies with both training and test data: {len(complete_data)}")
-
-        if complete_data.empty:
-            print(f"  No flies have both training and test data for {f1_condition}")
-            ax.text(0.5, 0.5, f"No complete data for {f1_condition}", ha="center", va="center", transform=ax.transAxes)
-            ax.set_title(f"F1_condition: {f1_condition}")
-            continue
-
-        # Store complete data with F1_condition label
-        complete_data_with_condition = complete_data.copy()
-        complete_data_with_condition["f1_condition"] = f1_condition
-        all_complete_data.append(complete_data_with_condition)
-
-        # Set color for this condition
-        color = colors[i % len(colors)]
-
-        # Create scatter plot for this condition
-        x = complete_data["training"]
-        y = complete_data["test"]
-
-        ax.scatter(x, y, alpha=0.7, s=60, edgecolors="black", linewidth=0.5, color=color)
-
-        # Calculate correlation and trend line
-        if len(x) > 1:  # Need at least 2 points for correlation
-            correlation_coef, p_value = stats.pearsonr(x, y)  # type: ignore
-
-            # Normalized correlation: scale both training and test to [0,1] based on their ranges
-            x_normalized = (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x * 0
-            y_normalized = (y - y.min()) / (y.max() - y.min()) if y.max() > y.min() else y * 0
-
-            # Calculate correlation on normalized data
-            normalized_correlation_coef = float("nan")
-            normalized_p_value = float("nan")
-            if x_normalized.std() > 0 and y_normalized.std() > 0:
-                normalized_correlation_coef, normalized_p_value = stats.pearsonr(x_normalized, y_normalized)  # type: ignore
-
-            # Add trend line (best fit)
-            z = np.polyfit(x, y, 1)
-            fit_line = np.poly1d(z)
-            ax.plot(
-                x,
-                fit_line(x),
-                color=color,
-                alpha=0.8,
-                linewidth=2,
-                label=f"Linear fit (r = {correlation_coef:.3f})",
-            )
-
-            # Store results
-            results[f1_condition] = {
-                "correlation": correlation_coef,
-                "p_value": p_value,
-                "normalized_correlation": normalized_correlation_coef,
-                "normalized_p_value": normalized_p_value,
-                "slope": z[0],
-                "intercept": z[1],
-                "n_flies": len(complete_data),
-                "x_data": x,
-                "y_data": y,
-            }
-
-            # Add correlation text box
-            r_squared = correlation_coef * correlation_coef  # type: ignore
-            textstr = (
-                f"Raw: r = {correlation_coef:.3f} (p = {p_value:.3f})\n"
-                f"Norm: r = {normalized_correlation_coef:.3f} (p = {normalized_p_value:.3f})\n"
-                f"n = {len(complete_data)}"
-            )
-            props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
-            ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8, verticalalignment="top", bbox=props)
-        else:
-            results[f1_condition] = {
-                "correlation": np.nan,
-                "p_value": np.nan,
-                "normalized_correlation": np.nan,
-                "normalized_p_value": np.nan,
-                "slope": np.nan,
-                "intercept": np.nan,
-                "n_flies": len(complete_data),
-                "x_data": x,
-                "y_data": y,
-            }
-
-        # Formatting for individual plots
-        ax.set_xlabel("Distance Moved - Training Ball", fontsize=11)
-        ax.set_ylabel("Distance Moved - Test Ball", fontsize=11)
-        ax.set_title(f"F1_condition: {f1_condition}", fontsize=12, fontweight="bold")
-        ax.grid(True, alpha=0.3)
-
-        # Set axis limits with padding
-        if len(x) > 0 and len(y) > 0:
-            x_range = x.max() - x.min() if x.max() > x.min() else x.mean() * 0.1
-            y_range = y.max() - y.min() if y.max() > y.min() else y.mean() * 0.1
-            x_padding = x_range * 0.1
-            y_padding = y_range * 0.1
-
-            ax.set_xlim(x.min() - x_padding, x.max() + x_padding)
-            ax.set_ylim(y.min() - y_padding, y.max() + y_padding)
-
-    # Create combined plot in the last subplot
-    if all_complete_data:
-        ax_combined = axes[-1]
-
-        # Combine all data
-        combined_data = pd.concat(all_complete_data, ignore_index=True)
-
-        # Plot each F1_condition with different colors
-        for i, f1_condition in enumerate(f1_conditions):
-            condition_subset = combined_data[combined_data["f1_condition"] == f1_condition]
-            if condition_subset.empty:
+    for metric in available_metrics:
+        print(f"\n==== Metric: {metric} ====")
+        for pretrain_val in pretraining_groups:
+            group_df = df[df[pretraining_col] == pretrain_val]
+            if group_df.empty:
+                print(f"No flies with {pretraining_col} == '{pretrain_val}' for metric {metric}.")
                 continue
-
-            color = colors[i % len(colors)]
-            x = condition_subset["training"]
-            y = condition_subset["test"]
-
-            ax_combined.scatter(
-                x,
-                y,
-                alpha=0.7,
-                s=60,
-                edgecolors="black",
-                linewidth=0.5,
-                color=color,
-                label=f"{f1_condition} (n={len(condition_subset)})",
-            )
-
-            # Add trend line for each condition
-            if len(x) > 1:
-                z = np.polyfit(x, y, 1)
-                fit_line = np.poly1d(z)
-                ax_combined.plot(x, fit_line(x), color=color, alpha=0.8, linewidth=2, linestyle="--")
-
-        ax_combined.set_xlabel("Distance Moved - Training Ball", fontsize=11)
-        ax_combined.set_ylabel("Distance Moved - Test Ball", fontsize=11)
-        ax_combined.set_title("Combined: All F1_conditions", fontsize=12, fontweight="bold")
-        ax_combined.grid(True, alpha=0.3)
-        ax_combined.legend()
-
-    plt.tight_layout()
-
-    # Save the plot
-    output_path = Path(__file__).parent / "training_vs_test_scatter_by_f1condition.png"
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"Plot saved to: {output_path}")
-
-    # Print comparison statistics
-    print("\n" + "=" * 60)
-    print("COMPARISON ACROSS F1_CONDITIONS")
-    print("=" * 60)
-
-    for f1_condition, result in results.items():
-        print(f"\nF1_condition: {f1_condition}")
-        print(f"  Number of flies: {result['n_flies']}")
-        if not np.isnan(result["correlation"]):
-            print(f"  Raw correlation: {result['correlation']:.3f} (p = {result['p_value']:.3f})")
-            print(
-                f"  Normalized correlation: {result['normalized_correlation']:.3f} (p = {result['normalized_p_value']:.3f})"
-            )
-            print(f"  Slope: {result['slope']:.3f}")
-            print(
-                f"  Training mean: {result['x_data'].mean():.3f} ± {result['x_data'].std():.3f}, Range: {result['x_data'].min():.1f}-{result['x_data'].max():.1f}"
-            )
-            print(
-                f"  Test mean: {result['y_data'].mean():.3f} ± {result['y_data'].std():.3f}, Range: {result['y_data'].min():.1f}-{result['y_data'].max():.1f}"
-            )
-            print(f"  Test/Training ratio: {result['y_data'].mean() / result['x_data'].mean():.3f}")
-        else:
-            print("  Insufficient data for correlation analysis")
-
-    # Statistical comparison between conditions
-    if len(results) >= 2:
-        print(f"\n" + "-" * 40)
-        print("STATISTICAL COMPARISON BETWEEN CONDITIONS")
-        print("-" * 40)
-
-        conditions = list(results.keys())
-        for i in range(len(conditions)):
-            for j in range(i + 1, len(conditions)):
-                cond1, cond2 = conditions[i], conditions[j]
-                if not np.isnan(results[cond1]["correlation"]) and not np.isnan(results[cond2]["correlation"]):
-
-                    print(f"\n{cond1} vs {cond2}:")
-                    print(
-                        f"  Correlation difference: {results[cond1]['correlation'] - results[cond2]['correlation']:.3f}"
+            f1_conditions = group_df[f1_condition_col].unique()
+            n_conditions = len(f1_conditions)
+            fig, axes = plt.subplots(1, n_conditions + 1, figsize=(6 * (n_conditions + 1), 6))
+            if n_conditions == 0:
+                axes = [axes]
+            elif n_conditions == 1:
+                axes = [axes[0], axes[1]]
+            results = {}
+            all_complete_data = []
+            for i, f1_condition in enumerate(f1_conditions):
+                ax = axes[i]
+                condition_data = group_df[group_df[f1_condition_col] == f1_condition]
+                pivot_data = condition_data.pivot_table(
+                    index=fly_id_col,
+                    columns=ball_condition_col,
+                    values=metric,
+                    aggfunc="first",
+                )
+                if "training" not in pivot_data.columns or "test" not in pivot_data.columns:
+                    ax.text(0.5, 0.5, f"No data for {f1_condition}", ha="center", va="center", transform=ax.transAxes)
+                    ax.set_title(f"F1_condition: {f1_condition}")
+                    continue
+                complete_data = pivot_data.dropna(subset=["training", "test"])
+                if complete_data.empty:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        f"No complete data for {f1_condition}",
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
                     )
-                    print(f"  Slope difference: {results[cond1]['slope'] - results[cond2]['slope']:.3f}")
-
-                    # Test for difference in means between test ball performance
-                    from scipy.stats import ttest_ind
-
-                    t_stat, p_val = ttest_ind(results[cond1]["y_data"], results[cond2]["y_data"])
-                    print(f"  Test ball mean difference: t = {t_stat:.3f}, p = {p_val:.3f}")
-
-    return results
+                    ax.set_title(f"F1_condition: {f1_condition}")
+                    continue
+                complete_data_with_condition = complete_data.copy()
+                complete_data_with_condition["F1_condition"] = f1_condition
+                all_complete_data.append(complete_data_with_condition)
+                color = colors[i % len(colors)]
+                x = complete_data["training"]
+                y = complete_data["test"]
+                # Convert boolean columns to int for plotting and calculations
+                if pd.api.types.is_bool_dtype(x):
+                    x = x.astype(int)
+                if pd.api.types.is_bool_dtype(y):
+                    y = y.astype(int)
+                ax.scatter(x, y, alpha=0.7, s=60, edgecolors="black", linewidth=0.5, color=color)
+                if len(x) > 1 and len(np.unique(x)) > 1 and len(np.unique(y)) > 1:
+                    try:
+                        correlation_coef, p_value = stats.pearsonr(x, y)
+                        x_normalized = (x - x.min()) / (x.max() - x.min()) if x.max() > x.min() else x * 0
+                        y_normalized = (y - y.min()) / (y.max() - y.min()) if y.max() > y.min() else y * 0
+                        normalized_correlation_coef = float("nan")
+                        normalized_p_value = float("nan")
+                        if x_normalized.std() > 0 and y_normalized.std() > 0:
+                            normalized_correlation_coef, normalized_p_value = stats.pearsonr(x_normalized, y_normalized)
+                        z = np.polyfit(x, y, 1)
+                        fit_line = np.poly1d(z)
+                        ax.plot(
+                            x,
+                            fit_line(x),
+                            color=color,
+                            alpha=0.8,
+                            linewidth=2,
+                            label=f"Linear fit (r = {correlation_coef:.3f})",
+                        )
+                        results[f1_condition] = {
+                            "correlation": correlation_coef,
+                            "p_value": p_value,
+                            "normalized_correlation": normalized_correlation_coef,
+                            "normalized_p_value": normalized_p_value,
+                            "slope": z[0],
+                            "intercept": z[1],
+                            "n_flies": len(complete_data),
+                            "x_data": x,
+                            "y_data": y,
+                        }
+                        textstr = (
+                            f"Raw: r = {correlation_coef:.3f} (p = {p_value:.3f})\n"
+                            f"Norm: r = {normalized_correlation_coef:.3f} (p = {normalized_p_value:.3f})\n"
+                            f"n = {len(complete_data)}"
+                        )
+                        props = dict(boxstyle="round", facecolor="wheat", alpha=0.8)
+                        ax.text(
+                            0.05, 0.95, textstr, transform=ax.transAxes, fontsize=8, verticalalignment="top", bbox=props
+                        )
+                    except Exception as e:
+                        ax.text(
+                            0.05,
+                            0.95,
+                            f"No fit: {e}",
+                            transform=ax.transAxes,
+                            fontsize=8,
+                            verticalalignment="top",
+                            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                        )
+                        results[f1_condition] = {
+                            "correlation": np.nan,
+                            "p_value": np.nan,
+                            "normalized_correlation": np.nan,
+                            "normalized_p_value": np.nan,
+                            "slope": np.nan,
+                            "intercept": np.nan,
+                            "n_flies": len(complete_data),
+                            "x_data": x,
+                            "y_data": y,
+                        }
+                else:
+                    ax.text(
+                        0.05,
+                        0.95,
+                        "No fit: constant or insufficient data",
+                        transform=ax.transAxes,
+                        fontsize=8,
+                        verticalalignment="top",
+                        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+                    )
+                    results[f1_condition] = {
+                        "correlation": np.nan,
+                        "p_value": np.nan,
+                        "normalized_correlation": np.nan,
+                        "normalized_p_value": np.nan,
+                        "slope": np.nan,
+                        "intercept": np.nan,
+                        "n_flies": len(complete_data),
+                        "x_data": x,
+                        "y_data": y,
+                    }
+                ax.set_xlabel(f"{metric} - Training Ball", fontsize=11)
+                ax.set_ylabel(f"{metric} - Test Ball", fontsize=11)
+                ax.set_title(f"F1_condition: {f1_condition}", fontsize=12, fontweight="bold")
+                ax.grid(True, alpha=0.3)
+                if len(x) > 0 and len(y) > 0:
+                    x_range = x.max() - x.min() if x.max() > x.min() else x.mean() * 0.1
+                    y_range = y.max() - y.min() if y.max() > y.min() else y.mean() * 0.1
+                    x_padding = x_range * 0.1
+                    y_padding = y_range * 0.1
+                    ax.set_xlim(x.min() - x_padding, x.max() + x_padding)
+                    ax.set_ylim(y.min() - y_padding, y.max() + y_padding)
+            # Save and print output path for each plot
+            out_path = f"scatter_{metric}_pretraining_{pretrain_val}.png"
+            fig.tight_layout()
+            fig.savefig(out_path)
+            print(f"Plot saved to: {out_path}")
+            plt.close(fig)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ analysis_modes:
 
   tnt_mb247:
     description: "TNT MB247 flies tested across pretraining and genotype"
-    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -40,8 +40,8 @@ analysis_modes:
       "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for MB247
     coordinates:
-      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_17_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
-      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_15_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
       alternative_coordinates_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
       alternative_summary_paths:
@@ -51,6 +51,12 @@ analysis_modes:
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
+        run_permutation_tests: true
+        permutation_params:
+          n_permutations: 10000
+          alpha: 0.05
+          bin_size: 8.33  # ~12 bins across 0-100% (avoids over-testing with too many bins)
+          progress: true
 
   tnt_lc10_2:
     description: "TNT LC10-2 flies tested across pretraining and genotype"
@@ -144,7 +150,7 @@ output:
   plot_format: "png"
   dpi: 300
   bbox_inches: "tight"
-  show_plots: true
+  show_plots: false
 
   # Summary statistics
   print_detailed_stats: true
