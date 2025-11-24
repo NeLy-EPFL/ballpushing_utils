@@ -78,8 +78,8 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": [Path("/mnt/upramdya_data/MD/Broad_TNT/Videos")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Broad_TNT/Datasets"),
+        "data_root": [Path("/mnt/upramdya_data/MD/Learning_mutants/Videos")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Learning_mutants/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",

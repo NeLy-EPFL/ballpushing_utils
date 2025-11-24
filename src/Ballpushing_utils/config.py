@@ -88,7 +88,7 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "TNT"  # "F1"  #
+    experiment_type: str = "TNT"  # "F1"  #  #
     time_range: Optional[tuple] = None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
