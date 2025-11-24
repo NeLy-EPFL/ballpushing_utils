@@ -8,6 +8,7 @@ Usage:
     python unified_f1_analysis.py --mode control --analysis binary_metrics
     python unified_f1_analysis.py --mode tnt_mb247 --analysis boxplots --metric interaction_rate
     python unified_f1_analysis.py --mode tnt_lc10_2 --analysis coordinates --plot_type percentage
+    python unified_f1_analysis.py --mode tnt_ddc --analysis binary --show
 """
 
 import pandas as pd
@@ -38,6 +39,7 @@ class F1AnalysisFramework:
                        - control: /mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New
                        - tnt_mb247: /mnt/upramdya_data/MD/F1_Tracks/MB247
                        - tnt_lc10_2: /mnt/upramdya_data/MD/F1_Tracks/LC10-2
+                       - tnt_ddc: /mnt/upramdya_data/MD/F1_Tracks/DDC
         """
         if config_path is None:
             config_path = Path(__file__).parent / "analysis_config.yaml"
@@ -73,8 +75,14 @@ class F1AnalysisFramework:
             self.has_brain_regions = False
 
     def load_dataset(self, mode):
-        """Load dataset for specified mode."""
+        """Load dataset for specified mode, with support for pooled modes."""
         mode_config = self.config["analysis_modes"][mode]
+
+        # Check if this is a pooled mode
+        if "primary_dataset" in mode_config:
+            return self._load_pooled_dataset(mode, mode_config)
+
+        # Regular mode - load single dataset
         dataset_path = mode_config["dataset_path"]
 
         try:
@@ -93,6 +101,102 @@ class F1AnalysisFramework:
         except Exception as e:
             print(f"Error loading dataset: {e}")
             return None
+
+    def _load_pooled_dataset(self, mode, mode_config):
+        """Load and combine datasets for pooled analysis."""
+        print(f"\n🔄 Loading pooled dataset for mode: {mode}")
+
+        # Get primary dataset mode
+        primary_mode = mode_config["primary_dataset"]
+        primary_config = self.config["analysis_modes"][primary_mode]
+
+        # Load primary dataset
+        print(f"  📁 Loading primary dataset from: {primary_mode}")
+        try:
+            df_primary = pd.read_feather(primary_config["dataset_path"])
+            print(f"  ✓ Primary dataset loaded: {df_primary.shape}")
+        except Exception as e:
+            print(f"  ❌ Error loading primary dataset: {e}")
+            return None
+
+        # Get genotypes to pool
+        shared_genotypes = mode_config.get("shared_genotypes", [])
+        pool_from_modes = mode_config.get("pool_from_modes", [])
+
+        if not shared_genotypes or not pool_from_modes:
+            print("  ⚠️  No shared genotypes or pool_from_modes specified, using primary dataset only")
+            return df_primary
+
+        # Find genotype column in primary dataset
+        genotype_col = None
+        for col in df_primary.columns:
+            if "genotype" in col.lower():
+                genotype_col = col
+                break
+
+        if not genotype_col:
+            print("  ⚠️  Could not find genotype column, using primary dataset only")
+            return df_primary
+
+        # Collect pooled data for shared genotypes
+        pooled_dfs = [df_primary]
+
+        for pool_mode in pool_from_modes:
+            if pool_mode not in self.config["analysis_modes"]:
+                print(f"  ⚠️  Mode '{pool_mode}' not found in config, skipping")
+                continue
+
+            pool_config = self.config["analysis_modes"][pool_mode]
+
+            # Skip if this is also a pooled mode (avoid recursion)
+            if "primary_dataset" in pool_config:
+                print(f"  ⚠️  Skipping pooled mode '{pool_mode}' to avoid recursion")
+                continue
+
+            try:
+                print(f"  📁 Loading additional data from: {pool_mode}")
+                df_pool = pd.read_feather(pool_config["dataset_path"])
+
+                # Filter for shared genotypes only
+                if genotype_col in df_pool.columns:
+                    df_pool_filtered = df_pool[df_pool[genotype_col].isin(shared_genotypes)]
+
+                    if len(df_pool_filtered) > 0:
+                        print(
+                            f"  ✓ Added {len(df_pool_filtered)} rows from {pool_mode} ({', '.join(shared_genotypes)})"
+                        )
+                        pooled_dfs.append(df_pool_filtered)
+                    else:
+                        print(f"  ⚠️  No matching genotypes found in {pool_mode}")
+                else:
+                    print(f"  ⚠️  Genotype column not found in {pool_mode}")
+
+            except Exception as e:
+                print(f"  ⚠️  Error loading from {pool_mode}: {e}")
+
+        # Combine all datasets
+        if len(pooled_dfs) > 1:
+            df_combined = pd.concat(pooled_dfs, ignore_index=True)
+            print(f"\n  ✅ Pooled dataset created: {df_combined.shape} (from {len(pooled_dfs)} sources)")
+
+            # Filter out excluded dates
+            excluded_dates = mode_config.get("excluded_dates", [])
+            if excluded_dates and "Date" in df_combined.columns:
+                initial_shape = df_combined.shape
+                df_combined = df_combined[~df_combined["Date"].isin(excluded_dates)]
+                print(f"  Removed excluded dates {excluded_dates}. Shape: {initial_shape} -> {df_combined.shape}")
+
+            # Print genotype distribution
+            if genotype_col in df_combined.columns:
+                print(f"\n  📊 Genotype distribution in pooled dataset:")
+                genotype_counts = df_combined[genotype_col].value_counts()
+                for genotype, count in genotype_counts.items():
+                    print(f"     {genotype}: {count}")
+
+            return df_combined
+        else:
+            print(f"\n  ℹ️  No additional data pooled, using primary dataset only")
+            return df_primary
 
     def detect_columns(self, df, mode):
         """Auto-detect column names based on patterns."""
@@ -617,13 +721,16 @@ class F1AnalysisFramework:
                 # Use custom output directory if provided
                 output_dir = self.custom_output_dir
             else:
-                # Use default paths based on mode
-                if mode == "control":
+                # Use default paths based on mode (handle pooled modes)
+                base_mode = mode.replace("_pooled", "")
+                if base_mode == "control":
                     output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
-                elif mode == "tnt_mb247":
+                elif base_mode == "tnt_mb247":
                     output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
-                elif mode == "tnt_lc10_2":
+                elif base_mode == "tnt_lc10_2":
                     output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+                elif base_mode == "tnt_ddc":
+                    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/DDC")
                 else:
                     # Fallback to current directory for unknown modes
                     output_dir = Path(__file__).parent
@@ -631,11 +738,17 @@ class F1AnalysisFramework:
             # Create output directory if it doesn't exist
             output_dir.mkdir(parents=True, exist_ok=True)
 
+            # Add pooled suffix to filename if in pooled mode
+            if "_pooled" in mode:
+                plot_filename = f"{plot_name}_pooled"
+            else:
+                plot_filename = plot_name
+
             # Save in both PNG and PDF formats
             formats_to_save = ["png", "pdf"]
 
             for fmt in formats_to_save:
-                output_path = output_dir / f"{plot_name}.{fmt}"
+                output_path = output_dir / f"{plot_filename}.{fmt}"
 
                 # Attempt save, but catch very large-image errors and retry with safer settings
                 try:
@@ -1834,20 +1947,28 @@ class F1AnalysisFramework:
 
     def _generate_boxplot_summary_markdown(self, all_results, mode, detected_cols):
         """Generate markdown summary of boxplot pairwise comparisons."""
-        # Determine output directory
+        # Determine output directory (handle pooled modes)
+        base_mode = mode.replace("_pooled", "")
         if self.custom_output_dir:
             output_dir = self.custom_output_dir
-        elif mode == "control":
+        elif base_mode == "control":
             output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
-        elif mode == "tnt_mb247":
+        elif base_mode == "tnt_mb247":
             output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
-        elif mode == "tnt_lc10_2":
+        elif base_mode == "tnt_lc10_2":
             output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+        elif base_mode == "tnt_ddc":
+            output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/DDC")
         else:
             output_dir = Path(".")
 
         output_dir.mkdir(parents=True, exist_ok=True)
-        summary_file = output_dir / f"boxplot_pairwise_summary_{mode}.md"
+
+        # Add pooled suffix to filename if in pooled mode
+        if "_pooled" in mode:
+            summary_file = output_dir / f"boxplot_pairwise_summary_{mode}.md"
+        else:
+            summary_file = output_dir / f"boxplot_pairwise_summary_{mode}.md"
 
         # Check if this is an append operation
         is_appending = summary_file.exists()
@@ -3215,7 +3336,20 @@ class F1AnalysisFramework:
 def main():
     """Main function with command line interface."""
     parser = argparse.ArgumentParser(description="Unified F1 tracks analysis framework")
-    parser.add_argument("--mode", required=True, choices=["control", "tnt_mb247", "tnt_lc10_2"], help="Analysis mode")
+    parser.add_argument(
+        "--mode",
+        required=True,
+        choices=[
+            "control",
+            "tnt_mb247",
+            "tnt_lc10_2",
+            "tnt_ddc",
+            "tnt_mb247_pooled",
+            "tnt_lc10_2_pooled",
+            "tnt_ddc_pooled",
+        ],
+        help="Analysis mode (use '_pooled' suffix to include shared controls from other experiments)",
+    )
     parser.add_argument(
         "--analysis",
         choices=["binary_metrics", "boxplots", "coordinates", "all"],
@@ -3231,7 +3365,9 @@ def main():
             "Output directory for plots. Defaults based on mode: "
             "control=/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New, "
             "tnt_mb247=/mnt/upramdya_data/MD/F1_Tracks/MB247, "
-            "tnt_lc10_2=/mnt/upramdya_data/MD/F1_Tracks/LC10-2"
+            "tnt_lc10_2=/mnt/upramdya_data/MD/F1_Tracks/LC10-2, "
+            "tnt_ddc=/mnt/upramdya_data/MD/F1_Tracks/DDC, "
+            "pooled modes use same directories with '_pooled' suffix in filename"
         ),
     )
     parser.add_argument(
@@ -3253,12 +3389,19 @@ def main():
         output_dir = framework.custom_output_dir
     elif args.mode == "control":
         output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New")
-    elif args.mode == "tnt_mb247":
+    elif args.mode == "tnt_mb247" or args.mode == "tnt_mb247_pooled":
         output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/MB247")
-    elif args.mode == "tnt_lc10_2":
+    elif args.mode == "tnt_lc10_2" or args.mode == "tnt_lc10_2_pooled":
         output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/LC10-2")
+    elif args.mode == "tnt_ddc" or args.mode == "tnt_ddc_pooled":
+        output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/DDC")
     else:
         output_dir = Path(__file__).parent
+
+    # Add pooled suffix to mode name for display
+    mode_display = args.mode.replace("_", " ").title()
+    if "pooled" in args.mode.lower():
+        print(f"\n🔄 Running in POOLED mode - combining shared controls from multiple experiments")
 
     print(f"\n📁 Output directory: {output_dir}")
     print(f"{'='*60}\n")

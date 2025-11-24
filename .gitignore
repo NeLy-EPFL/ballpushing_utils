@@ -876,3 +876,5 @@ src/F1_tracks/aligned_heatmaps_by_Pretraining.png
 tests/F1_tracks/test_single_fly_trajectory_on_template.png
 tests/F1_tracks/test_multi_fly_trajectories_on_template.png
 tests/F1_tracks/test_multi_fly_heatmap_on_template.png
+src/F1_tracks/DDC/test_ball_euclidean_distance_permutation_results.csv
+src/F1_tracks/DDC_POOLED/test_ball_euclidean_distance_permutation_results.csv

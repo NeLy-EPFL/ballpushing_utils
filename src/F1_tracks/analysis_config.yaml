@@ -87,6 +87,132 @@ analysis_modes:
         time_window: {start: -10, end: 30}
         create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
 
+  tnt_ddc:
+    description: "TNT DDC flies tested across pretraining and genotype"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+    grouping_variables:
+      primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
+      secondary: "genotype"   # Column name will be auto-detected with "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxDDC": "Olfaction"
+      "TNTxEmptyGal4": "Control"
+    # Coordinate plotting specific settings for DDC
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true  # Set to false to skip individual fly trajectory plots (faster)
+        run_permutation_tests: true
+        permutation_params:
+          n_permutations: 10000
+          alpha: 0.05
+          bin_size: 8.33  # ~12 bins across 0-100% (avoids over-testing with too many bins)
+          progress: true
+
+  # Pooled modes - combine data from multiple experiments for shared controls
+  tnt_ddc_pooled:
+    description: "TNT DDC with pooled EmptyGal4 controls from MB247 and LC10-2"
+    primary_dataset: "tnt_ddc"  # Reference to main mode
+    pool_from_modes: ["tnt_mb247", "tnt_lc10_2"]  # Pool controls from these modes
+    shared_genotypes: ["TNTxEmptyGal4"]  # Genotypes to pool
+    grouping_variables:
+      primary: "pretraining"
+      secondary: "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxDDC": "Olfaction"
+      "TNTxEmptyGal4": "Control"
+    # Coordinate plotting specific settings for DDC pooled
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true
+        run_permutation_tests: true
+        permutation_params:
+          n_permutations: 10000
+          alpha: 0.05
+          bin_size: 8.33
+          progress: true
+
+  tnt_mb247_pooled:
+    description: "TNT MB247 with pooled EmptyGal4 controls from DDC and LC10-2"
+    primary_dataset: "tnt_mb247"
+    pool_from_modes: ["tnt_ddc", "tnt_lc10_2"]
+    shared_genotypes: ["TNTxEmptyGal4"]
+    grouping_variables:
+      primary: "pretraining"
+      secondary: "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxMB247": "MB"
+      "TNTxEmptyGal4": "Control"
+    # Coordinate plotting specific settings for MB247 pooled
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251015_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_summary_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true
+        run_permutation_tests: true
+        permutation_params:
+          n_permutations: 10000
+          alpha: 0.05
+          bin_size: 8.33
+          progress: true
+
+  tnt_lc10_2_pooled:
+    description: "TNT LC10-2 with pooled EmptyGal4 controls from MB247 and DDC"
+    primary_dataset: "tnt_lc10_2"
+    pool_from_modes: ["tnt_mb247", "tnt_ddc"]
+    shared_genotypes: ["TNTxEmptyGal4", "TNTxEmptySplit"]
+    grouping_variables:
+      primary: "pretraining"
+      secondary: "genotype"
+    excluded_dates: ["250904"]
+    brain_region_mapping:
+      "TNTxLC10-2": "Vision"
+      "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
+    # Coordinate plotting specific settings for LC10-2 pooled
+    coordinates:
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+      alternative_coordinates_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_F1_coordinates_F1_TNT_LC10-2_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      alternative_summary_paths:
+        - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_summary_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+      coordinates_plot_params:
+        normalize_methods: ["percentage", "trimmed"]
+        percentage_bin_size: 0.1
+        trimmed_time_bin_size: 0.1
+        time_window: {start: -10, end: 30}
+        create_individual_fly_plots: true
+
 # Common analysis parameters
 analysis_parameters:
   # Ball condition filtering
@@ -191,6 +317,48 @@ plot_styling:
       "y": "colored_fill"  # Colored fill
 
   tnt_lc10_2:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "Vision": "#ff7f0e"  # Orange
+      "Control": "#7f7f7f"  # Gray
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"
+      "y": "colored_fill"
+
+  tnt_ddc:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "Olfaction": "#8B4513"  # Brown (SaddleBrown)
+      "Control": "#7f7f7f"  # Gray
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"
+      "y": "colored_fill"
+
+  # Pooled mode styling - inherits from primary mode
+  tnt_ddc_pooled:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "Olfaction": "#8B4513"  # Brown
+      "Control": "#7f7f7f"  # Gray
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"
+      "y": "colored_fill"
+
+  tnt_mb247_pooled:
+    figure_size: [20, 12]
+    brain_region_colors:
+      "MB": "#1f77b4"  # Blue
+      "Control": "#7f7f7f"  # Gray
+      "Vision": "#ff7f0e"  # Orange
+      "Unknown": "#808080"  # Gray
+    pretraining_styles:
+      "n": "white_fill_colored_edge"
+      "y": "colored_fill"
+
+  tnt_lc10_2_pooled:
     figure_size: [20, 12]
     brain_region_colors:
       "Vision": "#ff7f0e"  # Orange
