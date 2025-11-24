@@ -528,6 +528,12 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("time_chamber_beginning"):
                     time_chamber_beginning = safe_call(self.get_time_chamber_beginning, fly_idx, default=np.nan)
 
+                time_to_first_interaction = np.nan
+                if self.is_metric_enabled("time_to_first_interaction"):
+                    time_to_first_interaction = safe_call(
+                        self.compute_time_to_first_interaction, fly_idx, ball_idx, default=np.nan
+                    )
+
                 median_stop_duration = np.nan
                 if self.is_metric_enabled("median_stop_duration"):
                     median_stop_duration = safe_call(self.compute_median_stop_duration, fly_idx, default=np.nan)
@@ -853,6 +859,8 @@ class BallPushingMetrics:
                     metrics_dict["head_pushing_ratio"] = head_pushing_ratio
                 if self.is_metric_enabled("leg_visibility_ratio"):
                     metrics_dict["leg_visibility_ratio"] = leg_visibility_ratio
+                if self.is_metric_enabled("time_to_first_interaction"):
+                    metrics_dict["time_to_first_interaction"] = time_to_first_interaction
 
                 self.metrics[key] = metrics_dict
 
@@ -1103,16 +1111,17 @@ class BallPushingMetrics:
         if hasattr(self.fly.metadata, "F1_condition"):
 
             if self.fly.metadata.F1_condition == "control":
-                if ball_idx == 0 and self.tracking_data.chamber_exit_time is not None:
-                    chamber_exit_time = self.tracking_data.chamber_exit_time
+                # Control condition: test ball is ball_idx == 0
+                if ball_idx == 0 and self.tracking_data.f1_exit_time is not None:
                     adjusted_nb_events = (
                         len(events)
                         * self.fly.config.adjusted_events_normalisation
-                        / (self.tracking_data.duration - chamber_exit_time)
-                        if self.tracking_data.duration - chamber_exit_time > 0
+                        / (self.tracking_data.duration - self.tracking_data.f1_exit_time)
+                        if self.tracking_data.duration - self.tracking_data.f1_exit_time > 0
                         else 0
                     )
             else:
+                # Pretrained condition: test ball is ball_idx == 1
                 if ball_idx == 1 and self.tracking_data.f1_exit_time is not None:
                     adjusted_nb_events = (
                         len(events)
@@ -2947,6 +2956,89 @@ class BallPushingMetrics:
         time_in_chamber = np.sum(in_chamber) / self.fly.experiment.fps
 
         return time_in_chamber
+
+    def compute_time_to_first_interaction(self, fly_idx, ball_idx):
+        """
+        Compute the time from chamber/corridor exit to the first interaction event.
+
+        For F1 experiments:
+        - Training ball (pretrained condition): uses chamber_exit_time as reference
+        - Test ball (control condition, ball_idx==0): uses f1_exit_time as reference
+        - Test ball (pretrained condition, ball_idx==1): uses f1_exit_time as reference
+
+        For non-F1 experiments:
+        - Uses chamber_exit_time as reference
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Time in seconds from chamber/corridor exit to first interaction event.
+            Returns np.nan if no interaction events exist or if reference time is not available.
+        """
+        # Get interaction events for this fly-ball pair
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        if not events or len(events) == 0:
+            return np.nan
+
+        # Get the first event start time (in frames)
+        first_event_start_frame = events[0][0]
+        first_event_start_time = first_event_start_frame / self.fly.experiment.fps
+
+        # Determine the appropriate reference time based on experiment type and ball
+        reference_time = None
+
+        if hasattr(self.fly.metadata, "F1_condition"):
+            # F1 experiment
+            ball_identity = (
+                self.tracking_data.ball_identities.get(ball_idx)
+                if hasattr(self.tracking_data, "ball_identities")
+                else None
+            )
+
+            if ball_identity == "test":
+                # Test ball uses f1_exit_time (corridor exit)
+                reference_time = self.tracking_data.f1_exit_time
+            elif ball_identity == "training":
+                # Training ball uses chamber_exit_time
+                reference_time = self.tracking_data.chamber_exit_time
+            else:
+                # Fallback for F1 without proper ball identity
+                if self.fly.metadata.F1_condition == "control" and ball_idx == 0:
+                    # Control: test ball is first ball, use f1_exit_time
+                    reference_time = self.tracking_data.f1_exit_time
+                elif self.fly.metadata.F1_condition != "control" and ball_idx == 1:
+                    # Pretrained: test ball is second ball, use f1_exit_time
+                    reference_time = self.tracking_data.f1_exit_time
+                elif ball_idx == 0 and self.fly.metadata.F1_condition != "control":
+                    # Pretrained: training ball is first ball, use chamber_exit_time
+                    reference_time = self.tracking_data.chamber_exit_time
+        else:
+            # Non-F1 experiment: use chamber_exit_time
+            reference_time = self.tracking_data.chamber_exit_time
+
+        if reference_time is None:
+            return np.nan
+
+        # Calculate time difference
+        time_to_first_interaction = first_event_start_time - reference_time
+
+        # Ensure non-negative (first interaction should be after exit)
+        if time_to_first_interaction < 0:
+            if self.fly.config.debugging:
+                print(
+                    f"Warning: Negative time_to_first_interaction ({time_to_first_interaction:.2f}s) for fly {fly_idx}, ball {ball_idx}"
+                )
+            return np.nan
+
+        return time_to_first_interaction
 
     def compute_median_stop_duration(self, fly_idx):
         """

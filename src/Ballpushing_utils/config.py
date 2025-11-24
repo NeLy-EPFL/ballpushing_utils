@@ -88,11 +88,11 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "TNT"  # "F1"  #
+    experiment_type: str = "F1"  # "TNT"
     time_range: Optional[tuple] = None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
-    tracks_smoothing: bool = True
+    tracks_smoothing: bool = False
     chamber_radius: int = 50
     rolling_window: int = 10
 

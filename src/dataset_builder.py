@@ -78,8 +78,8 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": [Path("/mnt/upramdya_data/MD/Antennae_dissection/Videos")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/Antennae_dissection/Datasets"),
+        "data_root": [Path("/mnt/upramdya_data/MD/F1_Tracks/Videos")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/F1_Tracks/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -93,7 +93,7 @@ CONFIG = {
             # "standardized_contacts",
             "summary",  # Re-enabled for testing the optimization
             "coordinates",  # For regular experiments
-            # "fly_positions"
+            "fly_positions",
         ],  # Metrics to process (add/remove as needed)
         "memory_threshold_mb": 2048,  # Memory threshold in MB for conditional cache clearing
     },
