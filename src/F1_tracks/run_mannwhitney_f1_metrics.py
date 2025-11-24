@@ -52,6 +52,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact
+from statsmodels.stats.multitest import multipletests
 import scipy.stats as stats_module
 
 
@@ -68,7 +69,7 @@ def load_f1_dataset(test_mode=False, test_sample_size=500):
     """
     # Load the F1 dataset
     dataset_path = (
-        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
+        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251119_10_summary_F1_New_Data/summary/pooled_summary.feather"
     )
 
     print(f"Loading F1 dataset from: {dataset_path}")
@@ -370,6 +371,7 @@ def load_f1_metrics_list():
         "nb_significant_events",
         "significant_ratio",
         # Timing metrics
+        "time_to_first_interaction",
         "first_significant_event",
         "first_significant_event_time",
         "first_major_event",
@@ -505,6 +507,9 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
     """
     Analyze binary metrics for F1 experiments using appropriate statistical tests.
 
+    For 2 groups: Uses Fisher's exact test
+    For 3+ groups: Uses overall chi-square test followed by pairwise Fisher's tests with FDR correction
+
     Parameters:
     -----------
     data : pd.DataFrame
@@ -512,7 +517,7 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
     binary_metrics : list
         List of binary metric column names
     y : str
-        Column name for grouping (pretraining conditions)
+        Column name for grouping (pretraining conditions or F1_condition)
     output_dir : str or Path
         Directory to save plots
     overwrite : bool
@@ -520,18 +525,19 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
 
     Returns:
     --------
-    pd.DataFrame
-        Statistics results for binary metrics
+    tuple
+        (pairwise_results_df, overall_results_df) - DataFrames with pairwise and overall statistics
     """
     if not binary_metrics:
         print("No binary metrics to analyze")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     print(f"\n{'='*50}")
-    print(f"F1 BINARY METRICS ANALYSIS")
+    print(f"F1 BINARY METRICS ANALYSIS - Grouping by {y}")
     print(f"{'='*50}")
 
     results = []
+    overall_results = []  # Store overall test results
 
     if output_dir:
         output_dir = Path(output_dir)
@@ -539,19 +545,21 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
 
     # Determine control group (typically 'n' for no pretraining or 'control')
     control_condition = None
-    pretraining_values = data[y].value_counts()
-    print(f"Pretraining condition distribution: {dict(pretraining_values)}")
+    condition_values = data[y].value_counts()
+    n_conditions = len(condition_values)
+    print(f"{y} distribution: {dict(condition_values)}")
+    print(f"Number of groups: {n_conditions}")
 
     # Prioritize common control conditions
     control_candidates = ["n", "no", "control", "untrained", "naive"]
     for candidate in control_candidates:
-        if candidate in pretraining_values.index:
+        if candidate in condition_values.index:
             control_condition = candidate
             break
 
     if control_condition is None:
-        # Use the most common condition as control
-        control_condition = pretraining_values.index[0]
+        # Use the first condition alphabetically as control
+        control_condition = sorted(condition_values.index)[0]
 
     print(f"Using control condition: {control_condition}")
 
@@ -575,7 +583,43 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
         print(f"\nProportions for {metric}:")
         print(proportions[["n_success", "n_total", "proportion"]])
 
-        # Statistical tests for each condition vs control
+        # For 3+ groups, perform overall chi-square test first
+        overall_p = None
+        overall_chi2 = None
+        if n_conditions > 2:
+            try:
+                # Overall chi-square test
+                ct_values = pd.crosstab(data[y], data[metric])
+                chi2, overall_p, dof, expected = chi2_contingency(ct_values)
+                overall_chi2 = chi2
+                min_expected = expected.min()
+
+                print(f"\n  Overall Chi-square test: χ²={chi2:.3f}, p={overall_p:.4f}, df={dof}")
+                print(f"  Min expected frequency: {min_expected:.1f}")
+
+                if min_expected < 5:
+                    print(f"  ⚠️  Warning: Some expected frequencies < 5, chi-square may not be valid")
+
+                # Store overall result
+                overall_results.append(
+                    {
+                        "metric": metric,
+                        "grouping": y,
+                        "n_groups": n_conditions,
+                        "chi2": chi2,
+                        "p_value": overall_p,
+                        "dof": dof,
+                        "min_expected": min_expected,
+                        "significant": overall_p < 0.05,
+                    }
+                )
+
+            except Exception as e:
+                print(f"  Error in overall chi-square test: {e}")
+
+        # Pairwise comparisons: each condition vs control
+        pairwise_results_for_metric = []
+
         for condition in data[y].unique():
             if condition == control_condition:
                 continue
@@ -588,9 +632,9 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
                 continue
 
             # Create 2x2 contingency table for Fisher's exact test
-            test_success = test_data.sum()
+            test_success = int(test_data.sum())
             test_total = len(test_data)
-            control_success = control_data_subset.sum()
+            control_success = int(control_data_subset.sum())
             control_total = len(control_data_subset)
 
             # Fisher's exact test
@@ -610,17 +654,7 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
                 control_prop = control_success / control_total if control_total > 0 else 0
                 effect_size = test_prop - control_prop
 
-                # Significance level
-                if p_value < 0.001:
-                    sig_level = "***"
-                elif p_value < 0.01:
-                    sig_level = "**"
-                elif p_value < 0.05:
-                    sig_level = "*"
-                else:
-                    sig_level = "ns"
-
-                results.append(
+                pairwise_results_for_metric.append(
                     {
                         "metric": metric,
                         "condition": condition,
@@ -634,34 +668,145 @@ def analyze_binary_metrics_f1(data, binary_metrics, y="Pretraining", output_dir=
                         "effect_size": effect_size,
                         "odds_ratio": odds_ratio,
                         "p_value": p_value,
-                        "significant": p_value < 0.05,
-                        "sig_level": sig_level,
+                        "p_value_uncorrected": p_value,  # Store uncorrected p-value
                         "test_type": "Fisher exact",
+                        "overall_chi2": overall_chi2,
+                        "overall_p": overall_p,
                     }
                 )
 
-                print(f"  {condition} vs {control_condition}: OR={odds_ratio:.3f}, p={p_value:.4f} {sig_level}")
+                print(f"  {condition} vs {control_condition}: OR={odds_ratio:.3f}, p={p_value:.4f}")
 
             except Exception as e:
                 print(f"  Error testing {condition} vs {control_condition}: {e}")
 
+        # Apply FDR correction if we have multiple comparisons for this metric
+        if len(pairwise_results_for_metric) > 1:
+            p_values = [r["p_value"] for r in pairwise_results_for_metric]
+            reject, p_corrected, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
+
+            print(f"\n  FDR correction (Benjamini-Hochberg) applied to {len(p_values)} comparisons:")
+            for i, result in enumerate(pairwise_results_for_metric):
+                result["p_value_fdr"] = p_corrected[i]
+                result["significant_fdr"] = reject[i]
+
+                # Update significance level based on FDR-corrected p-value
+                if p_corrected[i] < 0.001:
+                    sig_level = "***"
+                elif p_corrected[i] < 0.01:
+                    sig_level = "**"
+                elif p_corrected[i] < 0.05:
+                    sig_level = "*"
+                else:
+                    sig_level = "ns"
+
+                result["sig_level_fdr"] = sig_level
+                result["significant"] = reject[i]  # Use FDR-corrected significance
+                result["sig_level"] = sig_level  # Use FDR-corrected significance level
+
+                print(
+                    f"    {result['condition']}: p_uncorr={result['p_value_uncorrected']:.4f} → p_FDR={p_corrected[i]:.4f} {sig_level}"
+                )
+        else:
+            # Single comparison, no correction needed
+            for result in pairwise_results_for_metric:
+                result["p_value_fdr"] = result["p_value"]
+                result["significant_fdr"] = result["p_value"] < 0.05
+
+                # Significance level based on uncorrected p-value
+                if result["p_value"] < 0.001:
+                    sig_level = "***"
+                elif result["p_value"] < 0.01:
+                    sig_level = "**"
+                elif result["p_value"] < 0.05:
+                    sig_level = "*"
+                else:
+                    sig_level = "ns"
+
+                result["sig_level_fdr"] = sig_level
+                result["sig_level"] = sig_level
+                result["significant"] = result["significant_fdr"]
+
+        # Add all pairwise results to main results list
+        results.extend(pairwise_results_for_metric)
+
         # Create visualization
         if output_dir:
-            create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition)
+            create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition, n_conditions)
 
     results_df = pd.DataFrame(results)
+    overall_df = pd.DataFrame(overall_results)
 
-    if output_dir and not results_df.empty:
-        stats_file = output_dir / "f1_binary_metrics_statistics.csv"
-        results_df.to_csv(stats_file, index=False)
-        print(f"\nF1 binary metrics statistics saved to: {stats_file}")
+    if output_dir:
+        if not results_df.empty:
+            stats_file = output_dir / f"f1_binary_metrics_pairwise_{y}.csv"
+            results_df.to_csv(stats_file, index=False)
+            print(f"\nPairwise comparison statistics saved to: {stats_file}")
 
-    return results_df
+        if not overall_df.empty:
+            overall_file = output_dir / f"f1_binary_metrics_overall_{y}.csv"
+            overall_df.to_csv(overall_file, index=False)
+            print(f"Overall test statistics saved to: {overall_file}")
+
+    return results_df, overall_df
 
 
-def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
+def permutation_test_means(group1, group2, n_permutations=10000, random_state=42):
     """
-    Create simple Mann-Whitney U comparison plots for F1 experiments.
+    Perform permutation test on difference of means.
+
+    Parameters:
+    -----------
+    group1 : array-like
+        First group of observations
+    group2 : array-like
+        Second group of observations
+    n_permutations : int
+        Number of permutations to perform (default: 10000)
+    random_state : int
+        Random seed for reproducibility
+
+    Returns:
+    --------
+    tuple
+        (observed_difference, p_value)
+        - observed_difference: actual difference in means (group2 - group1)
+        - p_value: two-sided p-value
+    """
+    np.random.seed(random_state)
+
+    # Convert to numpy arrays
+    group1 = np.array(group1)
+    group2 = np.array(group2)
+
+    # Calculate observed difference in means
+    observed_diff = np.mean(group2) - np.mean(group1)
+
+    # Combine all data
+    combined = np.concatenate([group1, group2])
+    n1 = len(group1)
+    n_total = len(combined)
+
+    # Perform permutations
+    perm_diffs = np.zeros(n_permutations)
+    for i in range(n_permutations):
+        # Shuffle the combined data
+        np.random.shuffle(combined)
+        # Split into two groups
+        perm_group1 = combined[:n1]
+        perm_group2 = combined[n1:]
+        # Calculate difference in means
+        perm_diffs[i] = np.mean(perm_group2) - np.mean(perm_group1)
+
+    # Calculate two-sided p-value
+    p_value = np.mean(np.abs(perm_diffs) >= np.abs(observed_diff))
+
+    return observed_diff, p_value
+
+
+def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", test_type="mannwhitney"):
+    """
+    Create simple statistical comparison plots for F1 experiments.
 
     This is a simplified plotting function that directly compares pretraining conditions
     without the complexity of split-based analysis.
@@ -676,6 +821,13 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
         Directory to save plots
     y_col : str
         Column name for pretraining conditions
+    test_type : str
+        Type of statistical test: 'mannwhitney' or 'permutation' (default: 'mannwhitney')
+
+    Returns:
+    --------
+    list
+        List of dictionaries containing statistical results for each metric
     """
     from scipy.stats import mannwhitneyu
     import matplotlib.pyplot as plt
@@ -689,6 +841,9 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
     matplotlib.rcParams["ps.fonttype"] = 42
     matplotlib.rcParams["font.family"] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
+
+    # Store statistical results for summary
+    stats_results = []
 
     # Get pretraining colors
     pretraining_colors = create_pretraining_colors()
@@ -724,9 +879,17 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
             print(f"    ⚠️  Insufficient data for comparison in {metric}")
             continue
 
-        # Perform Mann-Whitney U test
+        # Perform statistical test based on test_type
         try:
-            statistic, p_value = mannwhitneyu(experimental_data, control_data, alternative="two-sided")
+            if test_type == "permutation":
+                # Permutation test on means
+                mean_diff, p_value = permutation_test_means(control_data, experimental_data)
+                statistic = mean_diff  # Store mean difference as statistic
+                test_name = "Permutation test (means)"
+            else:
+                # Mann-Whitney U test (default)
+                statistic, p_value = mannwhitneyu(experimental_data, control_data, alternative="two-sided")
+                test_name = "Mann-Whitney U"
 
             # Determine significance level
             if p_value < 0.001:
@@ -738,10 +901,64 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
             else:
                 sig_level = "ns"
 
+            # Calculate effect sizes
+            control_median = control_data.median()
+            experimental_median = experimental_data.median()
+            median_diff = experimental_median - control_median
+
+            control_mean = control_data.mean()
+            experimental_mean = experimental_data.mean()
+            mean_diff_calc = experimental_mean - control_mean
+
+            if control_median != 0:
+                percent_change_median = (median_diff / control_median) * 100
+            else:
+                percent_change_median = np.nan
+
+            if control_mean != 0:
+                percent_change_mean = (mean_diff_calc / control_mean) * 100
+            else:
+                percent_change_mean = np.nan
+
+            # Store results for summary
+            result_dict = {
+                "metric": metric,
+                "metric_display_name": map_metric_name(metric),
+                "control_condition": control_condition,
+                "experimental_condition": experimental_condition,
+                "control_n": len(control_data),
+                "experimental_n": len(experimental_data),
+                "control_median": control_median,
+                "control_mean": control_mean,
+                "control_std": control_data.std(),
+                "experimental_median": experimental_median,
+                "experimental_mean": experimental_mean,
+                "experimental_std": experimental_data.std(),
+                "median_difference": median_diff,
+                "mean_difference": mean_diff_calc,
+                "percent_change_median": percent_change_median,
+                "percent_change_mean": percent_change_mean,
+                "test_statistic": statistic,
+                "p_value": p_value,
+                "significance": sig_level,
+                "significant": p_value < 0.05,
+                "test_type": test_name,
+            }
+
+            # Add test-specific fields for backward compatibility
+            if test_type == "permutation":
+                result_dict["permutation_mean_diff"] = statistic
+            else:
+                result_dict["mann_whitney_u"] = statistic
+                result_dict["percent_change"] = percent_change_median  # Legacy field
+
+            stats_results.append(result_dict)
+
         except Exception as e:
             print(f"    ⚠️  Error in statistical test for {metric}: {e}")
             p_value = 1.0
             sig_level = "ns"
+            statistic = np.nan
 
         # Create the plot with smaller figure size for publication-quality layout
         fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
@@ -839,118 +1056,508 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining"):
 
         plt.tight_layout()
 
-        # Save plot with editable text
-        output_file = output_dir / f"f1_{metric}_pretraining_comparison.pdf"
+        # Save plot with editable text - filename reflects test type
+        test_suffix = "permutation" if test_type == "permutation" else "mannwhitney"
+        output_file = output_dir / f"f1_{metric}_{test_suffix}_comparison.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight", format="pdf")
         plt.close()
 
         print(f"    ✅ Saved: {output_file.name}")
 
+    return stats_results
 
-def create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition=None):
-    """Create a visualization for F1 binary metrics showing proportions by pretraining condition"""
+
+def generate_markdown_summary(
+    stats_results, binary_results, overall_binary_results, output_dir, ball_identity="test", test_type="mannwhitney"
+):
+    """
+    Generate a comprehensive Markdown summary file with all statistical test results.
+
+    Parameters:
+    -----------
+    stats_results : list
+        List of dictionaries with continuous metric statistics
+    binary_results : pd.DataFrame or None
+        DataFrame with binary metric statistics
+    output_dir : Path
+        Directory to save the summary file
+    ball_identity : str
+        Ball identity analyzed ('test', 'training', or 'both')
+    test_type : str
+        Type of statistical test used ('mannwhitney' or 'permutation')
+    """
+    output_dir = Path(output_dir)
+    test_label = "Permutation" if test_type == "permutation" else "Mann_Whitney"
+    output_file = output_dir / f"F1_Statistical_Summary_{test_label}_ball_{ball_identity}.md"
+
+    with open(output_file, "w") as f:
+        # Header
+        test_name = "Permutation Test (Means)" if test_type == "permutation" else "Mann-Whitney U Test"
+        f.write(f"# F1 Pretraining Statistical Analysis Summary\n\n")
+        f.write(f"**Statistical Test:** {test_name}\n\n")
+        f.write(f"**Ball Identity:** {ball_identity}\n\n")
+        f.write(f"**Analysis Date:** {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write("---\n\n")
+
+        # Continuous Metrics Section
+        if stats_results:
+            f.write(f"## Continuous Metrics ({test_name})\n\n")
+
+            if test_type == "permutation":
+                f.write(
+                    "Statistical comparison of pretraining conditions using permutation test on mean differences.\n\n"
+                )
+            else:
+                f.write("Statistical comparison of pretraining conditions using two-sided Mann-Whitney U test.\n\n")
+
+            # Create control and experimental labels from first result
+            if stats_results:
+                ctrl = map_condition_labels(stats_results[0]["control_condition"])
+                exp = map_condition_labels(stats_results[0]["experimental_condition"])
+                f.write(f"**Conditions:** {ctrl} (control) vs {exp} (experimental)\n\n")
+
+            # Significance summary
+            sig_count = sum(1 for r in stats_results if r["significant"])
+            total_count = len(stats_results)
+            f.write(f"**Summary:** {sig_count}/{total_count} metrics showed significant differences (p < 0.05)\n\n")
+
+            # Separate by significance
+            significant_metrics = [r for r in stats_results if r["significant"]]
+            non_significant_metrics = [r for r in stats_results if not r["significant"]]
+
+            # Significant results
+            if significant_metrics:
+                f.write(f"### Significant Results (n={len(significant_metrics)})\n\n")
+
+                if test_type == "permutation":
+                    f.write(
+                        "| Metric | Control<br>Mean (n) | Experimental<br>Mean (n) | Mean Diff | % Change | p-value | Sig |\n"
+                    )
+                    f.write("|--------|-----------|--------------|-----------|----------|---------|-----|\n")
+
+                    # Sort by p-value (ascending)
+                    for result in sorted(significant_metrics, key=lambda x: x["p_value"]):
+                        metric_name = result["metric_display_name"]
+                        ctrl_mean = f"{result['control_mean']:.3f} (n={result['control_n']})"
+                        exp_mean = f"{result['experimental_mean']:.3f} (n={result['experimental_n']})"
+                        diff = f"{result['mean_difference']:+.3f}"
+                        pct = (
+                            f"{result['percent_change_mean']:+.1f}%"
+                            if not np.isnan(result["percent_change_mean"])
+                            else "N/A"
+                        )
+                        pval = f"{result['p_value']:.4f}" if result["p_value"] >= 0.0001 else "< 0.0001"
+                        sig = result["significance"]
+
+                        f.write(f"| {metric_name} | {ctrl_mean} | {exp_mean} | {diff} | {pct} | {pval} | {sig} |\n")
+                else:
+                    f.write(
+                        "| Metric | Control<br>Median (n) | Experimental<br>Median (n) | Difference | % Change | p-value | Sig |\n"
+                    )
+                    f.write("|--------|-----------|--------------|------------|----------|---------|-----|\n")
+
+                    # Sort by p-value (ascending)
+                    for result in sorted(significant_metrics, key=lambda x: x["p_value"]):
+                        metric_name = result["metric_display_name"]
+                        ctrl_med = f"{result['control_median']:.3f} (n={result['control_n']})"
+                        exp_med = f"{result['experimental_median']:.3f} (n={result['experimental_n']})"
+                        diff = f"{result['median_difference']:+.3f}"
+                        pct = (
+                            f"{result['percent_change_median']:+.1f}%"
+                            if not np.isnan(result["percent_change_median"])
+                            else "N/A"
+                        )
+                        pval = f"{result['p_value']:.4f}" if result["p_value"] >= 0.0001 else "< 0.0001"
+                        sig = result["significance"]
+
+                        f.write(f"| {metric_name} | {ctrl_med} | {exp_med} | {diff} | {pct} | {pval} | {sig} |\n")
+
+                f.write("\n")
+
+            # Non-significant results
+            if non_significant_metrics:
+                f.write(f"### Non-Significant Results (n={len(non_significant_metrics)})\n\n")
+
+                if test_type == "permutation":
+                    f.write("| Metric | Control<br>Mean (n) | Experimental<br>Mean (n) | Mean Diff | p-value |\n")
+                    f.write("|--------|-----------|--------------|-----------|--------|\n")
+
+                    for result in sorted(non_significant_metrics, key=lambda x: x["p_value"]):
+                        metric_name = result["metric_display_name"]
+                        ctrl_mean = f"{result['control_mean']:.3f} (n={result['control_n']})"
+                        exp_mean = f"{result['experimental_mean']:.3f} (n={result['experimental_n']})"
+                        diff = f"{result['mean_difference']:+.3f}"
+                        pval = f"{result['p_value']:.4f}"
+
+                        f.write(f"| {metric_name} | {ctrl_mean} | {exp_mean} | {diff} | {pval} |\n")
+                else:
+                    f.write("| Metric | Control<br>Median (n) | Experimental<br>Median (n) | Difference | p-value |\n")
+                    f.write("|--------|-----------|--------------|------------|--------|\n")
+
+                    for result in sorted(non_significant_metrics, key=lambda x: x["p_value"]):
+                        metric_name = result["metric_display_name"]
+                        ctrl_med = f"{result['control_median']:.3f} (n={result['control_n']})"
+                        exp_med = f"{result['experimental_median']:.3f} (n={result['experimental_n']})"
+                        diff = f"{result['median_difference']:+.3f}"
+                        pval = f"{result['p_value']:.4f}"
+
+                        f.write(f"| {metric_name} | {ctrl_med} | {exp_med} | {diff} | {pval} |\n")
+
+                f.write("\n")
+
+            # Detailed statistics table
+            f.write("### Detailed Statistics\n\n")
+
+            if test_type == "permutation":
+                f.write("| Metric | Condition | n | Mean ± SD | Median | Mean Diff | p-value |\n")
+                f.write("|--------|-----------|---|-----------|--------|-----------|----------|\n")
+
+                for result in sorted(stats_results, key=lambda x: x["p_value"]):
+                    metric_name = result["metric_display_name"]
+
+                    # Control row
+                    ctrl_stats = f"{result['control_mean']:.3f} ± {result['control_std']:.3f}"
+                    f.write(
+                        f"| {metric_name} | Control | {result['control_n']} | {ctrl_stats} | {result['control_median']:.3f} | {result['mean_difference']:+.3f} | {result['p_value']:.4f} |\n"
+                    )
+
+                    # Experimental row
+                    exp_stats = f"{result['experimental_mean']:.3f} ± {result['experimental_std']:.3f}"
+                    f.write(
+                        f"| | Experimental | {result['experimental_n']} | {exp_stats} | {result['experimental_median']:.3f} | | |\n"
+                    )
+            else:
+                f.write("| Metric | Condition | n | Mean ± SD | Median | U Statistic | p-value |\n")
+                f.write("|--------|-----------|---|-----------|--------|-------------|----------|\n")
+
+                for result in sorted(stats_results, key=lambda x: x["p_value"]):
+                    metric_name = result["metric_display_name"]
+
+                    # Control row
+                    ctrl_stats = f"{result['control_mean']:.3f} ± {result['control_std']:.3f}"
+                    u_stat = result.get("mann_whitney_u", result.get("test_statistic", np.nan))
+                    f.write(
+                        f"| {metric_name} | Control | {result['control_n']} | {ctrl_stats} | {result['control_median']:.3f} | {u_stat:.1f} | {result['p_value']:.4f} |\n"
+                    )
+
+                    # Experimental row
+                    exp_stats = f"{result['experimental_mean']:.3f} ± {result['experimental_std']:.3f}"
+                    f.write(
+                        f"| | Experimental | {result['experimental_n']} | {exp_stats} | {result['experimental_median']:.3f} | | |\n"
+                    )
+
+            f.write("\n")
+
+        # Binary Metrics Section
+        if binary_results is not None and not binary_results.empty:
+            f.write("## Binary Metrics\\n\\n")
+
+            # Overall tests (if available)
+            if overall_binary_results is not None and not overall_binary_results.empty:
+                f.write("### Overall Tests\\n\\n")
+                f.write("Chi-square tests for overall differences across all groups:\\n\\n")
+                f.write("| Metric | Groups | χ² | df | p-value | Sig |\\n")
+                f.write("|--------|--------|-----|-----|---------|-----|\\n")
+
+                for _, row in overall_binary_results.iterrows():
+                    metric_name = map_metric_name(row["metric"])
+                    n_groups = int(row["n_groups"])
+                    chi2_val = f"{row['chi2']:.3f}"
+                    dof = int(row["dof"])
+                    p_val = f"{row['p_value']:.4f}"
+                    sig = (
+                        "***"
+                        if row["p_value"] < 0.001
+                        else "**" if row["p_value"] < 0.01 else "*" if row["p_value"] < 0.05 else "ns"
+                    )
+
+                    f.write(f"| {metric_name} | {n_groups} | {chi2_val} | {dof} | {p_val} | {sig} |\\n")
+
+                f.write("\\n")
+
+            # Pairwise comparisons
+            f.write("### Pairwise Comparisons (Fisher's Exact Test with FDR Correction)\\n\\n")
+            f.write("Statistical comparison of proportions using Fisher's exact test.\\n")
+
+            # Check if FDR correction was applied
+            has_fdr = "p_value_fdr" in binary_results.columns
+            if has_fdr:
+                n_comparisons = len(binary_results)
+                f.write(f"FDR correction (Benjamini-Hochberg) applied for {n_comparisons} pairwise comparisons.\\n\\n")
+            else:
+                f.write("\\n")
+
+            sig_binary = sum(binary_results["significant"])
+            total_binary = len(binary_results)
+            f.write(
+                f"**Summary:** {sig_binary}/{total_binary} pairwise comparisons showed significant differences (FDR-corrected p < 0.05)\\n\\n"
+            )
+
+            if has_fdr:
+                f.write(
+                    "| Metric | Comparison | Control<br>Prop (n) | Test<br>Prop (n) | Odds Ratio | p-value | p-FDR | Sig |\\n"
+                )
+                f.write("|--------|------------|----------|----------|------------|---------|-------|-----|\\n")
+
+                for _, row in binary_results.sort_values("p_value_fdr").iterrows():
+                    metric_name = map_metric_name(row["metric"])
+                    comparison = f"{map_condition_labels(row['condition'])} vs {map_condition_labels(row['control'])}"
+                    ctrl_prop = (
+                        f"{row['control_proportion']:.3f} ({int(row['control_success'])}/{int(row['control_total'])})"
+                    )
+                    test_prop = f"{row['test_proportion']:.3f} ({int(row['test_success'])}/{int(row['test_total'])})"
+                    odds_ratio = f"{row['odds_ratio']:.3f}"
+                    p_val = f"{row['p_value_uncorrected']:.4f}" if row["p_value_uncorrected"] >= 0.0001 else "< 0.0001"
+                    p_fdr = f"{row['p_value_fdr']:.4f}" if row["p_value_fdr"] >= 0.0001 else "< 0.0001"
+                    sig = row["sig_level"]
+
+                    f.write(
+                        f"| {metric_name} | {comparison} | {ctrl_prop} | {test_prop} | {odds_ratio} | {p_val} | {p_fdr} | {sig} |\\n"
+                    )
+            else:
+                f.write(
+                    "| Metric | Comparison | Control<br>Prop (n) | Test<br>Prop (n) | Odds Ratio | p-value | Sig |\\n"
+                )
+                f.write("|--------|------------|----------|----------|------------|---------|-----|\\n")
+
+                for _, row in binary_results.sort_values("p_value").iterrows():
+                    metric_name = map_metric_name(row["metric"])
+                    comparison = f"{map_condition_labels(row['condition'])} vs {map_condition_labels(row['control'])}"
+                    ctrl_prop = (
+                        f"{row['control_proportion']:.3f} ({int(row['control_success'])}/{int(row['control_total'])})"
+                    )
+                    test_prop = f"{row['test_proportion']:.3f} ({int(row['test_success'])}/{int(row['test_total'])})"
+                    odds_ratio = f"{row['odds_ratio']:.3f}"
+                    p_val = f"{row['p_value']:.4f}" if row["p_value"] >= 0.0001 else "< 0.0001"
+                    sig = row["sig_level"]
+
+                    f.write(
+                        f"| {metric_name} | {comparison} | {ctrl_prop} | {test_prop} | {odds_ratio} | {p_val} | {sig} |\\n"
+                    )
+
+            f.write("\\n")
+
+        # Footnotes
+        f.write("---\n\n")
+        f.write("## Notes\n\n")
+        f.write("**Significance levels:**\n")
+        f.write("- `***` p < 0.001 (highly significant)\n")
+        f.write("- `**` p < 0.01 (very significant)\n")
+        f.write("- `*` p < 0.05 (significant)\n")
+        f.write("- `ns` p ≥ 0.05 (not significant)\n\n")
+        f.write("**Statistical tests:**\n")
+
+        if test_type == "permutation":
+            f.write("- Continuous metrics: Permutation test on mean differences (10,000 permutations)\\n")
+            f.write("  - Null hypothesis: No difference in means between groups\\n")
+            f.write("  - Test statistic: Difference in means (Experimental - Control)\\n")
+        else:
+            f.write("- Continuous metrics: Two-sided Mann-Whitney U test (non-parametric)\\n")
+            f.write("  - Null hypothesis: Distributions are the same\\n")
+            f.write("  - Test statistic: U statistic\\n")
+
+        f.write("- Binary metrics:\\n")
+        f.write("  - Overall: Chi-square test (for 3+ groups)\\n")
+        f.write("  - Pairwise: Fisher's exact test (for 2×2 contingency tables)\\n")
+        f.write("  - Multiple comparison correction: FDR (Benjamini-Hochberg)\\n\\n")
+        f.write("**Effect size:**\n")
+
+        if test_type == "permutation":
+            f.write("- Mean Diff: Experimental mean - Control mean\n")
+            f.write("- % Change: ((Experimental mean - Control mean) / Control mean) × 100\n")
+        else:
+            f.write("- Difference: Experimental median - Control median\n")
+            f.write("- % Change: ((Experimental - Control) / Control) × 100\n")
+
+        f.write("- Odds Ratio: Odds of event in experimental / Odds of event in control\n\n")
+
+    print(f"\n📊 Statistical summary saved to: {output_file}")
+    return output_file
+
+
+def create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition=None, n_conditions=2):
+    """Create a visualization for F1 binary metrics matching boxplot style with significance annotations"""
+
+    import matplotlib
+
+    # Set Arial font globally for editable text in PDFs
+    matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for editable text in PDF
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
     # Calculate proportions
     prop_data = data.groupby(y)[metric].agg(["count", "sum", "mean"]).reset_index()
     prop_data["proportion"] = prop_data["mean"]
-    prop_data["n_success"] = prop_data["sum"]
-    prop_data["n_total"] = prop_data["count"]
+    prop_data["n_success"] = prop_data["sum"].astype(int)
+    prop_data["n_total"] = prop_data["count"].astype(int)
 
-    # Sort by proportion (descending) - higher proportions first
-    prop_data = prop_data.sort_values("proportion", ascending=False).reset_index(drop=True)
+    # Sort: control first, then others alphabetically
+    if control_condition and control_condition in prop_data[y].values:
+        control_row = prop_data[prop_data[y] == control_condition]
+        other_rows = prop_data[prop_data[y] != control_condition].sort_values(y)
+        prop_data = pd.concat([control_row, other_rows]).reset_index(drop=True)
+    else:
+        prop_data = prop_data.sort_values(y).reset_index(drop=True)
 
-    # Get pretraining colors
+    # Get pretraining colors matching boxplot style
     pretraining_colors = create_pretraining_colors()
 
-    # Calculate confidence intervals (Wilson score interval)
-    def wilson_ci(successes, total, confidence=0.95):
-        if total == 0:
-            return 0, 0
-        z = stats.norm.ppf((1 + confidence) / 2)
-        p = successes / total
-        denominator = 1 + z**2 / total
-        centre_adjusted_probability = (p + z**2 / (2 * total)) / denominator
-        adjusted_standard_deviation = np.sqrt((p * (1 - p) + z**2 / (4 * total)) / total) / denominator
-        lower_bound = centre_adjusted_probability - z * adjusted_standard_deviation
-        upper_bound = centre_adjusted_probability + z * adjusted_standard_deviation
-        return max(0, lower_bound), min(1, upper_bound)
+    # Calculate statistical significance for each comparison vs control
+    significance_results = {}
+    if control_condition and n_conditions > 1:
+        control_data = data[data[y] == control_condition][metric].dropna()
+        control_success = int(control_data.sum())
+        control_total = len(control_data)
 
-    ci_data = []
-    for _, row in prop_data.iterrows():
-        lower, upper = wilson_ci(row["n_success"], row["n_total"])
-        ci_data.append({"lower": lower, "upper": upper})
+        for condition in prop_data[y].unique():
+            if condition == control_condition:
+                continue
 
-    ci_df = pd.DataFrame(ci_data)
-    prop_data = pd.concat([prop_data, ci_df], axis=1)
+            test_data = data[data[y] == condition][metric].dropna()
+            test_success = int(test_data.sum())
+            test_total = len(test_data)
 
-    # Create the plot
-    n_conditions = len(prop_data)
-    fig_height = max(8, 0.8 * n_conditions + 3)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, fig_height))
+            # Fisher's exact test
+            table = [[test_success, test_total - test_success], [control_success, control_total - control_success]]
+            odds_ratio, p_value = fisher_exact(table)
 
-    # Use pretraining condition colors
+            # Determine significance level
+            if p_value < 0.001:
+                sig_level = "***"
+            elif p_value < 0.01:
+                sig_level = "**"
+            elif p_value < 0.05:
+                sig_level = "*"
+            else:
+                sig_level = "ns"
+
+            significance_results[condition] = {"p_value": p_value, "sig_level": sig_level, "odds_ratio": odds_ratio}
+
+    # Create figure with size matching boxplot style
+    fig, ax = plt.subplots(1, 1, figsize=(4, 6))
+
+    # Map conditions to colors (matching boxplot style)
     colors = []
     for _, row in prop_data.iterrows():
         condition = str(row[y])
-        if condition in pretraining_colors:
-            color = pretraining_colors[condition]
-        else:
-            # Default colors
-            color = "red" if condition == control_condition else "blue"
+        color = pretraining_colors.get(condition, "#808080")  # Gray fallback
         colors.append(color)
 
-    # Plot 1: Proportion with confidence intervals (horizontal bars)
-    y_positions = range(len(prop_data))
-    bars = ax1.barh(y_positions, prop_data["proportion"], color=colors, alpha=0.7)
-
-    # Add error bars
-    yerr_lower = np.maximum(0, prop_data["proportion"] - prop_data["lower"])
-    yerr_upper = np.maximum(0, prop_data["upper"] - prop_data["proportion"])
-    xerr = [yerr_lower, yerr_upper]
-    ax1.errorbar(prop_data["proportion"], y_positions, xerr=xerr, fmt="none", color="black", capsize=5)
-
-    # Add sample sizes on bars
-    for i, (bar, row) in enumerate(zip(bars, prop_data.itertuples())):
-        width = bar.get_width()
-        ax1.text(
-            width + 0.01, bar.get_y() + bar.get_height() / 2.0, f"n={row.n_total}", ha="left", va="center", fontsize=8
-        )
-
-    ax1.set_ylabel("Pretraining Condition")
-    ax1.set_xlabel(f"Proportion of {metric}")
-    ax1.set_title(f"F1 {metric} - Proportions by Pretraining with 95% CI")
-    ax1.set_yticks(y_positions)
-    ax1.set_yticklabels(prop_data[y])
-    ax1.set_xlim(0, 1.1)
-    ax1.grid(True, alpha=0.3)
-
-    # Plot 2: Stacked bar chart showing counts (horizontal bars)
-    ax2.barh(y_positions, prop_data["n_success"], label=f"{metric}=1", color="lightgreen", alpha=0.8)
-    ax2.barh(
-        y_positions,
-        prop_data["n_total"] - prop_data["n_success"],
-        left=prop_data["n_success"],
-        label=f"{metric}=0",
-        color="lightcoral",
-        alpha=0.8,
+    # Create bar plot
+    x_positions = range(len(prop_data))
+    bars = ax.bar(
+        x_positions, prop_data["proportion"], width=0.6, color=colors, alpha=0.7, edgecolor="black", linewidth=1.5
     )
 
-    ax2.set_ylabel("Pretraining Condition")
-    ax2.set_xlabel("Count")
-    ax2.set_title(f"F1 {metric} - Raw Counts by Pretraining")
-    ax2.set_yticks(y_positions)
-    ax2.set_yticklabels(prop_data[y])
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    # Add sample sizes as text on bars
+    for i, (bar, row) in enumerate(zip(bars, prop_data.itertuples())):
+        height = bar.get_height()
+        # Display success/total
+        label_text = f"{row.n_success}/{row.n_total}"
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + 0.02,
+            label_text,
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontname="Arial",
+        )
+
+    # Add significance annotations (pairwise comparisons vs control)
+    if control_condition and len(significance_results) > 0:
+        y_max = prop_data["proportion"].max()
+
+        # For each non-control condition, add significance bar and annotation
+        control_idx = prop_data[prop_data[y] == control_condition].index[0]
+
+        for i, row in prop_data.iterrows():
+            condition = row[y]
+            if condition == control_condition:
+                continue
+
+            if condition in significance_results:
+                sig_info = significance_results[condition]
+                sig_level = sig_info["sig_level"]
+
+                if sig_level != "ns":  # Only show significant results
+                    # Draw significance bar between control and this condition
+                    bar_height = y_max + 0.08 + (i - control_idx - 1) * 0.08  # Stagger if multiple comparisons
+
+                    # Draw horizontal line
+                    ax.plot([control_idx, i], [bar_height, bar_height], "k-", linewidth=1.5)
+
+                    # Draw vertical ticks at ends
+                    tick_height = 0.02
+                    ax.plot(
+                        [control_idx, control_idx],
+                        [bar_height - tick_height, bar_height + tick_height],
+                        "k-",
+                        linewidth=1.5,
+                    )
+                    ax.plot([i, i], [bar_height - tick_height, bar_height + tick_height], "k-", linewidth=1.5)
+
+                    # Add significance stars
+                    ax.text(
+                        (control_idx + i) / 2,
+                        bar_height + 0.02,
+                        sig_level,
+                        ha="center",
+                        va="bottom",
+                        fontsize=12,
+                        fontname="Arial",
+                    )
+
+    # Set x-axis labels using mapped informative labels
+    ax.set_xticks(x_positions)
+    x_labels = [
+        map_condition_labels(str(cond)) if map_condition_labels(str(cond)) else str(cond) for cond in prop_data[y]
+    ]
+    ax.set_xticklabels(x_labels, fontsize=10, fontname="Arial")
+
+    # Set y-axis label with mapped metric name
+    metric_display_name = map_metric_name(metric)
+    ax.set_ylabel(f"Proportion\n{metric_display_name}", fontsize=11, fontname="Arial")
+
+    # Adjust y-axis limit to accommodate significance bars
+    if (
+        control_condition
+        and len(significance_results) > 0
+        and any(s["sig_level"] != "ns" for s in significance_results.values())
+    ):
+        n_sig = sum(1 for s in significance_results.values() if s["sig_level"] != "ns")
+        ax.set_ylim(0, 1.0 + 0.15 + n_sig * 0.08)
+    else:
+        ax.set_ylim(0, 1.1)
+
+    # Format y-axis tick labels
+    ax.tick_params(axis="y", labelsize=9)
+    for label in ax.get_yticklabels():
+        label.set_fontname("Arial")
+
+    # Clean formatting - no grid, white background, with tick marks
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    ax.grid(False)
+
+    # Add tick marks pointing outward
+    ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+
+    # Remove top and right spines for cleaner look
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
 
     plt.tight_layout()
 
-    # Save the plot
-    output_file = output_dir / f"f1_{metric}_binary_analysis.pdf"
-    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    # Save the plot with editable text
+    output_file = output_dir / f"f1_{metric}_binary_{y}.pdf"
+    plt.savefig(output_file, dpi=300, bbox_inches="tight", format="pdf")
     plt.close()
 
-    print(f"  F1 binary plot saved: {output_file}")
+    print(f"  Binary plot saved: {output_file.name}")
 
 
 def main(overwrite=True, test_mode=False, specific_metrics=None, ball_identity="test"):
@@ -1202,64 +1809,98 @@ def main(overwrite=True, test_mode=False, specific_metrics=None, ball_identity="
     pretraining_counts = dataset["Pretraining"].value_counts()
     print(pretraining_counts)
 
-    # Process continuous metrics with Mann-Whitney U tests
-    if continuous_metrics:
-        print(f"\n{'='*60}")
-        print(f"F1 CONTINUOUS METRICS ANALYSIS (Mann-Whitney U tests)")
-        print(f"Ball identity: {ball_identity}")
-        print("=" * 60)
+    # Initialize results storage
+    continuous_stats_results = []
+    binary_results = None
+    overall_binary_results = None  # Initialize here
 
+    # Initialize results storage for both test types
+    mannwhitney_stats_results = []
+    permutation_stats_results = []
+
+    # Process continuous metrics with BOTH Mann-Whitney U tests AND Permutation tests
+    if continuous_metrics:
         # Filter to only continuous metrics + required columns
         continuous_data = dataset[["Pretraining"] + continuous_metrics].copy()
 
-        print(f"Generating F1 Mann-Whitney plots...")
-        print(f"Continuous metrics dataset shape: {continuous_data.shape}")
-        print(f"Output directory: {ball_output_dir}")
-
-        # Filter out metrics that should be skipped
-        if not overwrite:
-            print(f"📄 Checking for existing plots...")
-            metrics_to_process = []
-            for metric in continuous_metrics:
-                if not should_skip_metric(metric, ball_output_dir, overwrite):
-                    metrics_to_process.append(metric)
-
-            if len(metrics_to_process) < len(continuous_metrics):
-                skipped_count = len(continuous_metrics) - len(metrics_to_process)
-                print(f"📄 Skipped {skipped_count} metrics with existing plots")
-
-            if not metrics_to_process:
-                print(f"📄 All continuous metrics already have plots, skipping...")
-            else:
-                continuous_data = continuous_data[["Pretraining"] + metrics_to_process]
-                continuous_metrics = metrics_to_process
-        else:
-            metrics_to_process = continuous_metrics
-
-        if metrics_to_process:
-            condition_start_time = time.time()
-            print(f"⏱️  Processing {len(metrics_to_process)} continuous metrics for F1 analysis...")
-
-            # Check for NaN annotations
-            nan_annotations = get_nan_annotations(continuous_data, metrics_to_process, "Pretraining")
-            if nan_annotations:
-                print(f"📋 NaN values detected in {len(nan_annotations)} metrics")
-
-            try:
-                # Use simple F1-specific plotting instead of complex split-based function
-                print(f"📊 Creating simple F1 pretraining comparison plots...")
-                create_f1_pretraining_plots(
-                    continuous_data,
-                    metrics=metrics_to_process,
-                    output_dir=ball_output_dir,
-                    y_col="Pretraining",
+        # Loop through both test types
+        for test_type in ["mannwhitney", "permutation"]:
+            # Create test-specific output directory
+            if test_type == "mannwhitney":
+                test_output_dir = (
+                    ball_output_dir.parent.parent / "F1_Metrics_byPretraining_Mannwhitney" / f"ball_{ball_identity}"
                 )
-                condition_time = time.time() - condition_start_time
-                print(f"⏱️  F1 continuous metrics completed in {condition_time:.1f}s")
-            except Exception as e:
-                print(f"❌ Error processing F1 continuous metrics: {e}")
-                if test_mode:
-                    print("🧪 TEST MODE: Continuing despite error...")
+                test_label = "Mann-Whitney U"
+            else:
+                test_output_dir = (
+                    ball_output_dir.parent.parent / "F1_Metrics_byPretraining_Permutation" / f"ball_{ball_identity}"
+                )
+                test_label = "Permutation Test"
+
+            test_output_dir.mkdir(parents=True, exist_ok=True)
+
+            print(f"\n{'='*60}")
+            print(f"F1 CONTINUOUS METRICS ANALYSIS ({test_label})")
+            print(f"Ball identity: {ball_identity}")
+            print(f"Test type: {test_type}")
+            print("=" * 60)
+
+            print(f"Generating F1 {test_type} plots...")
+            print(f"Continuous metrics dataset shape: {continuous_data.shape}")
+            print(f"Output directory: {test_output_dir}")
+
+            # Filter out metrics that should be skipped
+            metrics_to_process = continuous_metrics  # Initialize with all metrics
+            continuous_data_subset = continuous_data  # Initialize with full data
+
+            if not overwrite:
+                print(f"📄 Checking for existing plots...")
+                metrics_to_process = []
+                for metric in continuous_metrics:
+                    if not should_skip_metric(metric, test_output_dir, overwrite):
+                        metrics_to_process.append(metric)
+
+                if len(metrics_to_process) < len(continuous_metrics):
+                    skipped_count = len(continuous_metrics) - len(metrics_to_process)
+                    print(f"📄 Skipped {skipped_count} metrics with existing plots")
+
+                if not metrics_to_process:
+                    print(f"📄 All continuous metrics already have plots, skipping...")
+                else:
+                    continuous_data_subset = continuous_data[["Pretraining"] + metrics_to_process]
+
+            if metrics_to_process:
+                condition_start_time = time.time()
+                print(f"⏱️  Processing {len(metrics_to_process)} continuous metrics for F1 analysis...")
+
+                # Check for NaN annotations
+                nan_annotations = get_nan_annotations(continuous_data_subset, metrics_to_process, "Pretraining")
+                if nan_annotations:
+                    print(f"📋 NaN values detected in {len(nan_annotations)} metrics")
+
+                try:
+                    # Use simple F1-specific plotting with test type
+                    print(f"📊 Creating simple F1 pretraining comparison plots ({test_type})...")
+                    current_stats_results = create_f1_pretraining_plots(
+                        continuous_data_subset,
+                        metrics=metrics_to_process,
+                        output_dir=test_output_dir,
+                        y_col="Pretraining",
+                        test_type=test_type,
+                    )
+
+                    # Store results in appropriate variable
+                    if test_type == "mannwhitney":
+                        mannwhitney_stats_results = current_stats_results
+                    else:
+                        permutation_stats_results = current_stats_results
+
+                    condition_time = time.time() - condition_start_time
+                    print(f"⏱️  F1 continuous metrics ({test_type}) completed in {condition_time:.1f}s")
+                except Exception as e:
+                    print(f"❌ Error processing F1 continuous metrics ({test_type}): {e}")
+                    if test_mode:
+                        print("🧪 TEST MODE: Continuing despite error...")
 
     # Process binary metrics with Fisher's exact tests
     if binary_metrics:
@@ -1284,7 +1925,7 @@ def main(overwrite=True, test_mode=False, specific_metrics=None, ball_identity="
         binary_output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            binary_results = analyze_binary_metrics_f1(
+            binary_results, overall_binary_results = analyze_binary_metrics_f1(
                 binary_data,
                 binary_metrics,
                 y="Pretraining",
@@ -1299,6 +1940,52 @@ def main(overwrite=True, test_mode=False, specific_metrics=None, ball_identity="
                 print("🧪 TEST MODE: Continuing despite error...")
 
     print(f"Unique pretraining conditions: {len(dataset['Pretraining'].unique())}")
+
+    # Generate comprehensive Markdown summaries for both test types
+    if (mannwhitney_stats_results or permutation_stats_results) or binary_results is not None:
+        print(f"\n{'='*60}")
+        print(f"GENERATING STATISTICAL SUMMARIES")
+        print("=" * 60)
+
+        # Generate Mann-Whitney summary
+        if mannwhitney_stats_results or binary_results is not None:
+            try:
+                mannwhitney_output_dir = (
+                    ball_output_dir.parent.parent / "F1_Metrics_byPretraining_Mannwhitney" / f"ball_{ball_identity}"
+                )
+                summary_file = generate_markdown_summary(
+                    mannwhitney_stats_results,
+                    binary_results,
+                    overall_binary_results,
+                    mannwhitney_output_dir,
+                    ball_identity=ball_identity,
+                    test_type="mannwhitney",
+                )
+                print(f"✅ Mann-Whitney statistical summary generated successfully")
+            except Exception as e:
+                print(f"❌ Error generating Mann-Whitney statistical summary: {e}")
+                if test_mode:
+                    print("🧪 TEST MODE: Continuing despite error...")
+
+        # Generate Permutation test summary
+        if permutation_stats_results:
+            try:
+                permutation_output_dir = (
+                    ball_output_dir.parent.parent / "F1_Metrics_byPretraining_Permutation" / f"ball_{ball_identity}"
+                )
+                summary_file = generate_markdown_summary(
+                    permutation_stats_results,
+                    None,  # Binary tests only in Mann-Whitney
+                    None,  # No overall binary for permutation
+                    permutation_output_dir,
+                    ball_identity=ball_identity,
+                    test_type="permutation",
+                )
+                print(f"✅ Permutation test statistical summary generated successfully")
+            except Exception as e:
+                print(f"❌ Error generating Permutation statistical summary: {e}")
+                if test_mode:
+                    print("🧪 TEST MODE: Continuing despite error...")
 
     # Overall timing summary
     total_time = time.time() - overall_start_time

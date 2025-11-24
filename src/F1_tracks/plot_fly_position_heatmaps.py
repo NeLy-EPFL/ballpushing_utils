@@ -16,6 +16,8 @@ from itertools import combinations
 import argparse
 import cv2
 from matplotlib import colors
+from arena_alignment import load_template, detect_arena_in_video, transform_dataframe_to_template
+from masked_heatmap import create_average_fly_masked_heatmap, create_heatmap_with_template_overlay
 
 
 def load_background_image(video_path, frame_number=0):
@@ -95,6 +97,39 @@ def find_video_file(df, experiment_col="experiment"):
                                 return video_files[0]
 
     return None
+
+
+def find_first_f1_entry_time(df, x_col, time_col="time", fly_col="fly", threshold=100):
+    """
+    Find the first time each fly enters the F1 tracks area (x > threshold from start).
+
+    Args:
+        df: DataFrame with fly tracking data
+        x_col: Column name for x coordinates
+        time_col: Column name for time
+        fly_col: Column name for fly identifier
+        threshold: X position threshold (relative to start)
+
+    Returns:
+        DataFrame with fly_id and first_f1_entry_time columns
+    """
+    first_entries = []
+
+    for fly_id in df[fly_col].unique():
+        fly_data = df[df[fly_col] == fly_id].sort_values(time_col)
+
+        # Find first time x > threshold
+        f1_mask = fly_data[x_col] > threshold
+
+        if f1_mask.any():
+            first_f1_idx = f1_mask.idxmax()
+            first_f1_time = fly_data.loc[first_f1_idx, time_col]
+            first_entries.append({"fly": fly_id, "first_f1_entry_time": first_f1_time})
+        else:
+            # Fly never entered F1 tracks
+            first_entries.append({"fly": fly_id, "first_f1_entry_time": np.nan})
+
+    return pd.DataFrame(first_entries)
 
 
 def center_positions_on_start(df, x_col, y_col, fly_col="fly", n_frames=10):
@@ -391,6 +426,18 @@ def main():
         default=100,
         help="Frame number to extract from video for background (default: 100)",
     )
+    parser.add_argument(
+        "--template-path",
+        type=str,
+        default="/mnt/upramdya_data/MD/F1_Tracks/F1_New_Template.png",
+        help="Path to template PNG for arena alignment",
+    )
+    parser.add_argument(
+        "--use-template-alignment",
+        action="store_true",
+        default=True,
+        help="Use template-based arena alignment (default: True)",
+    )
 
     args = parser.parse_args()
 
@@ -488,6 +535,22 @@ def main():
         df_clean = df_clean.iloc[:: args.downsample].copy()
         print(f"Dataset shape after downsampling: {df_clean.shape}")
 
+    # Load template for background overlay (no template matching, just for visualization)
+    template = None
+    template_binary = None
+    arena_mask = None
+
+    if args.use_template_alignment:
+        template_path = Path(args.template_path)
+        if template_path.exists():
+            print(f"\nLoading template for background overlay: {template_path}")
+            template, template_binary, arena_mask = load_template(template_path)
+            print(f"Template loaded: {template.shape}")
+            print(f"Arena mask coverage: {arena_mask.sum() / arena_mask.size * 100:.1f}%")
+        else:
+            print(f"Warning: Template not found at {template_path}")
+            args.use_template_alignment = False
+
     # Center positions on the average of first 10 frames for each fly
     print("\nCentering positions on average of first 10 frames per fly...")
     df_clean, x_offset, y_offset = center_positions_on_start(
@@ -496,7 +559,7 @@ def main():
 
     print(f"Position ranges after centering:")
     print(f"  X: {df_clean[x_thorax_col].min():.1f} to {df_clean[x_thorax_col].max():.1f} pixels")
-    print(f"  Y: {df_clean[y_thorax_col].min():.1f} to {df_clean[y_thorax_col].max():.1f} pixels")
+    print(f"  Y: {df_clean[x_thorax_col].min():.1f} to {df_clean[y_thorax_col].max():.1f} pixels")
 
     # --- Normalize x coordinates: set x=0 to mean x in first hour for each fly ---
     print("\nNormalizing x coordinates: setting x=0 to mean x in first hour for each fly...")
@@ -520,9 +583,6 @@ def main():
     else:
         print("Warning: No 'time' column found, skipping x normalization.")
         df_norm = df_clean
-    # Use df_norm for all further analysis
-
-    # No background image logic
 
     # Get unique F1 conditions
     f1_conditions = sorted(df_norm[f1_condition_col].unique())
@@ -551,15 +611,53 @@ def main():
     print(f"\nUsing time column: {time_col}")
     print(f"Time range: {df_norm[time_col].min():.2f}s to {df_norm[time_col].max():.2f}s")
 
-    # Split data into full video and second hour (3600-7200 seconds)
-    # Assuming 2-hour recording: 0-3600s (first hour), 3600-7200s (second hour)
-    second_hour_start = 3600  # 1 hour in seconds
-    second_hour_end = 7200  # 2 hours in seconds
+    # Find when each fly first enters the F1 tracks area (x > 100)
+    print("\n" + "=" * 70)
+    print("FINDING FIRST F1 ENTRY TIME FOR EACH FLY")
+    print("=" * 70)
 
-    df_second_hour = df_norm[(df_norm[time_col] >= second_hour_start) & (df_norm[time_col] < second_hour_end)].copy()
+    first_entries = find_first_f1_entry_time(df_norm, x_thorax_col, time_col=time_col, fly_col="fly", threshold=100)
 
-    print(f"\nFull video data points: {len(df_norm):,}")
-    print(f"Second hour data points: {len(df_second_hour):,}")
+    # Print statistics
+    n_flies_entered = (~first_entries["first_f1_entry_time"].isna()).sum()
+    print(f"Flies that entered F1 tracks: {n_flies_entered}/{len(first_entries)}")
+
+    if n_flies_entered > 0:
+        entry_times = first_entries["first_f1_entry_time"].dropna()
+        print(f"Entry time statistics:")
+        print(f"  Mean: {entry_times.mean():.1f}s ({entry_times.mean()/60:.1f} min)")
+        print(f"  Std: {entry_times.std():.1f}s")
+        print(f"  Min: {entry_times.min():.1f}s ({entry_times.min()/60:.1f} min)")
+        print(f"  Max: {entry_times.max():.1f}s ({entry_times.max()/60:.1f} min)")
+
+    # Filter data starting from first F1 entry for each fly
+    df_from_f1_entry = []
+
+    for _, row in first_entries.iterrows():
+        fly_id = row["fly"]
+        entry_time = row["first_f1_entry_time"]
+
+        if pd.notna(entry_time):
+            fly_data = df_norm[df_norm["fly"] == fly_id]
+            # Keep data from entry time onwards
+            fly_data_filtered = fly_data[fly_data[time_col] >= entry_time].copy()
+
+            # Add time relative to F1 entry
+            fly_data_filtered["time_from_f1_entry"] = fly_data_filtered[time_col] - entry_time
+
+            df_from_f1_entry.append(fly_data_filtered)
+
+    if df_from_f1_entry:
+        df_from_f1_entry = pd.concat(df_from_f1_entry, ignore_index=True)
+
+        print(f"\nData from first F1 entry:")
+        print(f"  Total points: {len(df_from_f1_entry):,}")
+        print(
+            f"  Time range from F1 entry: {df_from_f1_entry['time_from_f1_entry'].min():.1f}s to {df_from_f1_entry['time_from_f1_entry'].max():.1f}s"
+        )
+    else:
+        print("\nWarning: No flies entered F1 tracks!")
+        df_from_f1_entry = df_norm  # Fallback to using all data
 
     # Create output directory for heatmaps
     output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Heatmaps")
@@ -569,123 +667,137 @@ def main():
     # Only plot second hour, split by X < 100 and X >= 100 for each condition
     n_conditions = len(f1_conditions)
 
-    # Create CLIPPED version (all conditions in one figure)
-    fig_clipped, axes_clipped = plt.subplots(1, n_conditions * 2, figsize=(6 * n_conditions * 2, 6))
-    if n_conditions == 1:
-        axes_clipped = np.array([axes_clipped]).flatten()
+    # Use masked heatmaps if template alignment was successful
+    use_masked_heatmaps = (
+        args.use_template_alignment and template is not None and arena_mask is not None and template_binary is not None
+    )
+
+    if use_masked_heatmaps:
+        print("\nCreating masked heatmaps with template background...")
+
+        # 1. Create individual heatmaps per condition (UNCLIPPED)
+        for condition in f1_conditions:
+            condition_data = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == condition]
+
+            result = create_heatmap_with_template_overlay(
+                data=condition_data,
+                x_col=x_thorax_col,
+                y_col=y_thorax_col,
+                template=template,
+                arena_mask=arena_mask,
+                template_binary=template_binary,
+                scale_factor=0.5,
+                bins=args.bins,
+                blur_sigma=2.0,
+                clip_percent=0.0,  # No clipping
+                colormap="hot",
+                alpha=0.7,
+                chamber_offset_x=20,
+                chamber_offset_y=20,
+            )
+
+            if result is not None:
+                fig, ax = result
+                ax.set_title(
+                    f"{condition.replace('_', ' ').title()}\nFrom First F1 Entry", fontsize=14, fontweight="bold"
+                )
+
+                output_filename = f"fly_position_heatmap_masked_{condition}_from_f1_entry"
+                if args.downsample > 1:
+                    output_filename += f"_ds{args.downsample}"
+                output_filename += ".png"
+                output_path = output_dir / output_filename
+
+                fig.savefig(output_path, dpi=300, bbox_inches="tight")
+                print(f"  Saved: {output_filename}")
+                plt.close(fig)
+
+        # 2. Create split corridor/F1 heatmaps per condition (UNCLIPPED)
+        for condition in f1_conditions:
+            condition_data = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == condition]
+            below_100 = condition_data[condition_data[x_thorax_col] < 100]
+            above_100 = condition_data[condition_data[x_thorax_col] >= 100]
+
+            # Corridor
+            if len(below_100) > 0:
+                result = create_heatmap_with_template_overlay(
+                    data=below_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    template=template,
+                    arena_mask=arena_mask,
+                    template_binary=template_binary,
+                    scale_factor=0.5,
+                    bins=args.bins,
+                    blur_sigma=2.0,
+                    clip_percent=0.0,
+                    colormap="hot",
+                    alpha=0.7,
+                    chamber_offset_x=20,
+                    chamber_offset_y=20,
+                )
+
+                if result is not None:
+                    fig, ax = result
+                    ax.set_title(f"{condition.replace('_', ' ').title()}\nCorridor", fontsize=14, fontweight="bold")
+
+                    output_filename = f"fly_position_heatmap_masked_{condition}_corridor"
+                    if args.downsample > 1:
+                        output_filename += f"_ds{args.downsample}"
+                    output_filename += ".png"
+                    output_path = output_dir / output_filename
+
+                    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+                    print(f"  Saved: {output_filename}")
+                    plt.close(fig)
+
+            # F1 tracks
+            if len(above_100) > 0:
+                result = create_heatmap_with_template_overlay(
+                    data=above_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    template=template,
+                    arena_mask=arena_mask,
+                    template_binary=template_binary,
+                    scale_factor=0.5,
+                    bins=args.bins,
+                    blur_sigma=2.0,
+                    clip_percent=0.0,
+                    colormap="hot",
+                    alpha=0.7,
+                    chamber_offset_x=20,
+                    chamber_offset_y=20,
+                )
+
+                if result is not None:
+                    fig, ax = result
+                    ax.set_title(f"{condition.replace('_', ' ').title()}\nF1 Tracks", fontsize=14, fontweight="bold")
+
+                    output_filename = f"fly_position_heatmap_masked_{condition}_f1tracks"
+                    if args.downsample > 1:
+                        output_filename += f"_ds{args.downsample}"
+                    output_filename += ".png"
+                    output_path = output_dir / output_filename
+
+                    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+                    print(f"  Saved: {output_filename}")
+                    plt.close(fig)
+
     else:
-        axes_clipped = axes_clipped.flatten()
+        print("\nCreating standard heatmaps (no template)...")
 
-    for i, condition in enumerate(f1_conditions):
-        condition_data = df_second_hour[df_second_hour[f1_condition_col] == condition]
-        below_100 = condition_data[condition_data[x_thorax_col] < 100]
-        above_100 = condition_data[condition_data[x_thorax_col] >= 100]
-
-        # Clipped - Corridor
-        create_2d_heatmap(
-            data=below_100,
-            x_col=x_thorax_col,
-            y_col=y_thorax_col,
-            title=f"{condition.replace('_', ' ').title()}\nCorridor",
-            ax=axes_clipped[i * 2],
-            bins=args.bins,
-            sigma=args.sigma,
-            blur_sigma=1.0,
-            clip_percent=0.05,
-            unclipped=False,
-        )
-
-        # Clipped - F1 tracks
-        create_2d_heatmap(
-            data=above_100,
-            x_col=x_thorax_col,
-            y_col=y_thorax_col,
-            title=f"{condition.replace('_', ' ').title()}\nF1 tracks",
-            ax=axes_clipped[i * 2 + 1],
-            bins=args.bins,
-            sigma=args.sigma,
-            blur_sigma=1.0,
-            clip_percent=0.05,
-            unclipped=False,
-        )
-
-    fig_clipped.tight_layout()
-    output_filename_clipped = f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_clipped"
-    if args.downsample > 1:
-        output_filename_clipped += f"_ds{args.downsample}"
-    output_filename_clipped += ".png"
-    output_path_clipped = output_dir / output_filename_clipped
-    fig_clipped.savefig(output_path_clipped, dpi=300, bbox_inches="tight")
-    print(f"\nHeatmap (clipped) saved to: {output_path_clipped}")
-    plt.close(fig_clipped)
-
-    # Create UNCLIPPED version (all conditions in one figure)
-    fig_unclipped, axes_unclipped = plt.subplots(1, n_conditions * 2, figsize=(6 * n_conditions * 2, 6))
-    if n_conditions == 1:
-        axes_unclipped = np.array([axes_unclipped]).flatten()
-    else:
-        axes_unclipped = axes_unclipped.flatten()
-
-    for i, condition in enumerate(f1_conditions):
-        condition_data = df_second_hour[df_second_hour[f1_condition_col] == condition]
-        below_100 = condition_data[condition_data[x_thorax_col] < 100]
-        above_100 = condition_data[condition_data[x_thorax_col] >= 100]
-
-        # Unclipped - Corridor
-        create_2d_heatmap(
-            data=below_100,
-            x_col=x_thorax_col,
-            y_col=y_thorax_col,
-            title=f"{condition.replace('_', ' ').title()}\nCorridor",
-            ax=axes_unclipped[i * 2],
-            bins=args.bins,
-            sigma=args.sigma,
-            blur_sigma=1.0,
-            clip_percent=0.05,
-            unclipped=True,
-        )
-
-        # Unclipped - F1 tracks
-        create_2d_heatmap(
-            data=above_100,
-            x_col=x_thorax_col,
-            y_col=y_thorax_col,
-            title=f"{condition.replace('_', ' ').title()}\nF1 tracks",
-            ax=axes_unclipped[i * 2 + 1],
-            bins=args.bins,
-            sigma=args.sigma,
-            blur_sigma=1.0,
-            clip_percent=0.05,
-            unclipped=True,
-        )
-
-    fig_unclipped.tight_layout()
-    output_filename_unclipped = f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_unclipped"
-    if args.downsample > 1:
-        output_filename_unclipped += f"_ds{args.downsample}"
-    output_filename_unclipped += ".png"
-    output_path_unclipped = output_dir / output_filename_unclipped
-    fig_unclipped.savefig(output_path_unclipped, dpi=300, bbox_inches="tight")
-    print(f"\nHeatmap (unclipped) saved to: {output_path_unclipped}")
-    plt.close(fig_unclipped)
-
-    # --- Second plot: group by Pretraining if present ---
-    if "Pretraining" in df_clean.columns:
-        pretraining_col = "Pretraining"
-        pretraining_conditions = sorted(df_clean[pretraining_col].dropna().unique())
-        print(f"\nPretraining conditions found: {pretraining_conditions}")
-
-        # Create CLIPPED version (all conditions in one figure)
-        fig2_clipped, axes2_clipped = plt.subplots(
-            1, len(pretraining_conditions) * 2, figsize=(6 * len(pretraining_conditions) * 2, 6)
-        )
-        if len(pretraining_conditions) == 1:
-            axes2_clipped = np.array([axes2_clipped]).flatten()
+    # Skip the old clipped/unclipped versions if using masked heatmaps
+    if not use_masked_heatmaps:
+        # Create CLIPPED version (all conditions in one figure) - standard heatmaps
+        fig_clipped, axes_clipped = plt.subplots(1, n_conditions * 2, figsize=(6 * n_conditions * 2, 6))
+        if n_conditions == 1:
+            axes_clipped = np.array([axes_clipped]).flatten()
         else:
-            axes2_clipped = axes2_clipped.flatten()
+            axes_clipped = axes_clipped.flatten()
 
-        for i, condition in enumerate(pretraining_conditions):
-            condition_data = df_second_hour[df_second_hour[pretraining_col] == condition]
+        for i, condition in enumerate(f1_conditions):
+            condition_data = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == condition]
             below_100 = condition_data[condition_data[x_thorax_col] < 100]
             above_100 = condition_data[condition_data[x_thorax_col] >= 100]
 
@@ -694,8 +806,8 @@ def main():
                 data=below_100,
                 x_col=x_thorax_col,
                 y_col=y_thorax_col,
-                title=f"{str(condition)}\nCorridor",
-                ax=axes2_clipped[i * 2],
+                title=f"{condition.replace('_', ' ').title()}\nCorridor",
+                ax=axes_clipped[i * 2],
                 bins=args.bins,
                 sigma=args.sigma,
                 blur_sigma=1.0,
@@ -708,8 +820,8 @@ def main():
                 data=above_100,
                 x_col=x_thorax_col,
                 y_col=y_thorax_col,
-                title=f"{str(condition)}\nF1 tracks",
-                ax=axes2_clipped[i * 2 + 1],
+                title=f"{condition.replace('_', ' ').title()}\nF1 tracks",
+                ax=axes_clipped[i * 2 + 1],
                 bins=args.bins,
                 sigma=args.sigma,
                 blur_sigma=1.0,
@@ -717,27 +829,25 @@ def main():
                 unclipped=False,
             )
 
-        fig2_clipped.tight_layout()
-        output_filename2_clipped = f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_byPretraining_clipped"
+        fig_clipped.tight_layout()
+        output_filename_clipped = f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_clipped"
         if args.downsample > 1:
-            output_filename2_clipped += f"_ds{args.downsample}"
-        output_filename2_clipped += ".png"
-        output_path2_clipped = output_dir / output_filename2_clipped
-        fig2_clipped.savefig(output_path2_clipped, dpi=300, bbox_inches="tight")
-        print(f"\nHeatmap by Pretraining (clipped) saved to: {output_path2_clipped}")
-        plt.close(fig2_clipped)
+            output_filename_clipped += f"_ds{args.downsample}"
+        output_filename_clipped += ".png"
+        output_path_clipped = output_dir / output_filename_clipped
+        fig_clipped.savefig(output_path_clipped, dpi=300, bbox_inches="tight")
+        print(f"\nHeatmap (clipped) saved to: {output_path_clipped}")
+        plt.close(fig_clipped)
 
         # Create UNCLIPPED version (all conditions in one figure)
-        fig2_unclipped, axes2_unclipped = plt.subplots(
-            1, len(pretraining_conditions) * 2, figsize=(6 * len(pretraining_conditions) * 2, 6)
-        )
-        if len(pretraining_conditions) == 1:
-            axes2_unclipped = np.array([axes2_unclipped]).flatten()
+        fig_unclipped, axes_unclipped = plt.subplots(1, n_conditions * 2, figsize=(6 * n_conditions * 2, 6))
+        if n_conditions == 1:
+            axes_unclipped = np.array([axes_unclipped]).flatten()
         else:
-            axes2_unclipped = axes2_unclipped.flatten()
+            axes_unclipped = axes_unclipped.flatten()
 
-        for i, condition in enumerate(pretraining_conditions):
-            condition_data = df_second_hour[df_second_hour[pretraining_col] == condition]
+        for i, condition in enumerate(f1_conditions):
+            condition_data = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == condition]
             below_100 = condition_data[condition_data[x_thorax_col] < 100]
             above_100 = condition_data[condition_data[x_thorax_col] >= 100]
 
@@ -746,8 +856,8 @@ def main():
                 data=below_100,
                 x_col=x_thorax_col,
                 y_col=y_thorax_col,
-                title=f"{str(condition)}\nCorridor",
-                ax=axes2_unclipped[i * 2],
+                title=f"{condition.replace('_', ' ').title()}\nCorridor",
+                ax=axes_unclipped[i * 2],
                 bins=args.bins,
                 sigma=args.sigma,
                 blur_sigma=1.0,
@@ -760,8 +870,8 @@ def main():
                 data=above_100,
                 x_col=x_thorax_col,
                 y_col=y_thorax_col,
-                title=f"{str(condition)}\nF1 tracks",
-                ax=axes2_unclipped[i * 2 + 1],
+                title=f"{condition.replace('_', ' ').title()}\nF1 tracks",
+                ax=axes_unclipped[i * 2 + 1],
                 bins=args.bins,
                 sigma=args.sigma,
                 blur_sigma=1.0,
@@ -769,15 +879,194 @@ def main():
                 unclipped=True,
             )
 
-        fig2_unclipped.tight_layout()
-        output_filename2_unclipped = f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_byPretraining_unclipped"
+        fig_unclipped.tight_layout()
+        output_filename_unclipped = f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_unclipped"
         if args.downsample > 1:
-            output_filename2_unclipped += f"_ds{args.downsample}"
-        output_filename2_unclipped += ".png"
-        output_path2_unclipped = output_dir / output_filename2_unclipped
-        fig2_unclipped.savefig(output_path2_unclipped, dpi=300, bbox_inches="tight")
-        print(f"\nHeatmap by Pretraining (unclipped) saved to: {output_path2_unclipped}")
-        plt.close(fig2_unclipped)
+            output_filename_unclipped += f"_ds{args.downsample}"
+        output_filename_unclipped += ".png"
+        output_path_unclipped = output_dir / output_filename_unclipped
+        fig_unclipped.savefig(output_path_unclipped, dpi=300, bbox_inches="tight")
+        print(f"\nHeatmap (unclipped) saved to: {output_path_unclipped}")
+        plt.close(fig_unclipped)
+
+    # --- Second plot: group by Pretraining if present ---
+    if "Pretraining" in df_clean.columns:
+        pretraining_col = "Pretraining"
+        pretraining_conditions = sorted(df_from_f1_entry[pretraining_col].dropna().unique())
+        print(f"\nPretraining conditions found: {pretraining_conditions}")
+
+        if use_masked_heatmaps:
+            # Create masked heatmaps for Pretraining conditions
+            for condition in pretraining_conditions:
+                condition_data = df_from_f1_entry[df_from_f1_entry[pretraining_col] == condition]
+
+                result = create_heatmap_with_template_overlay(
+                    data=condition_data,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    template=template,
+                    arena_mask=arena_mask,
+                    template_binary=template_binary,
+                    scale_factor=0.5,
+                    bins=args.bins,
+                    blur_sigma=2.0,
+                    clip_percent=0.0,
+                    colormap="hot",
+                    alpha=0.7,
+                    chamber_offset_x=20,
+                    chamber_offset_y=20,
+                )
+
+                if result is not None:
+                    fig, ax = result
+                    ax.set_title(f"Pretraining: {condition.replace('_', ' ').title()}", fontsize=14, fontweight="bold")
+                    output_filename = f"fly_position_heatmap_masked_pretraining_{condition}_from_f1_entry_unclipped"
+                    if args.downsample > 1:
+                        output_filename += f"_ds{args.downsample}"
+                    output_filename += ".png"
+                    output_path = output_dir / output_filename
+                    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+                    print(f"Saved pretraining heatmap: {output_path}")
+                    plt.close(fig)
+
+                result = create_heatmap_with_template_overlay(
+                    data=condition_data,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    template=template,
+                    arena_mask=arena_mask,
+                    template_binary=template_binary,
+                    scale_factor=0.5,
+                    bins=args.bins,
+                    blur_sigma=2.0,
+                    clip_percent=0.0,
+                    colormap="hot",
+                    alpha=0.7,
+                    chamber_offset_x=20,
+                    chamber_offset_y=20,
+                )
+
+                if result is not None:
+                    fig, ax = result
+                    ax.set_title(f"Pretraining: {str(condition)}\nFrom First F1 Entry", fontsize=14, fontweight="bold")
+
+                    output_filename = f"fly_position_heatmap_masked_pretraining_{condition}_from_f1_entry"
+                    if args.downsample > 1:
+                        output_filename += f"_ds{args.downsample}"
+                    output_filename += ".png"
+                    output_path = output_dir / output_filename
+
+                    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+                    print(f"  Saved: {output_filename}")
+                    plt.close(fig)
+        else:
+            # Create CLIPPED version (all conditions in one figure)
+            fig2_clipped, axes2_clipped = plt.subplots(
+                1, len(pretraining_conditions) * 2, figsize=(6 * len(pretraining_conditions) * 2, 6)
+            )
+            if len(pretraining_conditions) == 1:
+                axes2_clipped = np.array([axes2_clipped]).flatten()
+            else:
+                axes2_clipped = axes2_clipped.flatten()
+
+            for i, condition in enumerate(pretraining_conditions):
+                condition_data = df_from_f1_entry[df_from_f1_entry[pretraining_col] == condition]
+                below_100 = condition_data[condition_data[x_thorax_col] < 100]
+                above_100 = condition_data[condition_data[x_thorax_col] >= 100]
+
+                # Clipped - Corridor
+                create_2d_heatmap(
+                    data=below_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    title=f"{str(condition)}\nCorridor",
+                    ax=axes2_clipped[i * 2],
+                    bins=args.bins,
+                    sigma=args.sigma,
+                    blur_sigma=1.0,
+                    clip_percent=0.05,
+                    unclipped=False,
+                )
+
+                # Clipped - F1 tracks
+                create_2d_heatmap(
+                    data=above_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    title=f"{str(condition)}\nF1 tracks",
+                    ax=axes2_clipped[i * 2 + 1],
+                    bins=args.bins,
+                    sigma=args.sigma,
+                    blur_sigma=1.0,
+                    clip_percent=0.05,
+                    unclipped=False,
+                )
+
+            fig2_clipped.tight_layout()
+            output_filename2_clipped = (
+                f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_byPretraining_clipped"
+            )
+            if args.downsample > 1:
+                output_filename2_clipped += f"_ds{args.downsample}"
+            output_filename2_clipped += ".png"
+            output_path2_clipped = output_dir / output_filename2_clipped
+            fig2_clipped.savefig(output_path2_clipped, dpi=300, bbox_inches="tight")
+            print(f"\nHeatmap by Pretraining (clipped) saved to: {output_path2_clipped}")
+            plt.close(fig2_clipped)
+
+            # Create UNCLIPPED version (all conditions in one figure)
+            fig2_unclipped, axes2_unclipped = plt.subplots(
+                1, len(pretraining_conditions) * 2, figsize=(6 * len(pretraining_conditions) * 2, 6)
+            )
+            if len(pretraining_conditions) == 1:
+                axes2_unclipped = np.array([axes2_unclipped]).flatten()
+            else:
+                axes2_unclipped = axes2_unclipped.flatten()
+
+            for i, condition in enumerate(pretraining_conditions):
+                condition_data = df_from_f1_entry[df_from_f1_entry[pretraining_col] == condition]
+                below_100 = condition_data[condition_data[x_thorax_col] < 100]
+                above_100 = condition_data[condition_data[x_thorax_col] >= 100]
+
+                # Unclipped - Corridor
+                create_2d_heatmap(
+                    data=below_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    title=f"{str(condition)}\nCorridor",
+                    ax=axes2_unclipped[i * 2],
+                    bins=args.bins,
+                    sigma=args.sigma,
+                    blur_sigma=1.0,
+                    clip_percent=0.05,
+                    unclipped=True,
+                )
+
+                # Unclipped - F1 tracks
+                create_2d_heatmap(
+                    data=above_100,
+                    x_col=x_thorax_col,
+                    y_col=y_thorax_col,
+                    title=f"{str(condition)}\nF1 tracks",
+                    ax=axes2_unclipped[i * 2 + 1],
+                    bins=args.bins,
+                    sigma=args.sigma,
+                    blur_sigma=1.0,
+                    clip_percent=0.05,
+                    unclipped=True,
+                )
+
+                fig2_unclipped.tight_layout()
+            output_filename2_unclipped = (
+                f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_byPretraining_unclipped"
+            )
+            if args.downsample > 1:
+                output_filename2_unclipped += f"_ds{args.downsample}"
+            output_filename2_unclipped += ".png"
+            output_path2_unclipped = output_dir / output_filename2_unclipped
+            fig2_unclipped.savefig(output_path2_unclipped, dpi=300, bbox_inches="tight")
+            print(f"\nHeatmap by Pretraining (unclipped) saved to: {output_path2_unclipped}")
+            plt.close(fig2_unclipped)
 
         # --- Difference row if exactly two Pretraining conditions ---
         if len(pretraining_conditions) == 2:
@@ -800,8 +1089,8 @@ def main():
                         clean_data, x_thorax_col, y_thorax_col, bins=args.bins, x_range=x_range, y_range=y_range
                     )
 
-                df_control = df_second_hour[df_second_hour[pretraining_col] == control]
-                df_test = df_second_hour[df_second_hour[pretraining_col] == test]
+                df_control = df_from_f1_entry[df_from_f1_entry[pretraining_col] == control]
+                df_test = df_from_f1_entry[df_from_f1_entry[pretraining_col] == test]
                 heatmap_control, xedges, yedges = get_avg_heatmap(region(df_control))
                 heatmap_test, _, _ = get_avg_heatmap(region(df_test))
                 if heatmap_control is None or heatmap_test is None or xedges is None or yedges is None:
@@ -831,14 +1120,14 @@ def main():
                 axes3[j].set_ylabel("Y Position (pixels)")
                 plt.colorbar(im, ax=axes3[j], label="Δ Avg. Normalized Density (per fly)")
             plt.tight_layout()
-            output_filename3 = f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_byPretraining_DIFF"
+            output_filename3 = f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_byPretraining_DIFF"
             if args.downsample > 1:
                 output_filename3 += f"_ds{args.downsample}"
             output_filename3 += ".png"
             output_path3 = output_dir / output_filename3
             plt.savefig(output_path3, dpi=300, bbox_inches="tight")
             print(f"\nDifference heatmap by Pretraining saved to: {output_path3}")
-            plt.show()
+            plt.close(fig3)
 
     # --- F1_condition difference plots: all pairwise comparisons ---
     if len(f1_conditions) >= 2:
@@ -863,8 +1152,8 @@ def main():
                         clean_data, x_thorax_col, y_thorax_col, bins=args.bins, x_range=x_range, y_range=y_range
                     )
 
-                df_cond1 = df_second_hour[df_second_hour[f1_condition_col] == cond1]
-                df_cond2 = df_second_hour[df_second_hour[f1_condition_col] == cond2]
+                df_cond1 = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == cond1]
+                df_cond2 = df_from_f1_entry[df_from_f1_entry[f1_condition_col] == cond2]
                 heatmap_cond1, xedges, yedges = get_avg_heatmap(region(df_cond1))
                 heatmap_cond2, _, _ = get_avg_heatmap(region(df_cond2))
                 if heatmap_cond1 is None or heatmap_cond2 is None or xedges is None or yedges is None:
@@ -899,7 +1188,7 @@ def main():
                 plt.colorbar(im, ax=axes_diff[j], label="Δ Avg. Normalized Density (per fly)")
             plt.tight_layout()
             output_filename_diff = (
-                f"fly_position_heatmap_{args.plot_type}_second_hour_splitX_byF1Condition_DIFF_{cond2}_vs_{cond1}"
+                f"fly_position_heatmap_{args.plot_type}_from_f1_entry_splitX_byF1Condition_DIFF_{cond2}_vs_{cond1}"
             )
             if args.downsample > 1:
                 output_filename_diff += f"_ds{args.downsample}"
@@ -907,7 +1196,7 @@ def main():
             output_path_diff = output_dir / output_filename_diff
             plt.savefig(output_path_diff, dpi=300, bbox_inches="tight")
             print(f"\nDifference heatmap by F1_condition saved to: {output_path_diff}")
-            plt.show()
+            plt.close(fig_diff)
 
 
 if __name__ == "__main__":
