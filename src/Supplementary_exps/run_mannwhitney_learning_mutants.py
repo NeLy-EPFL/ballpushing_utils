@@ -525,7 +525,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         Number of samples to use in test mode
     """
     # Load the learning mutants dataset
-    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251118_12_summary_learning_mutants_Data/summary/pooled_summary.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251125_10_summary_learning_mutants_Data/summary/pooled_summary.feather"
 
     print(f"Loading learning mutants dataset from: {dataset_path}")
     try:
@@ -1106,7 +1106,8 @@ def main(overwrite=True, test_mode=False):
 
     # Determine control genotype (alphabetically first or could be specified)
     genotypes = sorted(dataset["Genotype"].unique())
-    control_genotype = genotypes[0]
+    # control_genotype = genotypes[0]
+    control_genotype = "PR" if "PR" in genotypes else genotypes[0]
     print(f"\n📊 Using {control_genotype} as control genotype")
 
     # Process continuous metrics
