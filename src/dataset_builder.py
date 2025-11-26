@@ -78,8 +78,8 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": [Path("/mnt/upramdya_data/MD/F1_Tracks/Videos")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/F1_Tracks/Datasets"),
+        "data_root": [Path("/mnt/upramdya_data/MD/MagnetBlock/Videos")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/MagnetBlock/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -91,11 +91,11 @@ CONFIG = {
             # "F1_coordinates",  # For F1 experiments only
             # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps)
             # "standardized_contacts",
-            "summary",  # Re-enabled for testing the optimization
+            # "summary",  # Re-enabled for testing the optimization
             "coordinates",  # For regular experiments
-            "fly_positions",
+            # "fly_positions",
         ],  # Metrics to process (add/remove as needed)
-        "memory_threshold_mb": 2048,  # Memory threshold in MB for conditional cache clearing
+        "memory_threshold_mb": 4096,  # Memory threshold in MB for conditional cache clearing
     },
 }
 
@@ -175,15 +175,18 @@ def get_memory_usage_mb():
     return memory_info.rss / 1024 / 1024
 
 
-def should_clear_caches(memory_threshold_mb=None):
+def should_clear_caches(memory_threshold_mb=None, baseline_memory_mb=None):
     """
-    Check if cache clearing is needed based on memory usage.
+    Check if cache clearing is needed based on memory growth from baseline.
 
     Parameters
     ----------
     memory_threshold_mb : int, optional
-        Memory threshold in MB above which caches should be cleared.
+        Memory growth threshold in MB above which caches should be cleared.
         If None, uses CONFIG value.
+    baseline_memory_mb : float, optional
+        Baseline memory usage in MB. If provided, checks memory growth from baseline.
+        If None, uses absolute memory threshold (old behavior).
 
     Returns
     -------
@@ -194,10 +197,17 @@ def should_clear_caches(memory_threshold_mb=None):
         memory_threshold_mb = CONFIG["PROCESSING"]["memory_threshold_mb"]
 
     current_memory = get_memory_usage_mb()
-    return current_memory > memory_threshold_mb
+
+    if baseline_memory_mb is not None:
+        # Check memory growth from baseline
+        memory_growth = current_memory - baseline_memory_mb
+        return memory_growth > memory_threshold_mb
+    else:
+        # Old behavior: check absolute memory
+        return current_memory > memory_threshold_mb
 
 
-def clear_experiment_caches_batch(experiment, force=False):
+def clear_experiment_caches_batch(experiment, force=False, baseline_memory_mb=None):
     """
     Clear caches for all flies in an experiment efficiently.
 
@@ -207,14 +217,21 @@ def clear_experiment_caches_batch(experiment, force=False):
         The experiment object containing flies to clear caches for.
     force : bool
         If True, clear caches regardless of memory usage. If False, only clear if needed.
+    baseline_memory_mb : float, optional
+        Baseline memory to check growth against. If provided, clears when growth exceeds threshold.
 
     Returns
     -------
     bool
         True if caches were cleared, False if clearing was skipped.
     """
-    if not force and not should_clear_caches():
-        logging.debug("Skipping cache clearing - memory usage below threshold")
+    if not force and not should_clear_caches(baseline_memory_mb=baseline_memory_mb):
+        current_memory = get_memory_usage_mb()
+        if baseline_memory_mb is not None:
+            memory_growth = current_memory - baseline_memory_mb
+            logging.debug(f"Skipping cache clearing - memory growth {memory_growth:.1f}MB below threshold")
+        else:
+            logging.debug("Skipping cache clearing - memory usage below threshold")
         return False
 
     memory_before = get_memory_usage_mb()
@@ -413,7 +430,7 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
     return processed_flies
 
 
-def process_experiment(folder, metrics, output_data):
+def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
     """
     Process an experiment folder in experiment mode.
 
@@ -425,6 +442,13 @@ def process_experiment(folder, metrics, output_data):
         List of metrics to process.
     output_data : Path
         Output directory for datasets.
+    baseline_memory_mb : float, optional
+        Baseline memory usage for delta-based cache clearing.
+
+    Returns
+    -------
+    float
+        Updated baseline memory after cache clearing (if cleared), otherwise None.
     """
     logging.info(f"Processing experiment folder: {folder.name}")
 
@@ -464,13 +488,24 @@ def process_experiment(folder, metrics, output_data):
                 logging.warning(f"No data available for {folder.name} with metric {metric}")
 
         # Clear caches after processing all metrics for this experiment (batch clearing)
-        # Force clear to ensure memory is freed after processing the experiment
-        cleared = clear_experiment_caches_batch(experiment, force=True)
-        if not cleared and experiment is not None:
-            logging.debug(f"Skipped cache clearing for {folder.name} - memory usage acceptable")
+        # Use conditional clearing based on memory growth from baseline
+        cleared = clear_experiment_caches_batch(experiment, force=False, baseline_memory_mb=baseline_memory_mb)
+        if cleared:
+            logging.info(f"Cleared caches for {folder.name} - memory growth exceeded threshold")
+            # Reset baseline after clearing
+            new_baseline = get_memory_usage_mb()
+            logging.info(f"New baseline memory: {new_baseline:.1f}MB")
+            return new_baseline
+        elif experiment is not None:
+            logging.debug(f"Skipped cache clearing for {folder.name} - memory growth acceptable")
+
+        return None
 
     except Exception as e:
+        import traceback
+
         logging.error(f"Error processing experiment {folder.name}: {str(e)}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
 
 
 def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False):
@@ -978,6 +1013,10 @@ if __name__ == "__main__":
     else:
         processed_items = set()
 
+    # Track baseline memory for delta-based cache clearing
+    baseline_memory_mb = get_memory_usage_mb()
+    logging.info(f"Baseline memory usage: {baseline_memory_mb:.1f}MB")
+
     # Choose processing approach based on mode and options
     if args.mode == "flies" and args.batch_size > 1 and not args.force_cache_clear:
         # Use batch processing for flies mode to optimize cache clearing
@@ -1029,7 +1068,11 @@ if __name__ == "__main__":
 
             try:
                 if args.mode == "experiment":
-                    process_experiment(item, CONFIG["PROCESSING"]["metrics"], output_data)
+                    new_baseline = process_experiment(
+                        item, CONFIG["PROCESSING"]["metrics"], output_data, baseline_memory_mb
+                    )
+                    if new_baseline is not None:
+                        baseline_memory_mb = new_baseline
                 elif args.mode == "flies":
                     # Use individual processing with configurable cache clearing
                     process_fly_directory(

@@ -924,6 +924,173 @@ class F1AnalysisFramework:
 
         return rejected, corrected_p
 
+    def calculate_ball_proximity_time(self, df, proximity_threshold=70, movement_threshold=100, n_avg=100):
+        """
+        Calculate the proportion of time each fly spends near the ball.
+
+        This metric is calculated from fly position data by:
+        1. Filtering data to keep only points after fly first moves >movement_threshold from starting position
+        2. Calculating Euclidean distance between fly thorax and ball center
+        3. Computing proportion of time where distance < proximity_threshold
+
+        Args:
+            df: DataFrame with fly and ball position data (requires fly_positions data)
+            proximity_threshold: Distance threshold for proximity in pixels (default: 70)
+            movement_threshold: Distance fly must move from start before counting (default: 100)
+            n_avg: Number of initial points to average for starting position (default: 100)
+
+        Returns:
+            DataFrame with fly, condition, and ball_proximity_proportion columns
+        """
+        print(f"\n📏 Calculating ball proximity time (threshold={proximity_threshold}px)...")
+
+        # Check for required columns
+        required_cols = ["fly", "x_thorax_fly_0", "y_thorax_fly_0"]
+        missing_cols = [col for col in required_cols if col not in df.columns]
+
+        if missing_cols:
+            print(f"  ⚠️  Missing required columns for ball proximity calculation: {missing_cols}")
+            print("  This metric requires fly_positions data, not summary data")
+            return None
+
+        # Filter data from first movement
+        filtered_dfs = []
+
+        for fly_id in df["fly"].unique():
+            fly_data = df[df["fly"] == fly_id].copy()
+
+            # Sort by frame or index
+            if "frame" in fly_data.columns:
+                fly_data = fly_data.sort_values("frame")
+            else:
+                fly_data = fly_data.sort_index()
+
+            # Calculate starting position
+            n_use = min(n_avg, len(fly_data))
+            if n_use == 0:
+                continue
+
+            x_start = fly_data["x_thorax_fly_0"].iloc[:n_use].mean()
+
+            # Calculate distance from start
+            fly_data["distance_from_start"] = np.abs(fly_data["x_thorax_fly_0"] - x_start)
+
+            # Find first time distance exceeds threshold
+            threshold_mask = fly_data["distance_from_start"] > movement_threshold
+
+            if threshold_mask.any():
+                first_threshold_idx = threshold_mask.idxmax()
+                fly_data_filtered = fly_data.loc[first_threshold_idx:]
+                filtered_dfs.append(fly_data_filtered)
+
+        if not filtered_dfs:
+            print("  ⚠️  No flies met movement threshold criteria")
+            return None
+
+        df_filtered = pd.concat(filtered_dfs, ignore_index=True)
+        print(f"  Filtered to {len(df_filtered)} frames from {df_filtered['fly'].nunique()} flies")
+
+        # Calculate proximity proportions
+        results = []
+
+        for fly_id in df_filtered["fly"].unique():
+            fly_data = df_filtered[df_filtered["fly"] == fly_id].copy()
+
+            if len(fly_data) == 0:
+                continue
+
+            # Get condition information
+            f1_condition = fly_data["F1_condition"].iloc[0] if "F1_condition" in fly_data.columns else None
+            pretraining = fly_data["Pretraining"].iloc[0] if "Pretraining" in fly_data.columns else None
+            genotype = fly_data["Genotype"].iloc[0] if "Genotype" in fly_data.columns else None
+
+            # Determine which ball to use based on condition
+            if f1_condition == "control" or pretraining == "n":
+                ball_x_col = "x_centre_ball_0"
+                ball_y_col = "y_centre_ball_0"
+            else:
+                ball_x_col = "x_centre_ball_1"
+                ball_y_col = "y_centre_ball_1"
+
+            # Check if ball columns exist
+            if ball_x_col not in fly_data.columns or ball_y_col not in fly_data.columns:
+                continue
+
+            # Get fly and ball positions
+            fly_x = fly_data["x_thorax_fly_0"].values
+            fly_y = fly_data["y_thorax_fly_0"].values
+            ball_x = fly_data[ball_x_col].values
+            ball_y = fly_data[ball_y_col].values
+
+            # Calculate distance to ball
+            distance_to_ball = np.sqrt((fly_x - ball_x) ** 2 + (fly_y - ball_y) ** 2)
+
+            # Calculate proportion near ball
+            near_ball = distance_to_ball < proximity_threshold
+            proportion_near = near_ball.sum() / len(near_ball) if len(near_ball) > 0 else 0
+
+            results.append(
+                {
+                    "fly": fly_id,
+                    "F1_condition": f1_condition,
+                    "Pretraining": pretraining,
+                    "Genotype": genotype,
+                    "ball_proximity_proportion": proportion_near,
+                    "n_timepoints": len(fly_data),
+                    "n_near_ball": near_ball.sum(),
+                }
+            )
+
+        result_df = pd.DataFrame(results)
+        print(f"  ✓ Calculated ball proximity for {len(result_df)} flies")
+
+        return result_df
+
+    def add_calculated_metrics(self, df, mode, include_proximity=False):
+        """
+        Add calculated metrics to the dataset.
+
+        Args:
+            df: DataFrame to add metrics to
+            mode: Analysis mode
+            include_proximity: If True, try to calculate ball proximity (requires position data)
+
+        Returns:
+            DataFrame with added metrics
+        """
+        df_enriched = df.copy()
+
+        # Ensure time_to_first_interaction exists
+        if "time_to_first_interaction" not in df_enriched.columns:
+            # Check for alternative column names
+            alt_names = ["first_interaction_time", "first_event_time", "first_significant_event_time"]
+            found = False
+
+            for alt_name in alt_names:
+                if alt_name in df_enriched.columns:
+                    print(f"  ℹ️  Using '{alt_name}' as 'time_to_first_interaction'")
+                    df_enriched["time_to_first_interaction"] = df_enriched[alt_name]
+                    found = True
+                    break
+
+            if not found:
+                print("  ⚠️  'time_to_first_interaction' not found in dataset")
+                print("     This metric should be calculated during data preprocessing")
+
+        # Calculate ball proximity if requested and data supports it
+        if include_proximity:
+            proximity_data = self.calculate_ball_proximity_time(df_enriched)
+
+            if proximity_data is not None:
+                # Merge proximity data back to main dataframe
+                # This is per-fly metric, so merge on fly identifier
+                df_enriched = df_enriched.merge(
+                    proximity_data[["fly", "ball_proximity_proportion"]], on="fly", how="left"
+                )
+                print(f"  ✓ Added 'ball_proximity_proportion' metric")
+
+        return df_enriched
+
     def analyze_boxplots(self, mode, metric_type=None):
         """Analyze continuous metrics using boxplots with scatter overlay and pairwise comparisons.
 
@@ -933,6 +1100,40 @@ class F1AnalysisFramework:
         df = self.load_dataset(mode)
         if df is None:
             return
+
+        # Try to load fly positions data for ball proximity calculation
+        mode_config = self.config["analysis_modes"][mode]
+
+        # Handle pooled modes - get primary mode config
+        if "primary_dataset" in mode_config:
+            primary_mode = mode_config["primary_dataset"]
+            primary_config = self.config["analysis_modes"][primary_mode]
+            fly_positions_path = primary_config.get("fly_positions_path")
+        else:
+            fly_positions_path = mode_config.get("fly_positions_path")
+
+        # Try to load fly positions data if path is provided
+        df_positions = None
+        if fly_positions_path:
+            try:
+                df_positions = pd.read_feather(fly_positions_path)
+                print(f"✓ Loaded fly positions data: {df_positions.shape}")
+
+                # Calculate ball proximity metric
+                proximity_data = self.calculate_ball_proximity_time(df_positions)
+
+                if proximity_data is not None:
+                    # Merge proximity metric into main dataframe
+                    df = df.merge(
+                        proximity_data[["fly", "ball_proximity_proportion"]],
+                        on="fly",
+                        how="left",
+                        suffixes=("", "_proximity"),
+                    )
+                    print(f"✓ Added 'ball_proximity_proportion' metric to dataset")
+            except Exception as e:
+                print(f"⚠️  Could not load fly positions data: {e}")
+                print("   Ball proximity metric will not be available")
 
         detected_cols = self.detect_columns(df, mode)
         if not all(key in detected_cols for key in ["primary", "secondary", "ball_condition"]):
@@ -2136,21 +2337,108 @@ class F1AnalysisFramework:
         alt_summary_paths = coordinates_config.get("alternative_summary_paths", [])
         plot_params = coordinates_config.get("coordinates_plot_params", {})
 
-        # Load coordinates dataset
+        # Check if this is a pooled mode
+        is_pooled = "primary_dataset" in mode_config
+
+        # Load coordinates dataset (with pooling support)
         df_coords = None
         used_coords_path = None
 
-        for path in [coordinates_path] + alt_coord_paths:
+        if is_pooled:
+            print(f"\n🔄 Loading pooled coordinates for mode: {mode}")
+
+            # Get primary dataset coordinates
+            primary_mode = mode_config["primary_dataset"]
+            primary_config = self.config["analysis_modes"][primary_mode]
+            primary_coords_config = primary_config.get("coordinates", {})
+
+            if not primary_coords_config:
+                print(f"  ⚠️  No coordinates config found for primary mode: {primary_mode}")
+                return
+
+            primary_coords_path = primary_coords_config["coordinates_path"]
+
             try:
-                if Path(path).exists():
-                    df_coords = pd.read_feather(path)
-                    used_coords_path = path
-                    print(f"✅ Coordinates dataset loaded: {path}")
-                    print(f"   Shape: {df_coords.shape}")
-                    break
+                df_coords = pd.read_feather(primary_coords_path)
+                print(f"  📁 Primary coordinates loaded from {primary_mode}: {df_coords.shape}")
             except Exception as e:
-                print(f"⚠️  Could not load coordinates from {path}: {e}")
-                continue
+                print(f"  ❌ Error loading primary coordinates: {e}")
+                return
+
+            # Get genotypes to pool
+            shared_genotypes = mode_config.get("shared_genotypes", [])
+            pool_from_modes = mode_config.get("pool_from_modes", [])
+
+            if shared_genotypes and pool_from_modes:
+                # Find genotype column
+                genotype_col = None
+                for col in df_coords.columns:
+                    if "genotype" in col.lower():
+                        genotype_col = col
+                        break
+
+                if genotype_col:
+                    pooled_coords = [df_coords]
+
+                    # Load coordinates from other modes
+                    for pool_mode in pool_from_modes:
+                        if pool_mode not in self.config["analysis_modes"]:
+                            continue
+
+                        pool_config = self.config["analysis_modes"][pool_mode]
+
+                        # Skip if also pooled (avoid recursion)
+                        if "primary_dataset" in pool_config:
+                            continue
+
+                        pool_coords_config = pool_config.get("coordinates", {})
+                        if not pool_coords_config:
+                            continue
+
+                        pool_coords_path = pool_coords_config.get("coordinates_path")
+                        if not pool_coords_path:
+                            continue
+
+                        try:
+                            df_pool = pd.read_feather(pool_coords_path)
+
+                            # Filter for shared genotypes
+                            if genotype_col in df_pool.columns:
+                                df_pool_filtered = df_pool[df_pool[genotype_col].isin(shared_genotypes)]
+
+                                if len(df_pool_filtered) > 0:
+                                    print(f"  ✓ Added {len(df_pool_filtered)} frames from {pool_mode}")
+                                    pooled_coords.append(df_pool_filtered)
+                        except Exception as e:
+                            print(f"  ⚠️  Could not load coordinates from {pool_mode}: {e}")
+
+                    # Combine all coordinate datasets
+                    if len(pooled_coords) > 1:
+                        df_coords = pd.concat(pooled_coords, ignore_index=True)
+                        print(f"  ✅ Pooled coordinates created: {df_coords.shape} (from {len(pooled_coords)} sources)")
+
+                        # Print genotype distribution
+                        if genotype_col in df_coords.columns:
+                            print(f"\n  📊 Genotype distribution in pooled coordinates:")
+                            genotype_counts = df_coords[genotype_col].value_counts()
+                            for genotype, count in genotype_counts.items():
+                                print(f"     {genotype}: {count} frames")
+
+            used_coords_path = f"{primary_mode} (pooled)"
+
+        else:
+            # Non-pooled mode: load coordinates normally
+            for path in [coordinates_path] + alt_coord_paths:
+                try:
+                    if Path(path).exists():
+                        df_coords = pd.read_feather(path)
+                        used_coords_path = path
+                        print(f"✅ Coordinates dataset loaded: {path}")
+                        print(f"   Shape: {df_coords.shape}")
+                        break
+                except Exception as e:
+                    print(f"⚠️  Could not load coordinates from {path}: {e}")
+                    continue
 
         if df_coords is None:
             print("❌ Could not load coordinates dataset from any path")
@@ -2171,7 +2459,8 @@ class F1AnalysisFramework:
                     continue
 
         # Filter coordinates data based on summary dataset
-        if df_summary is not None and "fly" in df_coords.columns and "fly" in df_summary.columns:
+        # Skip filtering for pooled modes since coordinates already contain pooled data
+        if df_summary is not None and "fly" in df_coords.columns and "fly" in df_summary.columns and not is_pooled:
             summary_flies = set(df_summary["fly"].unique())
             coords_flies = set(df_coords["fly"].unique())
             common_flies = summary_flies.intersection(coords_flies)
@@ -2184,6 +2473,10 @@ class F1AnalysisFramework:
             # Filter to common flies
             df_coords = df_coords[df_coords["fly"].isin(common_flies)]
             print(f"   Filtered coordinates shape: {df_coords.shape}")
+        elif is_pooled:
+            print(f"📊 Pooled mode: using all pooled coordinates without summary filtering")
+            print(f"   Total flies in pooled coordinates: {df_coords['fly'].nunique()}")
+            print(f"   Total frames: {len(df_coords)}")
 
         # Detect grouping columns from summary dataset (or use coordinates if no summary)
         detection_df = df_summary if df_summary is not None else df_coords
@@ -2222,7 +2515,7 @@ class F1AnalysisFramework:
                 return
 
         # Get plotting parameters
-        normalize_methods = plot_params.get("normalize_methods", ["percentage", "trimmed"])
+        normalize_methods = plot_params.get("normalize_methods", ["percentage", "trimmed", "adaptive_trimmed"])
         run_permutation_tests = plot_params.get("run_permutation_tests", True)
 
         # Create plots for each normalization method
@@ -2233,6 +2526,8 @@ class F1AnalysisFramework:
                 self._create_percentage_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
             elif method == "trimmed":
                 self._create_trimmed_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
+            elif method == "adaptive_trimmed":
+                self._create_adaptive_trimmed_coordinate_plots(df_coords, primary_col, secondary_col, coord_cols, mode)
 
         # Run permutation tests on percentage-normalized data
         if run_permutation_tests and "percentage" in normalize_methods:
@@ -2261,7 +2556,7 @@ class F1AnalysisFramework:
                         metric_col=coord_col,
                         n_permutations=10000,
                         alpha=0.05,
-                        bin_size=8.33,  # ~12 bins across 0-100%
+                        bin_size=10.0,  # 10% bins (0-10, 10-20, ..., 90-100)
                         progress=True,
                     )
 
@@ -2273,11 +2568,67 @@ class F1AnalysisFramework:
                         secondary_col=secondary_col,
                         metric_col=coord_col,
                         mode=mode,
-                        bin_size=8.33,  # Match permutation test bin size
+                        bin_size=10.0,  # Match permutation test bin size
                     )
 
                     # Save detailed results to CSV
-                    self._save_permutation_results_to_csv(perm_results, coord_col, mode)
+                    self._save_permutation_results_to_csv(perm_results, coord_col, mode, suffix="percentage")
+
+        # Run permutation tests on adaptive_trimmed data
+        if run_permutation_tests and "adaptive_trimmed" in normalize_methods:
+            print(f"\n🔬 Running permutation tests on adaptive trimmed trajectory data...")
+
+            # Find adaptive maximum time and trim data
+            adaptive_max_time = self._find_adaptive_maximum_time(df_coords, min_fly_fraction=0.5)
+            df_adaptive = df_coords[df_coords["adjusted_time"] <= adaptive_max_time].copy()
+
+            if not df_adaptive.empty:
+                # Determine appropriate bin size based on the time range
+                time_range = adaptive_max_time
+                # Use approximately 12 bins similar to the percentage plots
+                adaptive_bin_size = time_range / 12.0
+
+                print(f"  Time range: 0 to {adaptive_max_time:.2f}s")
+                print(f"  Bin size: {adaptive_bin_size:.2f}s (~12 bins)")
+
+                # Run tests for each ball distance metric
+                for coord_col in coord_cols:
+                    if coord_col not in df_adaptive.columns:
+                        continue
+
+                    # Skip if all NaN
+                    if df_adaptive[coord_col].isna().all():
+                        continue
+
+                    print(f"\n📊 Testing (adaptive trimmed): {coord_col}")
+
+                    # Compute permutation tests with time-based bins
+                    perm_results = self.compute_trajectory_permutation_tests_time_bins(
+                        data=df_adaptive,
+                        primary_col=primary_col,
+                        secondary_col=secondary_col,
+                        metric_col=coord_col,
+                        n_permutations=10000,
+                        alpha=0.05,
+                        bin_size=adaptive_bin_size,
+                        max_time=adaptive_max_time,
+                        progress=True,
+                    )
+
+                    # Plot results with significant bins highlighted
+                    self.plot_permutation_test_results_time_bins(
+                        data=df_adaptive,
+                        perm_results=perm_results,
+                        primary_col=primary_col,
+                        secondary_col=secondary_col,
+                        metric_col=coord_col,
+                        mode=mode,
+                        bin_size=adaptive_bin_size,
+                        max_time=adaptive_max_time,
+                    )
+
+                    # Save detailed results to CSV
+                    self._save_permutation_results_to_csv(perm_results, coord_col, mode, suffix="adaptive_trimmed")
 
         print(f"✅ Coordinate analysis completed for mode: {mode}")
 
@@ -2335,6 +2686,47 @@ class F1AnalysisFramework:
         print(f"   Flies with longer data: {(max_times_per_fly > max_shared_time).sum()}")
 
         return max_shared_time
+
+    def _find_adaptive_maximum_time(self, df, min_fly_fraction=0.5):
+        """Find maximum time where at least min_fly_fraction of flies still have data.
+
+        This is less restrictive than _find_maximum_shared_time which requires ALL flies.
+        It finds the largest time point where you still have enough flies for proper statistics.
+
+        Args:
+            df: DataFrame with fly and adjusted_time columns
+            min_fly_fraction: Minimum fraction of total flies required (default 0.5 = 50%)
+
+        Returns:
+            Maximum time where at least min_fly_fraction flies have data
+        """
+        if "fly" not in df.columns or "adjusted_time" not in df.columns:
+            return df["adjusted_time"].max() if "adjusted_time" in df.columns else 30
+
+        total_flies = df["fly"].nunique()
+        min_flies_required = max(3, int(total_flies * min_fly_fraction))  # At least 3 flies
+
+        # Get max time for each fly
+        max_times_per_fly = df.groupby("fly")["adjusted_time"].max().sort_values()
+
+        # Find the time at which we still have min_flies_required
+        # This is the max_time of the (total_flies - min_flies_required)th fly
+        # (counting from the end, so we keep the min_flies_required flies with longest data)
+        if len(max_times_per_fly) >= min_flies_required:
+            # Take the time of the fly at position where we still have min_flies_required flies after it
+            adaptive_max_time = max_times_per_fly.iloc[-(min_flies_required)]
+        else:
+            # If we don't have enough flies total, just use the minimum
+            adaptive_max_time = max_times_per_fly.min()
+
+        n_flies_retained = (max_times_per_fly >= adaptive_max_time).sum()
+        percent_retained = (n_flies_retained / total_flies) * 100
+
+        print(f"📊 Adaptive maximum time: {adaptive_max_time:.2f}s")
+        print(f"   Retains {n_flies_retained}/{total_flies} flies ({percent_retained:.1f}%)")
+        print(f"   (minimum required: {min_flies_required} = {min_fly_fraction*100:.0f}% of total)")
+
+        return adaptive_max_time
 
     def _create_percentage_coordinate_plots(self, df, primary_col, secondary_col, coord_cols, mode):
         """Create percentage-normalized coordinate plots."""
@@ -2521,6 +2913,96 @@ class F1AnalysisFramework:
         else:
             print("ℹ️  Skipping individual fly plots (disabled in config)")
 
+    def _create_adaptive_trimmed_coordinate_plots(self, df, primary_col, secondary_col, coord_cols, mode):
+        """Create adaptive-trimmed coordinate plots (keeps 50%+ flies with sufficient time coverage)."""
+        # Find adaptive maximum time (keeps at least 50% of flies)
+        adaptive_max_time = self._find_adaptive_maximum_time(df, min_fly_fraction=0.5)
+        df_adaptive = df[df["adjusted_time"] <= adaptive_max_time].copy()
+
+        print(f"📊 Adaptive trimmed data: {df_adaptive.shape[0]} points from {df_adaptive['fly'].nunique()} flies")
+
+        # Get plot configuration
+        mode_config = self.config["analysis_modes"][mode]
+        coordinates_config = mode_config.get("coordinates", {})
+        plot_params = coordinates_config.get("coordinates_plot_params", {})
+        create_individual_plots = plot_params.get("create_individual_fly_plots", False)
+
+        # Create averaged plots grouped by primary variable
+        self._create_coordinate_line_plots(
+            df_adaptive,
+            "adjusted_time",
+            coord_cols,
+            primary_col,
+            f"F1 Coordinates by {primary_col.title()} (Adaptive Trimmed - 50%+ Flies)",
+            "f1_coordinates_adaptive_trimmed_pretraining.png",
+            mode,
+            xlabel="Adjusted Time (seconds)",
+            time_type="adaptive_trimmed",
+            var_type="pretraining",
+        )
+
+        # Create averaged plots grouped by secondary variable
+        var_type_secondary = "genotype" if mode.startswith("tnt_") else "f1_condition"
+        self._create_coordinate_line_plots(
+            df_adaptive,
+            "adjusted_time",
+            coord_cols,
+            secondary_col,
+            f"F1 Coordinates by {secondary_col.replace('_', ' ').title()} (Adaptive Trimmed - 50%+ Flies)",
+            "f1_coordinates_adaptive_trimmed_f1condition.png",
+            mode,
+            xlabel="Adjusted Time (seconds)",
+            time_type="adaptive_trimmed",
+            var_type=var_type_secondary,
+        )
+
+        # For TNT modes, create combined pretraining + genotype plots
+        if mode.startswith("tnt_"):
+            print("📊 Creating combined pretraining + genotype plots (adaptive trimmed)...")
+            self._create_combined_coordinate_plots(
+                df_adaptive,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                secondary_col,
+                f"F1 Coordinates by Pretraining + Genotype (Adaptive Trimmed - 50%+ Flies)",
+                "f1_coordinates_adaptive_trimmed_combined.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="adaptive_trimmed",
+            )
+
+        # Create individual fly plots only if enabled in config
+        if create_individual_plots:
+            print("📊 Creating individual fly plots (adaptive trimmed)...")
+            self._create_individual_fly_plots(
+                df_adaptive,
+                "adjusted_time",
+                coord_cols,
+                primary_col,
+                f"F1 Individual Fly Coordinates by {primary_col.title()} (Adaptive Trimmed)",
+                "f1_coordinates_adaptive_trimmed_individual_flies_pretraining.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="adaptive_trimmed",
+                var_type="pretraining",
+            )
+
+            self._create_individual_fly_plots(
+                df_adaptive,
+                "adjusted_time",
+                coord_cols,
+                secondary_col,
+                f"F1 Individual Fly Coordinates by {secondary_col.replace('_', ' ').title()} (Adaptive Trimmed)",
+                "f1_coordinates_adaptive_trimmed_individual_flies_f1condition.png",
+                mode,
+                xlabel="Adjusted Time (seconds)",
+                time_type="adaptive_trimmed",
+                var_type=var_type_secondary,
+            )
+        else:
+            print("ℹ️  Skipping individual fly plots (disabled in config)")
+
     def compute_trajectory_permutation_tests(
         self,
         data,
@@ -2529,7 +3011,7 @@ class F1AnalysisFramework:
         metric_col,
         n_permutations=10000,
         alpha=0.05,
-        bin_size=8.33,
+        bin_size=10.0,  # Changed default to 10% bins
         progress=True,
     ):
         """
@@ -2553,7 +3035,7 @@ class F1AnalysisFramework:
         alpha : float
             Significance level for FDR correction
         bin_size : float
-            Size of time bins in percentage (default 8.33 gives ~12 bins across 0-100%)
+            Size of time bins in percentage (default 10.0 gives 10 bins across 0-100%)
         progress : bool
             Show progress bars
 
@@ -2568,7 +3050,7 @@ class F1AnalysisFramework:
         print(f"Settings:")
         print(f"  • Permutations: {n_permutations}")
         print(f"  • FDR alpha: {alpha}")
-        print(f"  • Time bin size: {bin_size}")
+        print(f"  • Time bin size: {bin_size}%")
 
         # Create combined grouping variable
         data_copy = data.copy()
@@ -2578,15 +3060,203 @@ class F1AnalysisFramework:
         groups = sorted(data_copy["combined_group"].unique())
         print(f"\nGroups: {groups}")
 
-        # Prepare data with time bins
-        data_copy["time_bin"] = np.floor(data_copy["adjusted_time"] / bin_size) * bin_size
+        # Create bins from adjusted_time (0-100%)
+        # Use bin edges: 0-10, 10-20, 20-30, ..., 90-100
+        bin_edges = np.arange(0, 100 + bin_size, bin_size)
+        data_copy["time_bin"] = pd.cut(
+            data_copy["adjusted_time"],
+            bins=bin_edges,
+            labels=bin_edges[:-1],  # Use left edge as label
+            include_lowest=True,
+        )
+
+        # Convert categorical to numeric for easier handling
+        data_copy["time_bin"] = pd.to_numeric(data_copy["time_bin"])
 
         # Get fly-level medians for each time bin (to handle repeated measures)
         fly_medians = data_copy.groupby(["fly", "combined_group", "time_bin"])[metric_col].median().reset_index()
 
         time_bins = sorted(fly_medians["time_bin"].unique())
         n_bins = len(time_bins)
-        print(f"Time bins: {n_bins} bins from {time_bins[0]:.1f} to {time_bins[-1]:.1f}")
+        print(f"Time bins: {n_bins} bins from {time_bins[0]:.1f}% to {time_bins[-1]:.1f}%")
+
+        # Get all pairwise combinations
+        comparisons = list(combinations(groups, 2))
+        print(f"\nPairwise comparisons: {len(comparisons)}")
+
+        results = {}
+
+        # For each pairwise comparison
+        for group1, group2 in comparisons:
+            comparison_name = f"{group1} vs {group2}"
+            print(f"\n{'─'*80}")
+            print(f"Testing: {comparison_name}")
+
+            # Filter data for this comparison
+            comparison_data = fly_medians[fly_medians["combined_group"].isin([group1, group2])]
+
+            # Store results for each bin
+            observed_diffs = []
+            p_values_raw = []
+            n_group1_per_bin = []
+            n_group2_per_bin = []
+
+            iterator = tqdm(time_bins, desc=f"  {comparison_name}") if progress else time_bins
+
+            for time_bin in iterator:
+                bin_data = comparison_data[comparison_data["time_bin"] == time_bin]
+
+                # Get values for each group
+                group1_vals = bin_data[bin_data["combined_group"] == group1][metric_col].values
+                group2_vals = bin_data[bin_data["combined_group"] == group2][metric_col].values
+
+                n_group1_per_bin.append(len(group1_vals))
+                n_group2_per_bin.append(len(group2_vals))
+
+                if len(group1_vals) == 0 or len(group2_vals) == 0:
+                    observed_diffs.append(np.nan)
+                    p_values_raw.append(1.0)
+                    continue
+
+                # Observed difference (group2 - group1)
+                obs_diff = np.mean(group2_vals) - np.mean(group1_vals)
+                observed_diffs.append(obs_diff)
+
+                # Permutation test
+                combined = np.concatenate([group1_vals, group2_vals])
+                n1 = len(group1_vals)
+                n2 = len(group2_vals)
+
+                perm_diffs = []
+                for _ in range(n_permutations):
+                    # Shuffle and split
+                    shuffled = np.random.permutation(combined)
+                    perm_g1 = shuffled[:n1]
+                    perm_g2 = shuffled[n1:]
+                    perm_diff = np.mean(perm_g2) - np.mean(perm_g1)
+                    perm_diffs.append(perm_diff)
+
+                perm_diffs = np.array(perm_diffs)
+
+                # Two-tailed p-value
+                p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
+                p_values_raw.append(p_value)
+
+            # Apply FDR correction across all time bins for this comparison
+            p_values_raw = np.array(p_values_raw)
+            valid_mask = ~np.isnan(p_values_raw)
+
+            p_values_corrected = np.ones_like(p_values_raw)
+            if valid_mask.sum() > 0:
+                rejected, p_corrected, _, _ = multipletests(p_values_raw[valid_mask], alpha=alpha, method="fdr_bh")
+                p_values_corrected[valid_mask] = p_corrected
+                significant_mask = np.zeros(len(p_values_raw), dtype=bool)
+                significant_mask[valid_mask] = rejected
+            else:
+                significant_mask = np.zeros(len(p_values_raw), dtype=bool)
+
+            # Store results
+            results[comparison_name] = {
+                "group1": group1,
+                "group2": group2,
+                "time_bins": time_bins,
+                "observed_diffs": observed_diffs,
+                "p_values_raw": p_values_raw,
+                "p_values_corrected": p_values_corrected,
+                "significant_timepoints": np.where(significant_mask)[0],
+                "n_significant": np.sum(significant_mask),
+                "n_significant_raw": np.sum(p_values_raw < alpha),
+                "n_group1_per_bin": n_group1_per_bin,
+                "n_group2_per_bin": n_group2_per_bin,
+            }
+
+            print(f"  Raw significant bins: {results[comparison_name]['n_significant_raw']}/{n_bins}")
+            print(f"  FDR significant bins: {results[comparison_name]['n_significant']}/{n_bins} (α={alpha})")
+
+        print(f"\n{'='*80}")
+        print(f"✅ Permutation tests completed")
+        print(f"{'='*80}\n")
+
+        return results
+
+    def compute_trajectory_permutation_tests_time_bins(
+        self,
+        data,
+        primary_col,
+        secondary_col,
+        metric_col,
+        n_permutations=10000,
+        alpha=0.05,
+        bin_size=2.5,
+        max_time=30.0,
+        progress=True,
+    ):
+        """
+        Compute pairwise permutation tests using time-based bins (for adaptive_trimmed data).
+
+        Similar to compute_trajectory_permutation_tests but uses actual time bins instead of percentage bins.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Time-trimmed data with fly-level information
+        primary_col : str
+            Primary grouping column (e.g., 'Pretraining')
+        secondary_col : str
+            Secondary grouping column (e.g., 'Genotype')
+        metric_col : str
+            Column containing the metric to test
+        n_permutations : int
+            Number of permutations for each test
+        alpha : float
+            Significance level for FDR correction
+        bin_size : float
+            Size of time bins in seconds (e.g., 2.5s)
+        max_time : float
+            Maximum time to consider
+        progress : bool
+            Show progress bars
+
+        Returns
+        -------
+        dict
+            Dictionary with test results for each pairwise comparison
+        """
+        print(f"\n{'='*80}")
+        print(f"PERMUTATION TESTS (Time-based): {metric_col}")
+        print(f"{'='*80}")
+        print(f"Settings:")
+        print(f"  • Permutations: {n_permutations}")
+        print(f"  • FDR alpha: {alpha}")
+        print(f"  • Time bin size: {bin_size:.2f}s")
+        print(f"  • Max time: {max_time:.2f}s")
+
+        # Create combined grouping variable
+        data_copy = data.copy()
+        data_copy["combined_group"] = data_copy[primary_col].astype(str) + "_" + data_copy[secondary_col].astype(str)
+
+        # Get all unique groups
+        groups = sorted(data_copy["combined_group"].unique())
+        print(f"\nGroups: {groups}")
+
+        # Create bins from adjusted_time
+        bin_edges = np.arange(0, max_time + bin_size, bin_size)
+        data_copy["time_bin"] = pd.cut(
+            data_copy["adjusted_time"],
+            bins=bin_edges,
+            labels=bin_edges[:-1],
+            include_lowest=True,
+        )
+
+        # Convert categorical to numeric for easier handling
+        data_copy["time_bin"] = pd.to_numeric(data_copy["time_bin"])
+
+        # Get fly-level medians for each time bin (to handle repeated measures)
+        fly_medians = data_copy.groupby(["fly", "combined_group", "time_bin"])[metric_col].median().reset_index()
+
+        time_bins = sorted(fly_medians["time_bin"].unique())
+        n_bins = len(time_bins)
+        print(f"Time bins: {n_bins} bins from {time_bins[0]:.1f}s to {time_bins[-1]:.1f}s")
 
         # Get all pairwise combinations
         comparisons = list(combinations(groups, 2))
@@ -2695,7 +3365,7 @@ class F1AnalysisFramework:
         secondary_col,
         metric_col,
         mode,
-        bin_size=8.33,
+        bin_size=10.0,  # Changed default to match compute function
     ):
         """
         Plot trajectory with permutation test results highlighting significant time bins.
@@ -2720,7 +3390,6 @@ class F1AnalysisFramework:
         # Create combined grouping
         data_copy = data.copy()
         data_copy["combined_group"] = data_copy[primary_col].astype(str) + "_" + data_copy[secondary_col].astype(str)
-        data_copy["time_bin"] = np.floor(data_copy["adjusted_time"] / bin_size) * bin_size
 
         groups = sorted(data_copy["combined_group"].unique())
 
@@ -2749,10 +3418,14 @@ class F1AnalysisFramework:
             for group in [group1, group2]:
                 subset = data_copy[data_copy["combined_group"] == group]
 
-                # Get fly-level medians
+                # Bin the data to match the combined plots (8.33% bins for ~12 bins across 0-100%)
+                subset = subset.copy()
+                subset["time_bin"] = np.floor(subset["adjusted_time"] / 8.33) * 8.33
+
+                # Get fly-level medians per time bin
                 fly_medians = subset.groupby(["fly", "time_bin"])[metric_col].median().reset_index()
 
-                # Calculate statistics
+                # Calculate statistics across flies at each time bin
                 time_stats = fly_medians.groupby("time_bin")[metric_col].agg(["mean", "sem", "count"]).reset_index()
 
                 # Get color
@@ -2774,7 +3447,11 @@ class F1AnalysisFramework:
                 # Add CI
                 ci = stats.t.ppf(0.975, time_stats["count"] - 1) * time_stats["sem"]
                 ax.fill_between(
-                    time_stats["time_bin"], time_stats["mean"] - ci, time_stats["mean"] + ci, color=color, alpha=0.15
+                    time_stats["time_bin"],
+                    time_stats["mean"] - ci,
+                    time_stats["mean"] + ci,
+                    color=color,
+                    alpha=0.15,
                 )
 
             # Highlight significant time bins
@@ -2785,7 +3462,8 @@ class F1AnalysisFramework:
                 y_min, y_max = ax.get_ylim()
                 for sig_idx in significant_bins:
                     t_bin = time_bins[sig_idx]
-                    ax.axvspan(t_bin - bin_size / 2, t_bin + bin_size / 2, alpha=0.2, color="red", zorder=0)
+                    # Shade the entire bin width
+                    ax.axvspan(t_bin, t_bin + bin_size, alpha=0.2, color="red", zorder=0)
 
             # Formatting
             ax.set_title(
@@ -2814,8 +3492,153 @@ class F1AnalysisFramework:
         # Save
         self._save_plot(fig, f"{metric_col}_permutation_tests", mode)
 
-    def _save_permutation_results_to_csv(self, perm_results, metric_col, mode):
-        """Save permutation test results to CSV file."""
+    def plot_permutation_test_results_time_bins(
+        self,
+        data,
+        perm_results,
+        primary_col,
+        secondary_col,
+        metric_col,
+        mode,
+        bin_size=2.5,
+        max_time=30.0,
+    ):
+        """
+        Plot trajectory with permutation test results for time-based bins (adaptive_trimmed).
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Time-trimmed data
+        perm_results : dict
+            Results from compute_trajectory_permutation_tests_time_bins
+        primary_col : str
+            Primary grouping column
+        secondary_col : str
+            Secondary grouping column
+        metric_col : str
+            Metric column name
+        mode : str
+            Analysis mode
+        bin_size : float
+            Time bin size in seconds
+        max_time : float
+            Maximum time value
+        """
+        # Create combined grouping
+        data_copy = data.copy()
+        data_copy["combined_group"] = data_copy[primary_col].astype(str) + "_" + data_copy[secondary_col].astype(str)
+
+        groups = sorted(data_copy["combined_group"].unique())
+
+        # Get color mapping
+        genotype_vals = [g.split("_")[1] for g in groups]
+        unique_genotypes = list(set(genotype_vals))
+        genotype_color_map = self.create_color_mapping(mode, unique_genotypes, "brain_region")
+
+        # Create figure with subplots for each pairwise comparison
+        n_comparisons = len(perm_results)
+        n_cols = 2
+        n_rows = int(np.ceil(n_comparisons / n_cols))
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 6 * n_rows))
+        if n_comparisons == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+
+        for idx, (comparison_name, result) in enumerate(perm_results.items()):
+            ax = axes[idx]
+
+            group1 = result["group1"]
+            group2 = result["group2"]
+
+            # Plot trajectories for these two groups
+            for group in [group1, group2]:
+                subset = data_copy[data_copy["combined_group"] == group]
+
+                # Bin the data (use same bin_size as permutation tests)
+                subset = subset.copy()
+                subset["time_bin"] = np.floor(subset["adjusted_time"] / bin_size) * bin_size
+
+                # Get fly-level medians per time bin
+                fly_medians = subset.groupby(["fly", "time_bin"])[metric_col].median().reset_index()
+
+                # Calculate statistics across flies at each time bin
+                time_stats = fly_medians.groupby("time_bin")[metric_col].agg(["mean", "sem", "count"]).reset_index()
+
+                # Get color
+                pretraining_val, genotype_val = group.split("_")
+                color = genotype_color_map.get(genotype_val, "black")
+                linestyle = "-" if pretraining_val == "y" else "--"
+
+                # Plot
+                ax.plot(
+                    time_stats["time_bin"],
+                    time_stats["mean"],
+                    color=color,
+                    linestyle=linestyle,
+                    linewidth=2.5,
+                    alpha=0.9,
+                    label=group.replace("_", " + "),
+                )
+
+                # Add CI
+                ci = stats.t.ppf(0.975, time_stats["count"] - 1) * time_stats["sem"]
+                ax.fill_between(
+                    time_stats["time_bin"],
+                    time_stats["mean"] - ci,
+                    time_stats["mean"] + ci,
+                    color=color,
+                    alpha=0.15,
+                )
+
+            # Highlight significant time bins
+            time_bins = result["time_bins"]
+            significant_bins = result["significant_timepoints"]
+
+            if len(significant_bins) > 0:
+                y_min, y_max = ax.get_ylim()
+                for sig_idx in significant_bins:
+                    t_bin = time_bins[sig_idx]
+                    # Shade the entire bin width
+                    ax.axvspan(t_bin, t_bin + bin_size, alpha=0.2, color="red", zorder=0)
+
+            # Formatting
+            ax.set_title(
+                f"{comparison_name}\n{result['n_significant']} significant bins (FDR α=0.05)",
+                fontsize=12,
+                fontweight="bold",
+            )
+            ax.set_xlabel("Time (s)", fontsize=10)
+            ax.set_ylabel(metric_col.replace("_", " ").title(), fontsize=10)
+            ax.legend(loc="best", fontsize=9)
+            ax.grid(True, alpha=0.3)
+            ax.axvline(x=0, color="black", linestyle=":", alpha=0.7)
+
+        # Hide unused subplots
+        for idx in range(n_comparisons, len(axes)):
+            axes[idx].set_visible(False)
+
+        plt.suptitle(
+            f'Trajectory Permutation Tests (Adaptive Trimmed): {metric_col.replace("_", " ").title()}\n'
+            f"(Red shading = FDR-corrected significant difference)",
+            fontsize=14,
+            fontweight="bold",
+        )
+        plt.tight_layout()
+
+        # Save
+        self._save_plot(fig, f"{metric_col}_permutation_tests_adaptive_trimmed", mode)
+
+    def _save_permutation_results_to_csv(self, perm_results, metric_col, mode, suffix=""):
+        """Save permutation test results to CSV file.
+
+        Args:
+            perm_results: Results dictionary from permutation tests
+            metric_col: Name of the metric column
+            mode: Analysis mode
+            suffix: Optional suffix for filename (e.g., 'percentage', 'adaptive_trimmed')
+        """
         output_config = self.config["output"]
 
         # Prepare data for export
@@ -2840,13 +3663,18 @@ class F1AnalysisFramework:
 
         df_export = pd.DataFrame(export_data)
 
+        # Construct filename with optional suffix
+        filename_base = f"{metric_col}_permutation_results"
+        if suffix:
+            filename_base = f"{metric_col}_permutation_results_{suffix}"
+
         # Save to CSV
         if mode.startswith("tnt_"):
             output_dir = Path(__file__).parent / mode.replace("tnt_", "").upper()
             output_dir.mkdir(exist_ok=True)
-            output_path = output_dir / f"{metric_col}_permutation_results.csv"
+            output_path = output_dir / f"{filename_base}.csv"
         else:
-            output_path = Path(__file__).parent / f"{metric_col}_permutation_results.csv"
+            output_path = Path(__file__).parent / f"{filename_base}.csv"
 
         df_export.to_csv(output_path, index=False)
         print(f"📄 Permutation results saved to: {output_path}")
@@ -3203,8 +4031,8 @@ class F1AnalysisFramework:
                     if subset_clean.empty:
                         continue
 
-                    # Create time bins
-                    bin_size = 0.1 if time_type == "percentage" else 0.1
+                    # Create time bins (use 8.33 for ~12 bins across 0-100%)
+                    bin_size = 8.33 if time_type == "percentage" else 8.33
                     subset_clean = subset_clean.copy()
                     subset_clean["time_bin"] = np.floor(subset_clean[x_col] / bin_size) * bin_size
 

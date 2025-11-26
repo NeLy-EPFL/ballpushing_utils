@@ -318,6 +318,12 @@ def main():
         default=None,
         help="Maximum number of flies to process (for testing)",
     )
+    parser.add_argument(
+        "--clip-percentile",
+        type=float,
+        default=95,
+        help="Percentile to clip colormap at (default: 95 to reduce starting position dominance)",
+    )
 
     args = parser.parse_args()
 
@@ -476,64 +482,150 @@ def main():
 
     template_rgb = cv2.cvtColor(template, cv2.COLOR_BGR2RGB)
 
-    for idx, (condition, data) in enumerate(condition_data.items()):
-        ax = axes[idx]
+    # Pre-compute all heatmaps to find global vmax
+    print("\n   Computing heatmaps...")
+    heatmaps = {}
+    global_vmax = 0
 
-        # Show template as background (fully opaque to keep it intact)
-        ax.imshow(template_rgb, aspect="auto", alpha=1.0)
-
-        # Create and overlay heatmap (masked to white areas only)
+    for condition, data in condition_data.items():
         heatmap = create_heatmap_on_template(
             data, template, template_binary, bins=args.bins, blur_sigma=args.blur_sigma
         )
-
+        heatmaps[condition] = heatmap
         if heatmap is not None:
-            vmax = np.nanmax(heatmap)
+            condition_max = np.nanmax(heatmap)
+            if condition_max > global_vmax:
+                global_vmax = condition_max
 
-            cmap = plt.get_cmap("hot")
-            cmap.set_bad(alpha=0)
+    print(f"   Global vmax for consistent scaling: {global_vmax:.6f}")
 
-            im = ax.imshow(
-                heatmap.T,
-                extent=[0, template.shape[1], template.shape[0], 0],
-                origin="upper",
-                cmap=cmap,
-                alpha=0.7,
-                interpolation="bilinear",
-                vmin=0,
-                vmax=vmax,
-            )
+    # Create multiple scale versions to handle starting position hotspot
+    scale_configs = [
+        {
+            "name": "linear_clipped",
+            "vmax_percentile": args.clip_percentile,
+            "transform": None,
+            "label": f"Avg. Normalized Density (clipped at {args.clip_percentile}th percentile)",
+        },
+        {
+            "name": "log",
+            "vmax_percentile": None,
+            "transform": "log",
+            "label": "Log₁₀ Avg. Normalized Density",
+        },
+        {
+            "name": "sqrt",
+            "vmax_percentile": None,
+            "transform": "sqrt",
+            "label": "√(Avg. Normalized Density)",
+        },
+    ]
 
-            # Add colorbar
-            cbar = plt.colorbar(im, ax=ax, label="Avg. Normalized Density", fraction=0.046, pad=0.04)
+    for scale_config in scale_configs:
+        scale_type = scale_config["name"]
+        print(f"\n   Creating {scale_type} scale version...")
 
-        # Add title and stats
-        n_flies = data["fly"].nunique()
-        n_points = len(data)
-        ax.set_title(f"{condition}\n{n_flies} flies, {n_points:,} points", fontsize=14, fontweight="bold")
+        # Calculate vmax for this scale type
+        if scale_config["vmax_percentile"] is not None:
+            # Use percentile clipping
+            all_values = []
+            for heatmap in heatmaps.values():
+                if heatmap is not None:
+                    all_values.extend(heatmap[~np.isnan(heatmap)].flatten())
+            if all_values:
+                scale_vmax = np.percentile(all_values, scale_config["vmax_percentile"])
+                print(f"     Using {scale_config['vmax_percentile']}th percentile: {scale_vmax:.6f}")
+            else:
+                scale_vmax = global_vmax
+        else:
+            scale_vmax = None  # Auto-scale
 
-        ax.set_xlim(0, template.shape[1])
-        ax.set_ylim(template.shape[0], 0)
-        ax.set_xlabel("X (template pixels)", fontsize=12)
-        ax.set_ylabel("Y (template pixels)", fontsize=12)
-        ax.set_aspect("equal")
+        # Create fresh figure for each scale type
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 10 * n_rows))
 
-    # Hide empty subplots
-    for idx in range(n_conditions, len(axes)):
-        axes[idx].axis("off")
+        # Handle single subplot case
+        if n_conditions == 1:
+            axes = np.array([axes])
+        axes_flat = axes.flatten() if n_conditions > 1 else axes
 
-    plt.tight_layout()
+        for idx, (condition, data) in enumerate(condition_data.items()):
+            ax = axes_flat[idx]
 
-    # Save figure
-    output_filename = f"aligned_heatmaps_by_{args.group_by}.png"
-    output_path = output_dir / output_filename
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"\n8. Saved heatmap to: {output_path}")
+            # Show template as background (fully opaque to keep it intact)
+            ax.imshow(template_rgb, aspect="auto", alpha=1.0)
 
-    plt.close()
+            # Get pre-computed heatmap
+            heatmap = heatmaps[condition]
 
-    print("\n" + "=" * 70)
-    print("COMPLETE!")
+            if heatmap is not None:
+                cmap = plt.get_cmap("viridis")
+                cmap.set_bad(alpha=0)
+
+                # Apply transformation if requested
+                heatmap_display = heatmap.copy()
+                mask = np.isnan(heatmap_display) | (heatmap_display == 0)
+
+                if scale_config["transform"] == "log":
+                    # Log scale with small epsilon
+                    heatmap_display[~mask] = np.log10(heatmap_display[~mask] + 1e-10)
+                    vmin = None
+                    vmax = None
+                elif scale_config["transform"] == "sqrt":
+                    # Square root scale
+                    heatmap_display[~mask] = np.sqrt(heatmap_display[~mask])
+                    vmin = 0
+                    vmax = np.sqrt(scale_vmax) if scale_vmax is not None else None
+                else:
+                    # Linear (possibly clipped)
+                    vmin = 0
+                    vmax = scale_vmax if scale_vmax is not None else global_vmax
+
+                # Restore NaNs for transparency
+                heatmap_display[mask] = np.nan
+
+                im = ax.imshow(
+                    heatmap_display.T,
+                    extent=[0, template.shape[1], template.shape[0], 0],
+                    origin="upper",
+                    cmap=cmap,
+                    alpha=0.7,
+                    interpolation="bilinear",
+                    vmin=vmin,
+                    vmax=vmax,
+                )
+
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=ax, label=scale_config["label"], fraction=0.046, pad=0.04)
+
+            # Add title and stats
+            n_flies = data["fly"].nunique()
+            n_points = len(data)
+            ax.set_title(f"{condition}\n{n_flies} flies, {n_points:,} points", fontsize=14, fontweight="bold")
+
+            ax.set_xlim(0, template.shape[1])
+            ax.set_ylim(template.shape[0], 0)
+            ax.set_xlabel("X (template pixels)", fontsize=12)
+            ax.set_ylabel("Y (template pixels)", fontsize=12)
+            ax.set_aspect("equal")
+
+        # Hide empty subplots
+        for idx in range(n_conditions, len(axes_flat)):
+            axes_flat[idx].axis("off")
+
+        plt.tight_layout()
+
+        # Save figure
+        output_filename = f"aligned_heatmaps_by_{args.group_by}_{scale_type}.png"
+        output_path = output_dir / output_filename
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
+        print(f"   Saved {scale_type} scale heatmap to: {output_path}")
+
+        plt.close()
+
+    print("\n8. COMPLETE!")
+    print("=" * 70)
+    print(f"Generated linear_clipped, log, and sqrt scale heatmaps for {args.group_by}")
+    print(f"Clipping percentile: {args.clip_percentile}th")
     print("=" * 70)
 
 

@@ -7,6 +7,7 @@ analysis_modes:
   control:
     description: "Control flies tested across pretraining and F1 conditions"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_17_summary_F1_New_Data/summary/pooled_summary.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "f1_condition"  # Column name will be auto-detected with "f1" and "condition"
@@ -22,7 +23,7 @@ analysis_modes:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251013_summary_F1_New_Data/summary/pooled_summary.feather"
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -32,6 +33,7 @@ analysis_modes:
   tnt_mb247:
     description: "TNT MB247 flies tested across pretraining and genotype"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_14_fly_positions_F1_TNT_MB247_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -49,7 +51,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_summary_F1_TNT_MB247_Data/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -58,12 +60,13 @@ analysis_modes:
         permutation_params:
           n_permutations: 10000
           alpha: 0.05
-          bin_size: 8.33  # ~12 bins across 0-100% (avoids over-testing with too many bins)
+          bin_size: 10.0  # 10% bins for permutation tests (0-10, 10-20, ..., 90-100)
           progress: true
 
   tnt_lc10_2:
     description: "TNT LC10-2 flies tested across pretraining and genotype"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -81,7 +84,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_summary_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -90,6 +93,7 @@ analysis_modes:
   tnt_ddc:
     description: "TNT DDC flies tested across pretraining and genotype"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_14_fly_positions_F1_TNT_DDC_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -106,7 +110,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -115,7 +119,7 @@ analysis_modes:
         permutation_params:
           n_permutations: 10000
           alpha: 0.05
-          bin_size: 8.33  # ~12 bins across 0-100% (avoids over-testing with too many bins)
+          bin_size: 10.0  # 10% bins for permutation tests (0-10, 10-20, ..., 90-100)
           progress: true
 
   # Pooled modes - combine data from multiple experiments for shared controls
@@ -140,7 +144,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -149,7 +153,7 @@ analysis_modes:
         permutation_params:
           n_permutations: 10000
           alpha: 0.05
-          bin_size: 8.33
+          bin_size: 10.0
           progress: true
 
   tnt_mb247_pooled:
@@ -173,7 +177,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251014_summary_F1_TNT_MB247_Data/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -182,7 +186,7 @@ analysis_modes:
         permutation_params:
           n_permutations: 10000
           alpha: 0.05
-          bin_size: 8.33
+          bin_size: 10.0
           progress: true
 
   tnt_lc10_2_pooled:
@@ -207,7 +211,7 @@ analysis_modes:
       alternative_summary_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251020_summary_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
       coordinates_plot_params:
-        normalize_methods: ["percentage", "trimmed"]
+        normalize_methods: ["percentage", "trimmed", "adaptive_trimmed"]
         percentage_bin_size: 0.1
         trimmed_time_bin_size: 0.1
         time_window: {start: -10, end: 30}
@@ -251,6 +255,8 @@ analysis_parameters:
       - "normalized_velocity"
       - "auc"
       - "overall_interaction_rate"
+      - "time_to_first_interaction"  # Time until fly first interacts with ball
+      - "ball_proximity_proportion"  # Proportion of time spent near ball (requires position data)
 
     # Pattern-based metric search patterns
     additional_patterns:
