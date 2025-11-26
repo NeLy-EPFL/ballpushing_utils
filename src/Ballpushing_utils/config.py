@@ -88,11 +88,11 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "F1"  # "TNT"
-    time_range: Optional[tuple] = None
+    experiment_type: str = "MagnetBlock"  # "F1"  # "TNT"
+    time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
-    tracks_smoothing: bool = False
+    tracks_smoothing: bool = True
     chamber_radius: int = 50
     rolling_window: int = 10
 
@@ -144,6 +144,11 @@ class Config:
     pause_min_duration: int = 5
 
     backoff_threshold: int = 30
+
+    # Ball movement validation configuration
+    check_spontaneous_ball_movement: bool = True  # Whether to check for ball movement outside interactions
+    spontaneous_movement_threshold: float = 10.0  # Threshold in pixels for spontaneous ball movement detection
+    spontaneous_movement_window: int = 30  # Window size in frames for detecting sustained spontaneous movement
 
     # Skeleton tracking configuration attributes
 

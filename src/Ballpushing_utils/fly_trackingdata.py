@@ -37,9 +37,6 @@ class FlyTrackingData:
                     self.log_missing_fly()
                 return
 
-            # Calculate euclidean distances for all balls (new line)
-            self.calculate_euclidean_distances()
-
         except Exception as e:
             print(f"Error loading files for {self.fly.metadata.name}: {e}")
             self.valid_data = False
@@ -70,10 +67,20 @@ class FlyTrackingData:
                 self.chamber_exit_time = exit_time
 
             # Apply initial time range filter if specified in config
+            # This MUST happen before calculating euclidean distances so the first interaction
+            # is from the filtered time range (e.g., for MagnetBlock starting at 3600s)
             if self.fly.config.time_range:
                 # if self.fly.config.debugging:
                 # print(f"Applying time range filter for {self.fly.metadata.name}: {self.fly.config.time_range}")
                 self.filter_tracking_data(self.fly.config.time_range)
+
+            # Calculate euclidean distances using first interaction as reference
+            # This must happen after time_range filtering so the reference is from filtered data
+            self.calculate_euclidean_distances()
+
+            # Check for spontaneous ball movement (if enabled) - after euclidean distances are calculated
+            if self.fly.config.check_spontaneous_ball_movement:
+                self.check_spontaneous_ball_movement()
 
             # Compute duration as the difference between last and first time
             # Use training ball if available, otherwise use first ball
@@ -307,7 +314,8 @@ class FlyTrackingData:
     def calculate_euclidean_distances(self):
         """
         Calculate euclidean distance for all balls in the tracking data.
-        This is the distance from the ball's initial position.
+        This is the distance from the ball's position at the first interaction (from fly's perspective).
+        If no interactions exist, falls back to the first frame in the filtered dataset.
         """
         if self.balltrack is None:
             return
@@ -315,14 +323,51 @@ class FlyTrackingData:
         for ball_idx in range(len(self.balltrack.objects)):
             ball_data = self.balltrack.objects[ball_idx].dataset
 
-            # Calculate euclidean distance from initial position
+            # Default to first frame in the (possibly filtered) dataset
+            reference_idx = 0  # This is a positional index for iloc
+
+            # Try to get first interaction frame for this ball
+            if hasattr(self, "interaction_events") and self.interaction_events:
+                if 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
+                    events = self.interaction_events[0][ball_idx]
+                    if events and len(events) > 0:
+                        # events[0][0] is the absolute frame number
+                        # We need to find its position in the filtered dataset
+                        interaction_frame = events[0][0]
+
+                        # Check if this frame exists in the filtered data
+                        if interaction_frame in ball_data.index:
+                            # Get the positional index of this frame
+                            reference_idx = ball_data.index.get_loc(interaction_frame)
+                            if self.fly.config.debugging:
+                                print(
+                                    f"Using first interaction frame {interaction_frame} (position {reference_idx}) as reference for ball {ball_idx}"
+                                )
+                        else:
+                            # Frame not in filtered data, use first available frame
+                            reference_idx = 0
+                            if self.fly.config.debugging:
+                                print(
+                                    f"First interaction frame {interaction_frame} not in filtered data, using first frame (position {reference_idx}) for ball {ball_idx}"
+                                )
+
+            # Get reference position using positional index
+            reference_x = ball_data["x_centre"].iloc[reference_idx]
+            reference_y = ball_data["y_centre"].iloc[reference_idx]
+            reference_frame = ball_data.index[reference_idx]  # Get actual frame number for logging
+
+            # Calculate euclidean distance from reference position
             ball_data["euclidean_distance"] = np.sqrt(
-                (ball_data["x_centre"] - ball_data["x_centre"].iloc[0]) ** 2
-                + (ball_data["y_centre"] - ball_data["y_centre"].iloc[0]) ** 2
+                (ball_data["x_centre"] - reference_x) ** 2 + (ball_data["y_centre"] - reference_y) ** 2
             )
 
             # Also add an alias column for learning experiments
             ball_data[f"distance_ball_{ball_idx}"] = ball_data["euclidean_distance"]
+
+            # Store reference information for debugging/analysis
+            ball_data["reference_frame"] = reference_frame
+            ball_data["reference_x"] = reference_x
+            ball_data["reference_y"] = reference_y
 
     def assign_ball_identities(self):
         """
@@ -1153,6 +1198,124 @@ class FlyTrackingData:
 
         return True
 
+    def check_spontaneous_ball_movement(self):
+        """
+        Check for ball movement outside of interaction events.
+        This detects potential issues like:
+        - Ball rolling on its own
+        - Tracking errors
+        - Environmental disturbances
+        - Multiple flies interacting (if not properly detected)
+
+        Issues a warning if significant ball displacement is detected outside of interaction periods.
+        """
+        if self.balltrack is None or self.balltrack.objects is None:
+            if self.fly.config.debugging:
+                print(f"No balltrack data available for spontaneous movement check.")
+            return
+
+        if self.flytrack is None or self.flytrack.objects is None:
+            if self.fly.config.debugging:
+                print(f"No flytrack data available for spontaneous movement check.")
+            return
+
+        # Check each ball
+        for ball_idx in range(len(self.balltrack.objects)):
+            ball_data = self.balltrack.objects[ball_idx].dataset
+
+            # Get ball identity if available
+            ball_identity = self.get_ball_identity(ball_idx)
+            ball_name = ball_identity if ball_identity else f"ball_{ball_idx}"
+
+            # Calculate frame-to-frame ball displacement
+            x_diff = ball_data["x_centre"].diff()
+            y_diff = ball_data["y_centre"].diff()
+            frame_displacement = np.sqrt(x_diff**2 + y_diff**2)
+
+            # Create a mask for frames that are NOT in interaction events
+            interaction_mask = np.zeros(len(ball_data), dtype=bool)
+
+            # Mark all frames that are part of interaction events
+            if self.interaction_events and 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
+                for event in self.interaction_events[0][ball_idx]:
+                    # Each event is [start, end, length]
+                    event_start, event_end = event[0], event[1]
+                    # Add a buffer around interaction events to account for tracking uncertainties
+                    buffer_frames = self.fly.config.gap_between_events * 2  # Use gap_between_events as buffer
+                    start_buffered = max(0, event_start - buffer_frames)
+                    end_buffered = min(len(ball_data), event_end + buffer_frames)
+                    interaction_mask[start_buffered:end_buffered] = True
+
+            # Find frames with significant movement outside interactions
+            non_interaction_mask = ~interaction_mask
+            spontaneous_movement = (
+                frame_displacement[non_interaction_mask] > self.fly.config.spontaneous_movement_threshold
+            )
+
+            if spontaneous_movement.any():
+                # Get indices where spontaneous movement occurred
+                non_interaction_indices = np.where(non_interaction_mask)[0]
+                movement_indices = non_interaction_indices[spontaneous_movement.values]
+
+                # Calculate total spontaneous displacement
+                total_spontaneous_displacement = frame_displacement[non_interaction_mask][spontaneous_movement].sum()
+
+                # Calculate euclidean distance moved during spontaneous events
+                max_spontaneous_displacement = frame_displacement[non_interaction_mask][spontaneous_movement].max()
+
+                # Count consecutive frames with spontaneous movement (sustained movement)
+                consecutive_spontaneous = 0
+                max_consecutive_spontaneous = 0
+                for idx in range(len(frame_displacement)):
+                    if (
+                        non_interaction_mask[idx]
+                        and frame_displacement.iloc[idx] > self.fly.config.spontaneous_movement_threshold
+                    ):
+                        consecutive_spontaneous += 1
+                        max_consecutive_spontaneous = max(max_consecutive_spontaneous, consecutive_spontaneous)
+                    else:
+                        consecutive_spontaneous = 0
+
+                # Issue warning with detailed information
+                warning_msg = (
+                    f"⚠️  WARNING: Spontaneous ball movement detected for {self.fly.metadata.name} ({ball_name})\n"
+                    f"   {len(movement_indices)} frames with movement > {self.fly.config.spontaneous_movement_threshold}px outside interactions\n"
+                    f"   Total spontaneous displacement: {total_spontaneous_displacement:.1f} pixels\n"
+                    f"   Maximum single-frame displacement: {max_spontaneous_displacement:.1f} pixels\n"
+                    f"   Maximum consecutive frames: {max_consecutive_spontaneous} frames ({max_consecutive_spontaneous/self.fly.experiment.fps:.1f}s)\n"
+                )
+
+                # Add examples of when spontaneous movement occurred
+                if len(movement_indices) > 0:
+                    # Show first 3 occurrences
+                    example_frames = movement_indices[:3]
+                    example_times = [idx / self.fly.experiment.fps for idx in example_frames]
+                    warning_msg += f"   Example occurrences at times: {', '.join([f'{t:.1f}s' for t in example_times])}"
+                    if len(movement_indices) > 3:
+                        warning_msg += f" (and {len(movement_indices) - 3} more)"
+                    warning_msg += "\n"
+
+                # Additional context based on experiment type
+                if hasattr(self.fly.config, "experiment_type"):
+                    if self.fly.config.experiment_type == "F1":
+                        warning_msg += (
+                            "   Note: For F1 experiments, check if this is the test ball moving before corridor exit\n"
+                        )
+                    warning_msg += "   Possible causes: ball rolling, tracking errors, environmental disturbances, or undetected fly interactions\n"
+
+                warning_msg += (
+                    "   Consider: checking video, adjusting interaction threshold, or marking this fly for review"
+                )
+
+                print(warning_msg)
+
+                # Optionally log to file if logging is enabled
+                if self.log_missing and hasattr(self.fly.config, "log_path"):
+                    with open(f"{self.fly.config.log_path}/spontaneous_ball_movement.log", "a") as f:
+                        f.write(
+                            f"{self.fly.metadata.name},{ball_name},{len(movement_indices)},{total_spontaneous_displacement:.1f},{max_spontaneous_displacement:.1f},{max_consecutive_spontaneous}\n"
+                        )
+
     def check_dying(self):
         """
         Check if in the fly tracking data, there is any time where the fly doesn't move more than 30 pixels for 15 minutes.
@@ -1476,6 +1639,88 @@ class FlyTrackingData:
             del self._interactions_onsets
         if hasattr(self, "_interactions_offsets"):
             del self._interactions_offsets
+
+    def get_spontaneous_movement_summary(self, ball_idx=0):
+        """
+        Get a summary of spontaneous ball movement for a specific ball.
+
+        Parameters
+        ----------
+        ball_idx : int
+            Index of the ball to analyze (default 0)
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - num_spontaneous_frames: Number of frames with spontaneous movement
+            - total_displacement: Total displacement during spontaneous movement
+            - max_displacement: Maximum single-frame displacement
+            - max_consecutive_frames: Longest sequence of consecutive spontaneous movement
+            - spontaneous_movement_times: List of times when spontaneous movement occurred
+        """
+        if self.balltrack is None or ball_idx >= len(self.balltrack.objects):
+            return None
+
+        ball_data = self.balltrack.objects[ball_idx].dataset
+
+        # Calculate frame-to-frame displacement
+        x_diff = ball_data["x_centre"].diff()
+        y_diff = ball_data["y_centre"].diff()
+        frame_displacement = np.sqrt(x_diff**2 + y_diff**2)
+
+        # Create interaction mask
+        interaction_mask = np.zeros(len(ball_data), dtype=bool)
+        if self.interaction_events and 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
+            for event_start, event_end in self.interaction_events[0][ball_idx]:
+                buffer_frames = self.fly.config.gap_between_events * 2
+                start_buffered = max(0, event_start - buffer_frames)
+                end_buffered = min(len(ball_data), event_end + buffer_frames)
+                interaction_mask[start_buffered:end_buffered] = True
+
+        # Find spontaneous movement
+        non_interaction_mask = ~interaction_mask
+        spontaneous_movement = frame_displacement[non_interaction_mask] > self.fly.config.spontaneous_movement_threshold
+
+        if not spontaneous_movement.any():
+            return {
+                "num_spontaneous_frames": 0,
+                "total_displacement": 0.0,
+                "max_displacement": 0.0,
+                "max_consecutive_frames": 0,
+                "spontaneous_movement_times": [],
+            }
+
+        # Calculate metrics
+        non_interaction_indices = np.where(non_interaction_mask)[0]
+        movement_indices = non_interaction_indices[spontaneous_movement.values]
+
+        total_displacement = frame_displacement[non_interaction_mask][spontaneous_movement].sum()
+        max_displacement = frame_displacement[non_interaction_mask][spontaneous_movement].max()
+
+        # Find max consecutive frames
+        consecutive_count = 0
+        max_consecutive = 0
+        for idx in range(len(frame_displacement)):
+            if (
+                non_interaction_mask[idx]
+                and frame_displacement.iloc[idx] > self.fly.config.spontaneous_movement_threshold
+            ):
+                consecutive_count += 1
+                max_consecutive = max(max_consecutive, consecutive_count)
+            else:
+                consecutive_count = 0
+
+        # Get times of spontaneous movement
+        movement_times = [idx / self.fly.experiment.fps for idx in movement_indices]
+
+        return {
+            "num_spontaneous_frames": len(movement_indices),
+            "total_displacement": float(total_displacement),
+            "max_displacement": float(max_displacement),
+            "max_consecutive_frames": int(max_consecutive),
+            "spontaneous_movement_times": movement_times,
+        }
 
     def log_missing_fly(self):
         """Log the metadata of flies that do not pass the validity test."""

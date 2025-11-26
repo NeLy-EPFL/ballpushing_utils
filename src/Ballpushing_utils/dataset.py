@@ -313,7 +313,14 @@ class Dataset:
         for i, data in enumerate(balldata):
             dataset[f"x_ball_{i}"] = data["x_centre"] - fly.tracking_data.start_x
             dataset[f"y_ball_{i}"] = data["y_centre"] - fly.tracking_data.start_y
-            dataset[f"distance_ball_{i}"] = np.sqrt(dataset[f"x_ball_{i}"].pow(2) + dataset[f"y_ball_{i}"].pow(2))
+            # Use pre-computed euclidean_distance which accounts for first interaction reference
+            if f"distance_ball_{i}" in data.columns:
+                dataset[f"distance_ball_{i}"] = data[f"distance_ball_{i}"]
+            elif "euclidean_distance" in data.columns:
+                dataset[f"distance_ball_{i}"] = data["euclidean_distance"]
+            else:
+                # Fallback: calculate from fly start position
+                dataset[f"distance_ball_{i}"] = np.sqrt(dataset[f"x_ball_{i}"].pow(2) + dataset[f"y_ball_{i}"].pow(2))
 
         # Downsample the dataset if required
         if downsampling_factor:
