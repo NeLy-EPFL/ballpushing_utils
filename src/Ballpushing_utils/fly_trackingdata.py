@@ -74,13 +74,17 @@ class FlyTrackingData:
                 # print(f"Applying time range filter for {self.fly.metadata.name}: {self.fly.config.time_range}")
                 self.filter_tracking_data(self.fly.config.time_range)
 
-            # Calculate euclidean distances using first interaction as reference
-            # This must happen after time_range filtering so the reference is from filtered data
+            # Calculate euclidean distances from initial ball position
+            # This happens after time_range filtering so reference is first frame of filtered data
             self.calculate_euclidean_distances()
 
-            # Check for spontaneous ball movement (if enabled) - after euclidean distances are calculated
+            # Check for spontaneous ball movement (if enabled) and invalidate fly if detected
             if self.fly.config.check_spontaneous_ball_movement:
-                self.check_spontaneous_ball_movement()
+                has_spontaneous_movement = self.check_spontaneous_ball_movement()
+                if has_spontaneous_movement:
+                    print(f"❌ Invalidating {self.fly.metadata.name} due to significant spontaneous ball movement")
+                    self.valid_data = False
+                    return
 
             # Compute duration as the difference between last and first time
             # Use training ball if available, otherwise use first ball
@@ -314,8 +318,7 @@ class FlyTrackingData:
     def calculate_euclidean_distances(self):
         """
         Calculate euclidean distance for all balls in the tracking data.
-        This is the distance from the ball's position at the first interaction (from fly's perspective).
-        If no interactions exist, falls back to the first frame in the filtered dataset.
+        This is the distance from the ball's initial position (first frame in the filtered dataset).
         """
         if self.balltrack is None:
             return
@@ -323,40 +326,15 @@ class FlyTrackingData:
         for ball_idx in range(len(self.balltrack.objects)):
             ball_data = self.balltrack.objects[ball_idx].dataset
 
-            # Default to first frame in the (possibly filtered) dataset
-            reference_idx = 0  # This is a positional index for iloc
-
-            # Try to get first interaction frame for this ball
-            if hasattr(self, "interaction_events") and self.interaction_events:
-                if 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
-                    events = self.interaction_events[0][ball_idx]
-                    if events and len(events) > 0:
-                        # events[0][0] is the absolute frame number
-                        # We need to find its position in the filtered dataset
-                        interaction_frame = events[0][0]
-
-                        # Check if this frame exists in the filtered data
-                        if interaction_frame in ball_data.index:
-                            # Get the positional index of this frame
-                            reference_idx = ball_data.index.get_loc(interaction_frame)
-                            if self.fly.config.debugging:
-                                print(
-                                    f"Using first interaction frame {interaction_frame} (position {reference_idx}) as reference for ball {ball_idx}"
-                                )
-                        else:
-                            # Frame not in filtered data, use first available frame
-                            reference_idx = 0
-                            if self.fly.config.debugging:
-                                print(
-                                    f"First interaction frame {interaction_frame} not in filtered data, using first frame (position {reference_idx}) for ball {ball_idx}"
-                                )
+            # Always use first frame in the (possibly filtered) dataset
+            reference_idx = 0  # First frame position
 
             # Get reference position using positional index
             reference_x = ball_data["x_centre"].iloc[reference_idx]
             reference_y = ball_data["y_centre"].iloc[reference_idx]
             reference_frame = ball_data.index[reference_idx]  # Get actual frame number for logging
 
-            # Calculate euclidean distance from reference position
+            # Calculate euclidean distance from initial ball position
             ball_data["euclidean_distance"] = np.sqrt(
                 (ball_data["x_centre"] - reference_x) ** 2 + (ball_data["y_centre"] - reference_y) ** 2
             )
@@ -368,6 +346,11 @@ class FlyTrackingData:
             ball_data["reference_frame"] = reference_frame
             ball_data["reference_x"] = reference_x
             ball_data["reference_y"] = reference_y
+
+            if self.fly.config.debugging:
+                print(
+                    f"Using first frame {reference_frame} (position {reference_idx}) as reference for ball {ball_idx}"
+                )
 
     def assign_ball_identities(self):
         """
@@ -1207,17 +1190,20 @@ class FlyTrackingData:
         - Environmental disturbances
         - Multiple flies interacting (if not properly detected)
 
-        Issues a warning if significant ball displacement is detected outside of interaction periods.
+        Returns:
+            bool: True if significant spontaneous movement detected (fly should be invalidated), False otherwise
         """
         if self.balltrack is None or self.balltrack.objects is None:
             if self.fly.config.debugging:
                 print(f"No balltrack data available for spontaneous movement check.")
-            return
+            return False
 
         if self.flytrack is None or self.flytrack.objects is None:
             if self.fly.config.debugging:
                 print(f"No flytrack data available for spontaneous movement check.")
-            return
+            return False
+
+        has_significant_spontaneous_movement = False
 
         # Check each ball
         for ball_idx in range(len(self.balltrack.objects)):
@@ -1315,6 +1301,11 @@ class FlyTrackingData:
                         f.write(
                             f"{self.fly.metadata.name},{ball_name},{len(movement_indices)},{total_spontaneous_displacement:.1f},{max_spontaneous_displacement:.1f},{max_consecutive_spontaneous}\n"
                         )
+
+                # Mark that significant spontaneous movement was detected
+                has_significant_spontaneous_movement = True
+
+        return has_significant_spontaneous_movement
 
     def check_dying(self):
         """

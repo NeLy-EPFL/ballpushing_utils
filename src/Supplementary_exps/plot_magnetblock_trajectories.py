@@ -36,7 +36,7 @@ from tqdm import tqdm
 
 def load_coordinates_dataset():
     """Load the MagnetBlock experiments coordinates dataset"""
-    dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251125_14_summary_magnet_block_folders_Data/coordinates/pooled_coordinates.feather"
+    dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251126_10_coordinates_magnet_block_folders_Data/coordinates/pooled_coordinates.feather"
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
@@ -240,7 +240,7 @@ def create_trajectory_plot(
 ):
     """
     Create a trajectory plot comparing Magnet to non-Magnet conditions.
-    Shows only mean trajectories with 95% confidence intervals.
+    Uses seaborn lineplot for mean ± CI visualization.
 
     Parameters:
     -----------
@@ -273,141 +273,115 @@ def create_trajectory_plot(
         return
 
     # Determine control and test groups
-    # Assuming alphabetical order: "Magnet" comes before "non-Magnet"
-    if "Magnet" in groups and "non-Magnet" in groups:
-        control_group = "non-Magnet"
-        test_group = "Magnet"
+    # Map to labels: "n" -> "Control", "y" -> "Magnet block"
+    if "n" in groups and "y" in groups:
+        control_group = "n"
+        test_group = "y"
+        data = data.copy()
+        data["label"] = data[group_col].apply(lambda x: "Magnet block" if x == "y" else "Control")
+        group_col_plot = "label"
     else:
         control_group = groups[0]
         test_group = groups[1]
+        group_col_plot = group_col
+
+    # Downsample data for plotting (every 290 frames as in notebook)
+    print(f"  Downsampling data for plotting...")
+    data_ds = data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :]).reset_index(drop=True)
+    print(f"  Downsampled from {len(data)} to {len(data_ds)} points")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=(12, 7))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
-    # Color palette - red for control, blue for test
-    colors = {control_group: "#e74c3c", test_group: "#3498db"}
+    # Color palette - blue for Magnet block, orange for Control (matching notebook)
+    label_colors = {"Magnet block": "blue", "Control": "orange"}
 
-    # Find earliest interaction event onset after 3600 seconds
-    earliest_onset_time = None
-    if "interaction_event_onset" in data.columns:
-        # Get all rows with interaction event onsets (non-NaN) and time >= 3600
-        onset_data = data[(data["interaction_event_onset"].notna()) & (data[time_col] >= 3600)]
-        if len(onset_data) > 0:
-            earliest_onset_time = onset_data[time_col].min()
-            print(f"  Earliest interaction event onset after 3600s: {earliest_onset_time:.1f}s")
-        else:
-            print("  Warning: No interaction event onsets found after 3600s")
-    else:
-        print("  Warning: 'interaction_event_onset' column not found in data")
+    # Plot using seaborn lineplot (gives mean ± CI automatically)
+    sns.lineplot(data=data_ds, x=time_col, y=value_col, hue=group_col_plot, palette=label_colors, ax=ax)
 
-    # Plot mean trajectories with 95% confidence intervals
-    for group in groups:
-        group_data = data[data[group_col] == group]
+    # Set x-axis limits first (3600 to 7200 seconds = 60 to 120 minutes)
+    ax.set_xlim(3600, 7200)
 
-        # Group by time to compute mean and 95% CI
-        grouped = group_data.groupby(time_col)[value_col]
+    # Get current y-axis limits and extend them to make room for significance annotations
+    y_min, y_max = ax.get_ylim()
+    y_range = y_max - y_min
 
-        # Calculate statistics
-        means = grouped.mean()
-        sems = grouped.sem()
-        counts = grouped.count()
+    # Extend y-axis by 15% to make room for significance stars
+    ax.set_ylim(y_min, y_max + 0.15 * y_range)
 
-        # Calculate 95% CI using t-distribution
-        ci_values = sems * counts.apply(lambda n: stats.t.ppf(0.975, n - 1) if n > 1 else 0)
+    # Update y_max after extension
+    y_max_extended = y_max + 0.15 * y_range
 
-        # Create DataFrame
-        time_grouped = pd.DataFrame({"time": means.index, "mean": means.values, "ci": ci_values.values})
-
-        # Plot mean line
-        ax.plot(time_grouped["time"], time_grouped["mean"], color=colors[group], linewidth=3, label=group, zorder=10)
-
-        # Plot 95% confidence interval
-        ax.fill_between(
-            time_grouped["time"],
-            time_grouped["mean"] - time_grouped["ci"],
-            time_grouped["mean"] + time_grouped["ci"],
-            color=colors[group],
-            alpha=0.3,
-            zorder=5,
-        )
-
-    # Draw vertical dotted lines for time bins
+    # Calculate time bin edges
     time_min = data[time_col].min()
     time_max = data[time_col].max()
-    bin_edges = np.linspace(time_min, time_max, n_bins + 1)
+    bin_width = (time_max - time_min) / n_bins
 
-    for edge in bin_edges:
-        ax.axvline(edge, color="gray", linestyle="dotted", alpha=0.5, zorder=1)
-
-    # Annotate significance levels
+    # Draw vertical dotted lines for time bins and annotate significance
     if permutation_results is not None:
-        y_max = data[value_col].max()
-        y_annotation = y_max * 1.05
+        significant_bins = permutation_results["significant_timepoints"]
 
-        for idx in permutation_results["significant_timepoints"]:
-            bin_start = bin_edges[idx]
-            bin_end = bin_edges[idx + 1]
-            x_pos = (bin_start + bin_end) / 2
+        for time_bin in range(n_bins):
+            bin_start = time_min + time_bin * bin_width
+            bin_end = bin_start + bin_width
 
-            p_value = permutation_results["p_values"][idx]
+            # Draw faint dotted lines for bins
+            ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
+            ax.axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
 
-            if p_value < 0.001:
-                significance = "***"
-            elif p_value < 0.01:
-                significance = "**"
-            elif p_value < 0.05:
-                significance = "*"
-            else:
-                significance = ""
+            # Annotate significance levels
+            if time_bin in significant_bins:
+                p_value = permutation_results["p_values"][time_bin]
 
-            if significance:
-                ax.annotate(
-                    significance,
-                    xy=(x_pos, y_annotation),
-                    ha="center",
-                    va="bottom",
-                    fontsize=16,
-                    color="red",
-                    fontweight="bold",
-                    zorder=15,
-                )
+                if p_value < 0.001:
+                    significance = "***"
+                elif p_value < 0.01:
+                    significance = "**"
+                elif p_value < 0.05:
+                    significance = "*"
+                else:
+                    significance = ""
 
-    # Set x-axis limits based on earliest interaction onset
-    if earliest_onset_time is not None:
-        # Start from earliest onset, end at data maximum
-        x_max = data[time_col].max()
-        ax.set_xlim(earliest_onset_time, x_max)
-        print(f"  X-axis range: {earliest_onset_time:.1f}s to {x_max:.1f}s")
+                if significance:
+                    # Position stars at top of plot (just below the extended limit)
+                    # Use 92% of the extended max to ensure they're visible
+                    y_position = y_max + 0.05 * y_range
+                    ax.text(
+                        bin_start + bin_width / 2,
+                        y_position,
+                        significance,
+                        ha="center",
+                        va="bottom",
+                        fontsize=16,
+                        color="red",
+                        fontweight="bold",
+                    )
+
+    # Set x-axis ticks: every 10 min from 60 min to 120 min
+    xticks = list(range(3600, 7201, 600))
+    xticklabels = [f"{int(x//60)} min" for x in xticks]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
 
     # Formatting
-    ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (px)", fontsize=14)
-    ax.set_title(f"Ball Trajectory: {test_group} vs {control_group}\n(Mean ± 95% CI, Permutation test)", fontsize=16)
-    ax.legend(fontsize=12, loc="best")
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("Time", fontsize=12)
+    ax.set_ylabel("Ball distance from start (px)", fontsize=12)
 
-    # Add sample sizes to legend
-    n_control = data[data[group_col] == control_group][subject_col].nunique()
-    n_test = data[data[group_col] == test_group][subject_col].nunique()
-    ax.text(
-        0.02,
-        0.98,
-        f"n({control_group})={n_control}, n({test_group})={n_test}",
-        transform=ax.transAxes,
-        fontsize=10,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
-    )
+    # Set legend position to lower right
+    ax.legend(loc="lower right", fontsize=12)
 
     plt.tight_layout()
 
     # Save plot
     if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        # Also save as PNG
+        # Save as PDF and PNG
+        pdf_path = output_path.with_suffix(".pdf")
         png_path = output_path.with_suffix(".png")
-        plt.savefig(png_path, dpi=300, bbox_inches="tight")
-        print(f"  Saved PDF: {output_path}")
+
+        plt.savefig(pdf_path, format="pdf", dpi=300, bbox_inches="tight")
+        plt.savefig(png_path, format="png", dpi=300, bbox_inches="tight")
+
+        print(f"  Saved PDF: {pdf_path}")
         print(f"  Saved PNG: {png_path}")
 
     plt.close()
@@ -457,9 +431,9 @@ def generate_trajectory_plot(data, n_bins=12, n_permutations=10000, output_dir=N
         raise ValueError(f"Expected 2 Magnet groups, found {len(groups)}: {groups}")
 
     # Determine control and test groups
-    if "Magnet" in groups and "non-Magnet" in groups:
-        control_group = "non-Magnet"
-        test_group = "Magnet"
+    if "n" in groups and "y" in groups:
+        control_group = "n"
+        test_group = "y"
     else:
         control_group = groups[0]
         test_group = groups[1]

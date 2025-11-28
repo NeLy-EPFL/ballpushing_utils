@@ -1027,6 +1027,26 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
                 0.5, bar_height + 0.02 * y_range, sig_level, ha="center", va="bottom", fontsize=12, fontname="Arial"
             )
 
+        # Add p-value text in top-left corner of plot
+        if p_value < 0.001:
+            p_text = f"p < 0.001"
+        elif p_value < 0.01:
+            p_text = f"p = {p_value:.3f}"
+        else:
+            p_text = f"p = {p_value:.3f}"
+
+        ax.text(
+            0.02,
+            0.98,
+            p_text,
+            transform=ax.transAxes,
+            fontsize=10,
+            fontname="Arial",
+            verticalalignment="top",
+            horizontalalignment="left",
+            bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
+        )
+
         # Clean formatting - no grid, white background, with tick marks
         ax.set_facecolor("white")
         fig.patch.set_facecolor("white")
@@ -1508,6 +1528,32 @@ def create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition=
                         fontsize=12,
                         fontname="Arial",
                     )
+
+        # Add p-value text box in top-left corner (for 2-group comparison)
+        if n_conditions == 2:
+            # Get the p-value from the single comparison
+            non_control_conditions = [c for c in significance_results.keys()]
+            if len(non_control_conditions) == 1:
+                p_value = significance_results[non_control_conditions[0]]["p_value"]
+
+                if p_value < 0.001:
+                    p_text = f"p < 0.001"
+                elif p_value < 0.01:
+                    p_text = f"p = {p_value:.3f}"
+                else:
+                    p_text = f"p = {p_value:.3f}"
+
+                ax.text(
+                    0.02,
+                    0.98,
+                    p_text,
+                    transform=ax.transAxes,
+                    fontsize=10,
+                    fontname="Arial",
+                    verticalalignment="top",
+                    horizontalalignment="left",
+                    bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
+                )
 
     # Set x-axis labels using mapped informative labels
     ax.set_xticks(x_positions)

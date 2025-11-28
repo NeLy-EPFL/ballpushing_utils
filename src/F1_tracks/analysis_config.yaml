@@ -33,7 +33,7 @@ analysis_modes:
   tnt_mb247:
     description: "TNT MB247 flies tested across pretraining and genotype"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
-    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_14_fly_positions_F1_TNT_MB247_Data/fly_positions/pooled_fly_positions.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251126_13_fly_positions_F1_TNT_MB247_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"

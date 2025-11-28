@@ -198,6 +198,143 @@ class F1AnalysisFramework:
             print(f"\n  ℹ️  No additional data pooled, using primary dataset only")
             return df_primary
 
+    def _load_fly_positions_data(self, mode):
+        """Load fly positions data for the specified mode, with support for pooled modes."""
+        mode_config = self.config["analysis_modes"][mode]
+
+        # Check if this is a pooled mode
+        if "primary_dataset" in mode_config:
+            return self._load_pooled_fly_positions(mode, mode_config)
+
+        # Regular mode - load single fly positions dataset
+        fly_positions_path = mode_config.get("fly_positions_path")
+
+        if not fly_positions_path:
+            print("ℹ️  No fly_positions_path specified for this mode")
+            return None
+
+        try:
+            df_positions = pd.read_feather(fly_positions_path)
+            print(f"✓ Loaded fly positions data: {df_positions.shape}")
+            return df_positions
+        except Exception as e:
+            print(f"⚠️  Could not load fly positions data: {e}")
+            return None
+
+    def _load_pooled_fly_positions(self, mode, mode_config):
+        """Load and combine fly positions data for pooled analysis."""
+        print(f"\n🔄 Loading pooled fly positions data for mode: {mode}")
+
+        # Get primary dataset mode
+        primary_mode = mode_config["primary_dataset"]
+        primary_config = self.config["analysis_modes"][primary_mode]
+
+        # Load primary fly positions dataset
+        print(f"  📁 Loading primary fly positions from: {primary_mode}")
+        primary_positions_path = primary_config.get("fly_positions_path")
+
+        if not primary_positions_path:
+            print(f"  ⚠️  No fly_positions_path in primary mode '{primary_mode}'")
+            return None
+
+        try:
+            df_positions_primary = pd.read_feather(primary_positions_path)
+            print(f"  ✓ Primary fly positions loaded: {df_positions_primary.shape}")
+        except Exception as e:
+            print(f"  ❌ Error loading primary fly positions: {e}")
+            return None
+
+        # Get genotypes to pool
+        shared_genotypes = mode_config.get("shared_genotypes", [])
+        pool_from_modes = mode_config.get("pool_from_modes", [])
+
+        if not shared_genotypes or not pool_from_modes:
+            print("  ℹ️  No shared genotypes or pool_from_modes specified, using primary fly positions only")
+            return df_positions_primary
+
+        # Find genotype column in primary dataset
+        genotype_col = None
+        for col in df_positions_primary.columns:
+            if "genotype" in col.lower():
+                genotype_col = col
+                break
+
+        if not genotype_col:
+            print("  ⚠️  Could not find genotype column in fly positions, using primary data only")
+            return df_positions_primary
+
+        # Collect pooled fly positions data for shared genotypes
+        pooled_positions_dfs = [df_positions_primary]
+
+        for pool_mode in pool_from_modes:
+            if pool_mode not in self.config["analysis_modes"]:
+                print(f"  ⚠️  Mode '{pool_mode}' not found in config, skipping")
+                continue
+
+            pool_config = self.config["analysis_modes"][pool_mode]
+
+            # Skip if this is also a pooled mode (avoid recursion)
+            if "primary_dataset" in pool_config:
+                print(f"  ⚠️  Skipping pooled mode '{pool_mode}' to avoid recursion")
+                continue
+
+            # Get fly positions path for this pool mode
+            pool_positions_path = pool_config.get("fly_positions_path")
+            if not pool_positions_path:
+                print(f"  ⚠️  No fly_positions_path in mode '{pool_mode}', skipping")
+                continue
+
+            try:
+                print(f"  📁 Loading fly positions from: {pool_mode}")
+                df_pool_positions = pd.read_feather(pool_positions_path)
+
+                # Filter for shared genotypes only
+                if genotype_col in df_pool_positions.columns:
+                    df_pool_positions_filtered = df_pool_positions[
+                        df_pool_positions[genotype_col].isin(shared_genotypes)
+                    ]
+
+                    if len(df_pool_positions_filtered) > 0:
+                        # Count unique flies
+                        n_flies = (
+                            df_pool_positions_filtered["fly"].nunique()
+                            if "fly" in df_pool_positions_filtered.columns
+                            else "?"
+                        )
+                        print(
+                            f"  ✓ Added {len(df_pool_positions_filtered)} position frames from {pool_mode} "
+                            f"({n_flies} flies, {', '.join(shared_genotypes)})"
+                        )
+                        pooled_positions_dfs.append(df_pool_positions_filtered)
+                    else:
+                        print(f"  ⚠️  No matching genotypes found in {pool_mode} fly positions")
+                else:
+                    print(f"  ⚠️  Genotype column not found in {pool_mode} fly positions")
+
+            except Exception as e:
+                print(f"  ⚠️  Error loading fly positions from {pool_mode}: {e}")
+
+        # Combine all fly positions datasets
+        if len(pooled_positions_dfs) > 1:
+            df_combined_positions = pd.concat(pooled_positions_dfs, ignore_index=True)
+            n_flies = df_combined_positions["fly"].nunique() if "fly" in df_combined_positions.columns else "?"
+            print(
+                f"\n  ✅ Pooled fly positions created: {df_combined_positions.shape} "
+                f"({n_flies} flies, from {len(pooled_positions_dfs)} sources)"
+            )
+
+            # Print genotype distribution
+            if genotype_col in df_combined_positions.columns:
+                print(f"\n  📊 Genotype distribution in pooled fly positions:")
+                genotype_fly_counts = df_combined_positions.groupby(genotype_col)["fly"].nunique()
+                for genotype, count in genotype_fly_counts.items():
+                    print(f"     {genotype}: {count} flies")
+
+            return df_combined_positions
+        else:
+            print(f"\n  ℹ️  No additional fly positions pooled, using primary data only")
+            return df_positions_primary
+
     def detect_columns(self, df, mode):
         """Auto-detect column names based on patterns."""
         mode_config = self.config["analysis_modes"][mode]
@@ -1091,10 +1228,15 @@ class F1AnalysisFramework:
 
         return df_enriched
 
-    def analyze_boxplots(self, mode, metric_type=None):
+    def analyze_boxplots(self, mode, metric_type=None, test_type="both"):
         """Analyze continuous metrics using boxplots with scatter overlay and pairwise comparisons.
 
         If metric_type is None, analyzes all available metrics from the config.
+
+        Args:
+            mode: Analysis mode (control, tnt_mb247, tnt_lc10_2, tnt_ddc, etc.)
+            metric_type: Specific metric to analyze, or None for all metrics
+            test_type: Statistical test to use ('mannwhitney', 'permutation', or 'both')
         """
         # Load and prepare data
         df = self.load_dataset(mode)
@@ -1102,23 +1244,11 @@ class F1AnalysisFramework:
             return
 
         # Try to load fly positions data for ball proximity calculation
-        mode_config = self.config["analysis_modes"][mode]
+        df_positions = self._load_fly_positions_data(mode)
 
-        # Handle pooled modes - get primary mode config
-        if "primary_dataset" in mode_config:
-            primary_mode = mode_config["primary_dataset"]
-            primary_config = self.config["analysis_modes"][primary_mode]
-            fly_positions_path = primary_config.get("fly_positions_path")
-        else:
-            fly_positions_path = mode_config.get("fly_positions_path")
-
-        # Try to load fly positions data if path is provided
-        df_positions = None
-        if fly_positions_path:
+        # Calculate ball proximity if fly positions data is available
+        if df_positions is not None:
             try:
-                df_positions = pd.read_feather(fly_positions_path)
-                print(f"✓ Loaded fly positions data: {df_positions.shape}")
-
                 # Calculate ball proximity metric
                 proximity_data = self.calculate_ball_proximity_time(df_positions)
 
@@ -1132,7 +1262,7 @@ class F1AnalysisFramework:
                     )
                     print(f"✓ Added 'ball_proximity_proportion' metric to dataset")
             except Exception as e:
-                print(f"⚠️  Could not load fly positions data: {e}")
+                print(f"⚠️  Error calculating ball proximity: {e}")
                 print("   Ball proximity metric will not be available")
 
         detected_cols = self.detect_columns(df, mode)
@@ -1232,14 +1362,28 @@ class F1AnalysisFramework:
             print(f"  Data shape: {df_metric.shape}")
 
             # Perform pairwise comparisons and create plots
-            if mode == "control":
-                metric_results = self._create_control_boxplots_with_pairwise(df_metric, detected_cols, metric_col, mode)
-            else:  # TNT modes
-                metric_results = self._create_tnt_boxplots_with_pairwise(df_metric, detected_cols, metric_col, mode)
+            # Create separate plots for each test type
+            test_types = []
+            if test_type == "both":
+                test_types = ["mannwhitney", "permutation"]
+            else:
+                test_types = [test_type]
 
-            # Store results
-            if metric_results:
-                all_results.append({"metric": metric_col, "results": metric_results})
+            for current_test in test_types:
+                print(f"  Creating plots with {current_test} test...")
+
+                if mode == "control":
+                    metric_results = self._create_control_boxplots_with_pairwise(
+                        df_metric, detected_cols, metric_col, mode, test_type=current_test
+                    )
+                else:  # TNT modes
+                    metric_results = self._create_tnt_boxplots_with_pairwise(
+                        df_metric, detected_cols, metric_col, mode, test_type=current_test
+                    )
+
+                # Store results
+                if metric_results:
+                    all_results.append({"metric": metric_col, "results": metric_results, "test_type": current_test})
 
         # Generate markdown summary
         if all_results:
@@ -1604,7 +1748,7 @@ class F1AnalysisFramework:
 
         return ax
 
-    def _create_control_boxplots_with_pairwise(self, data, cols, metric_col, mode):
+    def _create_control_boxplots_with_pairwise(self, data, cols, metric_col, mode, test_type="mannwhitney"):
         """Create boxplots for control mode with pairwise comparisons."""
         plot_config = self.config["plot_styling"][mode]
 
@@ -1619,6 +1763,7 @@ class F1AnalysisFramework:
             ax1,
             mode,
             "pretraining",
+            test_type=test_type,
         )
 
         # Plot by secondary grouping with pairwise stats
@@ -1630,17 +1775,20 @@ class F1AnalysisFramework:
             ax2,
             mode,
             "f1_condition",
+            test_type=test_type,
         )
 
         plt.tight_layout()
-        self._save_plot(fig, f"{metric_col}_boxplots", mode)
+        # Add test type to filename
+        test_suffix = "_permutation" if test_type == "permutation" else "_mannwhitney"
+        self._save_plot(fig, f"{metric_col}_boxplots{test_suffix}", mode)
 
         return {
             "primary": results_primary,
             "secondary": results_secondary,
         }
 
-    def _create_tnt_boxplots_with_pairwise(self, data, cols, metric_col, mode):
+    def _create_tnt_boxplots_with_pairwise(self, data, cols, metric_col, mode, test_type="mannwhitney"):
         """Create boxplots for TNT modes with pairwise comparisons."""
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
 
@@ -1653,17 +1801,24 @@ class F1AnalysisFramework:
             f"{metric_col.replace('_', ' ').title()} by {cols['primary'].title()} + {cols['secondary'].title()}",
             ax,
             mode,
+            test_type=test_type,
         )
 
         plt.tight_layout()
-        self._save_plot(fig, f"{metric_col}_boxplots", mode)
+        # Add test type to filename
+        test_suffix = "_permutation" if test_type == "permutation" else "_mannwhitney"
+        self._save_plot(fig, f"{metric_col}_boxplots{test_suffix}", mode)
 
         return {
             "combined": results_combined,
         }
 
-    def _create_boxplot_with_pairwise(self, data, x_col, y_col, title, ax, mode, var_type):
-        """Create boxplot with scatter overlay and pairwise comparisons."""
+    def _create_boxplot_with_pairwise(self, data, x_col, y_col, title, ax, mode, var_type, test_type="mannwhitney"):
+        """Create boxplot with scatter overlay and pairwise comparisons.
+
+        Args:
+            test_type: 'mannwhitney' or 'permutation' - determines which statistical test to use
+        """
         # Get ordering and colors
         unique_values = sorted(data[x_col].unique())
         color_mapping = self.create_color_mapping(mode, unique_values, var_type)
@@ -1716,22 +1871,25 @@ class F1AnalysisFramework:
 
         if len(groups) >= 2:
             # Perform all pairwise comparisons
-            p_values_mean = []
-            p_values_median = []
+            p_values = []
             comparisons = []
 
             for i in range(len(groups)):
                 for j in range(i + 1, len(groups)):
-                    # Permutation tests for this pair
-                    p_mean, diff_mean = self._permutation_test(
-                        [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
-                    )
-                    p_median, diff_median = self._permutation_test(
-                        [groups[i], groups[j]], lambda x: [np.median(g) for g in x]
-                    )
+                    # Choose statistical test based on test_type
+                    if test_type == "permutation":
+                        # Permutation test for mean difference
+                        p_value, diff_value = self._permutation_test(
+                            [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                        )
+                    else:  # mannwhitney
+                        # Mann-Whitney U test
+                        from scipy.stats import mannwhitneyu
 
-                    p_values_mean.append(p_mean)
-                    p_values_median.append(p_median)
+                        statistic, p_value = mannwhitneyu(groups[i], groups[j], alternative="two-sided")
+                        diff_value = np.median(groups[i]) - np.median(groups[j])
+
+                    p_values.append(p_value)
                     comparisons.append((group_names[i], group_names[j]))
 
                     # Store detailed results
@@ -1745,24 +1903,20 @@ class F1AnalysisFramework:
                             "mean2": np.mean(groups[j]),
                             "median1": np.median(groups[i]),
                             "median2": np.median(groups[j]),
-                            "p_mean_raw": p_mean,
-                            "p_median_raw": p_median,
-                            "mean_diff": diff_mean,
-                            "median_diff": diff_median,
+                            "p_value_raw": p_value,
+                            "diff_value": diff_value,
+                            "test_type": test_type,
                         }
                     )
 
             # Apply FDR correction
-            if len(p_values_mean) > 0:
-                _, p_mean_corrected, _, _ = multipletests(p_values_mean, alpha=0.05, method="fdr_bh")
-                _, p_median_corrected, _, _ = multipletests(p_values_median, alpha=0.05, method="fdr_bh")
+            if len(p_values) > 0:
+                _, p_corrected, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
 
                 # Update pairwise results with corrected p-values
                 for idx, result in enumerate(pairwise_results):
-                    result["p_mean_fdr"] = p_mean_corrected[idx]
-                    result["p_median_fdr"] = p_median_corrected[idx]
-                    result["significant_mean"] = p_mean_corrected[idx] < 0.05
-                    result["significant_median"] = p_median_corrected[idx] < 0.05
+                    result["p_value_fdr"] = p_corrected[idx]
+                    result["significant"] = p_corrected[idx] < 0.05
 
                 # Draw significance bars on plot
                 y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
@@ -1774,7 +1928,7 @@ class F1AnalysisFramework:
 
                 for idx, (comp_i, comp_j) in enumerate(comparisons):
                     result = pairwise_results[idx]
-                    if result["significant_mean"] or result["significant_median"]:
+                    if result["significant"]:
                         # Find group indices
                         i = group_names.index(comp_i)
                         j = group_names.index(comp_j)
@@ -1790,86 +1944,54 @@ class F1AnalysisFramework:
                         y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
                         bar_y_positions.append((i, j, bar_level))
 
-                        # Draw mean significance bar (red) if significant
-                        if result["significant_mean"]:
-                            ax.plot([i, j], [y_bar, y_bar], "r-", linewidth=1.5, alpha=0.8)
-                            ax.plot([i, i], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
-                            ax.plot([j, j], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                        # Draw significance bar
+                        ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
+                        ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+                        ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
 
-                            # Add significance stars for mean
-                            p_val = result["p_mean_fdr"]
-                            if p_val < 0.001:
-                                stars = "***"
-                            elif p_val < 0.01:
-                                stars = "**"
-                            elif p_val < 0.05:
-                                stars = "*"
-                            else:
-                                stars = ""
+                        # Add significance stars
+                        p_val = result["p_value_fdr"]
+                        if p_val < 0.001:
+                            stars = "***"
+                        elif p_val < 0.01:
+                            stars = "**"
+                        elif p_val < 0.05:
+                            stars = "*"
+                        else:
+                            stars = ""
 
-                            if stars:
-                                ax.text(
-                                    (i + j) / 2,
-                                    y_bar + bar_height,
-                                    stars,
-                                    ha="center",
-                                    va="bottom",
-                                    fontsize=10,
-                                    color="red",
-                                    fontweight="bold",
-                                )
+                        if stars:
+                            ax.text(
+                                (i + j) / 2,
+                                y_bar + bar_height,
+                                stars,
+                                ha="center",
+                                va="bottom",
+                                fontsize=12,
+                                fontweight="bold",
+                            )
 
-                        # Draw median significance bar (blue) if significant
-                        if result["significant_median"]:
-                            # Offset slightly if both mean and median are significant
-                            y_bar_median = y_bar + bar_height * 2 if result["significant_mean"] else y_bar
-
-                            ax.plot([i, j], [y_bar_median, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-                            ax.plot([i, i], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-                            ax.plot([j, j], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-
-                            # Add significance stars for median
-                            p_val = result["p_median_fdr"]
-                            if p_val < 0.001:
-                                stars = "***"
-                            elif p_val < 0.01:
-                                stars = "**"
-                            elif p_val < 0.05:
-                                stars = "*"
-                            else:
-                                stars = ""
-
-                            if stars:
-                                ax.text(
-                                    (i + j) / 2,
-                                    y_bar_median + bar_height,
-                                    stars,
-                                    ha="center",
-                                    va="bottom",
-                                    fontsize=10,
-                                    color="blue",
-                                    fontweight="bold",
-                                )
+                        # Add p-value annotation in top corner (only for the first significant comparison)
+                        if idx == 0 or len([r for r in pairwise_results[:idx] if r["significant"]]) == 0:
+                            p_text = f"p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
+                            ax.text(
+                                0.02,
+                                0.98,
+                                p_text,
+                                transform=ax.transAxes,
+                                fontsize=10,
+                                fontname="Arial",
+                                verticalalignment="top",
+                                horizontalalignment="left",
+                                bbox=dict(
+                                    boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1
+                                ),
+                            )
 
                 # Adjust y-axis limits to accommodate significance bars
-                if pairwise_results and any(r["significant_mean"] or r["significant_median"] for r in pairwise_results):
+                if pairwise_results and any(r["significant"] for r in pairwise_results):
                     max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
                     ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
-
-            # Create annotation text summarizing significant comparisons
-            sig_comparisons_mean = [
-                f"{comp[0]} vs {comp[1]}: p={p_mean_corrected[idx]:.4f}"
-                for idx, comp in enumerate(comparisons)
-                if p_mean_corrected[idx] < 0.05
-            ]
-
-            sig_comparisons_median = [
-                f"{comp[0]} vs {comp[1]}: p={p_median_corrected[idx]:.4f}"
-                for idx, comp in enumerate(comparisons)
-                if p_median_corrected[idx] < 0.05
-            ]
-
-            # Statistics are now in the markdown summary - no need for text box on plot
 
         return {
             "groups": group_names,
@@ -1879,7 +2001,9 @@ class F1AnalysisFramework:
             "pairwise": pairwise_results,
         }
 
-    def _create_combined_boxplot_with_pairwise(self, data, primary_col, secondary_col, y_col, title, ax, mode):
+    def _create_combined_boxplot_with_pairwise(
+        self, data, primary_col, secondary_col, y_col, title, ax, mode, test_type="mannwhitney"
+    ):
         """Create combined boxplot for TNT modes with pairwise comparisons."""
         # Create combined grouping
         data_copy = data.copy()
@@ -1951,10 +2075,9 @@ class F1AnalysisFramework:
             n = len(data_copy[data_copy["combined_group"] == group])
             ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=9, fontweight="bold")
 
-        # Statistical testing with SMART pairwise comparisons
-        # Only compare:
-        # 1. Within genotype, across pretraining (e.g., ctrl_n vs ctrl_y)
-        # 2. Within pretraining, across genotypes (e.g., ctrl_n vs tnt_n)
+        # Statistical testing with SIMPLIFIED pairwise comparisons
+        # NEW STRATEGY: Only compare pretraining within each genotype (n vs y)
+        # This reduces comparisons from all-pairwise to just 2: ctrl n vs ctrl y, and tnt n vs tnt y
         groups = [data_copy[data_copy["combined_group"] == group][y_col].values for group in unique_groups]
         group_names = unique_groups
 
@@ -1968,9 +2091,9 @@ class F1AnalysisFramework:
                 pretraining = group_name.split(" + ")[1]
                 group_info[group_name] = {"idx": i, "genotype": genotype, "pretraining": pretraining}
 
-            # Perform SMART pairwise comparisons
-            p_values_mean = []
-            p_values_median = []
+            # Perform SIMPLIFIED pairwise comparisons
+            # Only compare n vs y within the SAME genotype
+            p_values = []
             comparisons = []
 
             for i in range(len(groups)):
@@ -1981,27 +2104,25 @@ class F1AnalysisFramework:
                     g1_info = group_info[group1_name]
                     g2_info = group_info[group2_name]
 
-                    # Check if this is a meaningful comparison
-                    # Case 1: Same genotype, different pretraining
+                    # ONLY compare if: Same genotype, different pretraining (n vs y)
                     same_genotype = g1_info["genotype"] == g2_info["genotype"]
                     diff_pretraining = g1_info["pretraining"] != g2_info["pretraining"]
 
-                    # Case 2: Same pretraining, different genotype
-                    same_pretraining = g1_info["pretraining"] == g2_info["pretraining"]
-                    diff_genotype = g1_info["genotype"] != g2_info["genotype"]
+                    if same_genotype and diff_pretraining:
+                        # Choose statistical test based on test_type
+                        if test_type == "permutation":
+                            # Permutation test for mean difference
+                            p_value, diff_value = self._permutation_test(
+                                [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                            )
+                        else:  # mannwhitney
+                            # Mann-Whitney U test
+                            from scipy.stats import mannwhitneyu
 
-                    # Only perform comparison if it's meaningful
-                    if (same_genotype and diff_pretraining) or (same_pretraining and diff_genotype):
-                        # Permutation tests for this pair
-                        p_mean, diff_mean = self._permutation_test(
-                            [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
-                        )
-                        p_median, diff_median = self._permutation_test(
-                            [groups[i], groups[j]], lambda x: [np.median(g) for g in x]
-                        )
+                            statistic, p_value = mannwhitneyu(groups[i], groups[j], alternative="two-sided")
+                            diff_value = np.median(groups[i]) - np.median(groups[j])
 
-                        p_values_mean.append(p_mean)
-                        p_values_median.append(p_median)
+                        p_values.append(p_value)
                         comparisons.append((group_names[i], group_names[j], i, j))
 
                         # Store detailed results
@@ -2017,25 +2138,21 @@ class F1AnalysisFramework:
                                 "mean2": np.mean(groups[j]),
                                 "median1": np.median(groups[i]),
                                 "median2": np.median(groups[j]),
-                                "p_mean_raw": p_mean,
-                                "p_median_raw": p_median,
-                                "mean_diff": diff_mean,
-                                "median_diff": diff_median,
-                                "comparison_type": "within_genotype" if same_genotype else "within_pretraining",
+                                "p_value_raw": p_value,
+                                "diff_value": diff_value,
+                                "comparison_type": "within_genotype",
+                                "test_type": test_type,
                             }
                         )
 
-            # Apply FDR correction
-            if len(p_values_mean) > 0:
-                _, p_mean_corrected, _, _ = multipletests(p_values_mean, alpha=0.05, method="fdr_bh")
-                _, p_median_corrected, _, _ = multipletests(p_values_median, alpha=0.05, method="fdr_bh")
+            # Apply FDR correction (less harsh now with only 2 comparisons!)
+            if len(p_values) > 0:
+                _, p_corrected, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
 
                 # Update pairwise results with corrected p-values
                 for idx, result in enumerate(pairwise_results):
-                    result["p_mean_fdr"] = p_mean_corrected[idx]
-                    result["p_median_fdr"] = p_median_corrected[idx]
-                    result["significant_mean"] = p_mean_corrected[idx] < 0.05
-                    result["significant_median"] = p_median_corrected[idx] < 0.05
+                    result["p_value_fdr"] = p_corrected[idx]
+                    result["significant"] = p_corrected[idx] < 0.05
 
                 # Draw significance bars on plot
                 y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
@@ -2043,100 +2160,68 @@ class F1AnalysisFramework:
                 bar_height = y_range * 0.02
 
                 # Track which vertical positions we've used for bars
-                bar_y_positions = {}
-                current_bar_level = 0
+                bar_y_positions = []
 
                 for idx, result in enumerate(pairwise_results):
-                    if result["significant_mean"] or result["significant_median"]:
+                    if result["significant"]:
                         i = result["group1_idx"]
                         j = result["group2_idx"]
 
                         # Find a good y position for this bar
                         max_overlap_level = 0
-                        for existing_i, existing_j, level in bar_y_positions.get("used", []):
+                        for existing_i, existing_j, level in bar_y_positions:
                             # Check if bars would overlap
                             if not (j < existing_i or i > existing_j):
                                 max_overlap_level = max(max_overlap_level, level + 1)
 
                         bar_level = max_overlap_level
                         y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
+                        bar_y_positions.append((i, j, bar_level))
 
-                        # Store this bar's position
-                        if "used" not in bar_y_positions:
-                            bar_y_positions["used"] = []
-                        bar_y_positions["used"].append((i, j, bar_level))
+                        # Draw significance bar
+                        ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
+                        ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+                        ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
 
-                        # Draw mean significance bar (red) if significant
-                        if result["significant_mean"]:
-                            ax.plot([i, j], [y_bar, y_bar], "r-", linewidth=1.5, alpha=0.8)
-                            ax.plot([i, i], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
-                            ax.plot([j, j], [y_bar - bar_height, y_bar], "r-", linewidth=1.5, alpha=0.8)
+                        # Add significance stars
+                        p_val = result["p_value_fdr"]
+                        if p_val < 0.001:
+                            stars = "***"
+                        elif p_val < 0.01:
+                            stars = "**"
+                        elif p_val < 0.05:
+                            stars = "*"
+                        else:
+                            stars = ""
 
-                            # Add significance stars for mean
-                            p_val = result["p_mean_fdr"]
-                            if p_val < 0.001:
-                                stars = "***"
-                            elif p_val < 0.01:
-                                stars = "**"
-                            elif p_val < 0.05:
-                                stars = "*"
-                            else:
-                                stars = ""
+                        if stars:
+                            ax.text(
+                                (i + j) / 2,
+                                y_bar + bar_height,
+                                stars,
+                                ha="center",
+                                va="bottom",
+                                fontsize=12,
+                                fontweight="bold",
+                            )
 
-                            if stars:
-                                ax.text(
-                                    (i + j) / 2,
-                                    y_bar + bar_height,
-                                    stars,
-                                    ha="center",
-                                    va="bottom",
-                                    fontsize=10,
-                                    color="red",
-                                    fontweight="bold",
-                                )
-
-                        # Draw median significance bar (blue) if significant
-                        if result["significant_median"]:
-                            # Offset slightly if both mean and median are significant
-                            y_bar_median = y_bar + bar_height * 2 if result["significant_mean"] else y_bar
-
-                            ax.plot([i, j], [y_bar_median, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-                            ax.plot([i, i], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-                            ax.plot([j, j], [y_bar_median - bar_height, y_bar_median], "b-", linewidth=1.5, alpha=0.8)
-
-                            # Add significance stars for median
-                            p_val = result["p_median_fdr"]
-                            if p_val < 0.001:
-                                stars = "***"
-                            elif p_val < 0.01:
-                                stars = "**"
-                            elif p_val < 0.05:
-                                stars = "*"
-                            else:
-                                stars = ""
-
-                            if stars:
-                                ax.text(
-                                    (i + j) / 2,
-                                    y_bar_median + bar_height,
-                                    stars,
-                                    ha="center",
-                                    va="bottom",
-                                    fontsize=10,
-                                    color="blue",
-                                    fontweight="bold",
-                                )
+                        # Add p-value annotation next to the comparison
+                        # Place it slightly above the significance bar
+                        p_text = f"p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
+                        ax.text(
+                            (i + j) / 2,
+                            y_bar + bar_height * 3,
+                            p_text,
+                            ha="center",
+                            va="bottom",
+                            fontsize=9,
+                            bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
+                        )
 
                 # Adjust y-axis limits to accommodate significance bars
-                if pairwise_results and any(r["significant_mean"] or r["significant_median"] for r in pairwise_results):
-                    max_bar_level = max((level for _, _, level in bar_y_positions.get("used", [])), default=0)
+                if pairwise_results and any(r["significant"] for r in pairwise_results):
+                    max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
                     ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
-
-                # Count significant comparisons (for logging/debugging if needed)
-                sig_comparisons_mean = sum(1 for p in p_mean_corrected if p < 0.05)
-                sig_comparisons_median = sum(1 for p in p_median_corrected if p < 0.05)
-
-                # Statistics are now in the markdown summary - no need for text box on plot
 
         return {
             "groups": group_names,

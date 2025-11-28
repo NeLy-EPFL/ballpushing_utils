@@ -31,6 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting 
 
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.patches import Rectangle, Patch
@@ -75,6 +76,12 @@ def generate_magnet_mannwhitney_plots(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set Arial font globally for editable text in PDFs
+    matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for editable text in PDF
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
     all_stats = []
 
@@ -136,48 +143,21 @@ def generate_magnet_mannwhitney_plots(
         }
         all_stats.append(stat_result)
 
-        # Create plot
-        fig, ax = plt.subplots(figsize=figsize)
+        # Create plot with smaller figure size for publication-quality layout
+        fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
 
-        # Create color palette
-        colors = {control_group: "#e74c3c", test_group: "#3498db"}
+        # Map to intuitive labels: "n" -> "Control", "y" -> "Magnet block"
+        if control_group == "n" and test_group == "y":
+            control_label = "Control"
+            test_label = "Magnet block"
+        else:
+            control_label = control_group
+            test_label = test_group
 
-        # Plot boxplot
-        positions = [0, 1]
-        box_data = [control_data, test_data]
-        bp = ax.boxplot(
-            box_data,
-            positions=positions,
-            widths=0.6,
-            patch_artist=True,
-            showfliers=False,
-            medianprops=dict(color="black", linewidth=2),
-            boxprops=dict(alpha=0.7),
-        )
+        # Create color palette (matching F1 style)
+        colors = {control_group: "#ff7f0e", test_group: "#1f77b4"}  # Orange for control, blue for test
 
-        # Color the boxes
-        for patch, group in zip(bp["boxes"], [control_group, test_group]):
-            patch.set_facecolor(colors[group])
-
-        # Add jitter points
-        for i, (pos, group) in enumerate(zip(positions, [control_group, test_group])):
-            y_data = box_data[i]
-            x_jitter = np.random.normal(pos, 0.04, size=len(y_data))
-            ax.scatter(x_jitter, y_data, alpha=0.4, s=30, color=colors[group], edgecolors="black", linewidths=0.5)
-
-        # Set labels
-        ax.set_xticks(positions)
-        ax.set_xticklabels([control_group, test_group])
-        ax.set_ylabel(metric, fontsize=12)
-        ax.set_title(f"{metric}\nMann-Whitney U Test", fontsize=14, fontweight="bold")
-
-        # Add significance annotation
-        y_max = max(control_data.max(), test_data.max())
-        y_min = min(control_data.min(), test_data.min())
-        y_range = y_max - y_min
-        y_annotation = y_max + 0.1 * y_range
-
-        # Determine significance
+        # Determine significance level
         if p_value < 0.001:
             sig_symbol = "***"
         elif p_value < 0.01:
@@ -187,36 +167,110 @@ def generate_magnet_mannwhitney_plots(
         else:
             sig_symbol = "ns"
 
-        # Draw significance bracket
-        ax.plot(
-            [0, 0, 1, 1],
-            [y_annotation, y_annotation + 0.02 * y_range, y_annotation + 0.02 * y_range, y_annotation],
-            "k-",
-            linewidth=1.5,
-        )
-        ax.text(
-            0.5, y_annotation + 0.03 * y_range, sig_symbol, ha="center", va="bottom", fontsize=14, fontweight="bold"
+        # Create thinner boxplot with transparency (matching F1 style)
+        box_props = dict(linewidth=1.5, edgecolor="black")  # Black outline
+        whisker_props = dict(linewidth=1.5, color="black")
+        cap_props = dict(linewidth=1.5, color="black")
+        median_props = dict(linewidth=2, color="black")
+
+        positions = [0, 1]
+        box_data = [control_data, test_data]
+        bp = ax.boxplot(
+            box_data,
+            positions=positions,
+            widths=0.5,  # Thinner boxes (50% of spacing)
+            patch_artist=True,
+            boxprops=box_props,
+            whiskerprops=whisker_props,
+            capprops=cap_props,
+            medianprops=median_props,
+            showfliers=False,  # Don't show outliers since we're plotting all points
         )
 
-        # Add statistics text
-        stats_text = (
-            f"p = {p_value:.4f}\nEffect size = {effect_size:.3f}\nn({control_group}) = {n1}, n({test_group}) = {n2}"
-        )
+        # Color the boxes consistently with black outlines
+        bp["boxes"][0].set_facecolor(colors[control_group])
+        bp["boxes"][0].set_alpha(0.7)
+        bp["boxes"][0].set_edgecolor("black")
+        bp["boxes"][0].set_linewidth(1.5)
+        bp["boxes"][1].set_facecolor(colors[test_group])
+        bp["boxes"][1].set_alpha(0.7)
+        bp["boxes"][1].set_edgecolor("black")
+        bp["boxes"][1].set_linewidth(1.5)
+
+        # Add individual data points as larger filled circles matching box colors
+        x_jitter = 0.08  # Amount of horizontal jitter
+        for i, (group, color) in enumerate([(control_group, colors[control_group]), (test_group, colors[test_group])]):
+            y_data = box_data[i]
+            # Add random jitter to x positions
+            x_positions = np.random.normal(positions[i], x_jitter, size=len(y_data))
+            ax.scatter(
+                x_positions,
+                y_data,
+                s=25,  # Smaller point size for cleaner look
+                c=color,
+                alpha=0.6,  # Translucent
+                edgecolors="none",  # No edge
+                zorder=3,
+            )  # Draw on top
+
+        # Calculate y-axis range for annotations
+        y_max = max(control_data.max(), test_data.max())
+        y_min = min(control_data.min(), test_data.min())
+        y_range = y_max - y_min
+
+        # Draw significance bar and asterisks (only if significant)
+        if sig_symbol != "ns":
+            bar_height = y_max + 0.08 * y_range
+            ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
+            ax.text(
+                0.5, bar_height + 0.02 * y_range, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial"
+            )
+
+        # Add p-value text in top-left corner of plot
+        if p_value < 0.001:
+            p_text = f"p < 0.001"
+        elif p_value < 0.01:
+            p_text = f"p = {p_value:.3f}"
+        else:
+            p_text = f"p = {p_value:.3f}"
+
         ax.text(
-            0.98,
             0.02,
-            stats_text,
+            0.98,
+            p_text,
             transform=ax.transAxes,
             fontsize=10,
-            verticalalignment="bottom",
-            horizontalalignment="right",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+            fontname="Arial",
+            verticalalignment="top",
+            horizontalalignment="left",
+            bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
         )
 
-        # Adjust y-axis limits
-        ax.set_ylim(y_min - 0.1 * y_range, y_annotation + 0.15 * y_range)
+        # Clean formatting - no grid, white background, with tick marks
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+        ax.grid(False)
 
-        ax.grid(True, alpha=0.3, axis="y")
+        # Add tick marks pointing outward
+        ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+
+        # Set x-axis labels with intuitive labels
+        ax.set_xticks(positions)
+        ax.set_xticklabels([control_label, test_label], fontsize=10, fontname="Arial")
+
+        # Set y-axis label
+        ax.set_ylabel(metric, fontsize=11, fontname="Arial")
+
+        # Format y-axis tick labels
+        ax.tick_params(axis="y", labelsize=9)
+        for label in ax.get_yticklabels():
+            label.set_fontname("Arial")
+
+        # Remove top and right spines for cleaner look
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_linewidth(1.5)
 
         plt.tight_layout()
 
@@ -357,7 +411,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         Number of samples to use in test mode
     """
     # Load the MagnetBlock dataset
-    dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251125_14_summary_magnet_block_folders_Data/summary/pooled_summary.feather"
+    dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251126_11_summary_magnet_block_folders_Data/summary/pooled_summary.feather"
 
     print(f"Loading MagnetBlock dataset from: {dataset_path}")
     try:
@@ -651,6 +705,8 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
     proportions = []
     cis = []
     labels = []
+    n_totals = []
+    n_successes = []
 
     for group in groups:
         group_data = plot_data[plot_data[y] == group]
@@ -662,44 +718,124 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
 
         proportions.append(prop)
         cis.append((prop - ci_low, ci_high - prop))
-        labels.append(f"{group}\n(n={n_total})")
+        labels.append(group)
+        n_totals.append(n_total)
+        n_successes.append(n_success)
 
-    # Create plot
-    fig, ax = plt.subplots(figsize=(10, 6))
+    # Perform Fisher's exact test to get p-value
+    if len(groups) == 2:
+        contingency = pd.crosstab(plot_data[y], plot_data[metric])
+        try:
+            odds_ratio, p_value = fisher_exact(contingency)
+        except Exception:
+            p_value = 1.0
 
-    colors = {control_group: "#e74c3c"}
+        # Determine significance
+        if p_value < 0.001:
+            sig_symbol = "***"
+        elif p_value < 0.01:
+            sig_symbol = "**"
+        elif p_value < 0.05:
+            sig_symbol = "*"
+        else:
+            sig_symbol = "ns"
+    else:
+        p_value = 1.0
+        sig_symbol = "ns"
+
+    # Create plot with smaller figure size matching F1 style
+    fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
+
+    # Map to intuitive labels: "n" -> "Control", "y" -> "Magnet block"
+    display_labels = []
+    for group in groups:
+        if group == "n":
+            display_labels.append("Control")
+        elif group == "y":
+            display_labels.append("Magnet block")
+        else:
+            display_labels.append(group)
+
+    # Use F1-style colors
+    colors = {control_group: "#ff7f0e"}  # Orange for control
     if len(groups) == 2:
         test_group = [g for g in groups if g != control_group][0]
-        colors[test_group] = "#3498db"
+        colors[test_group] = "#1f77b4"  # Blue for test
 
     bar_colors = [colors.get(g, "#95a5a6") for g in groups]
 
     x_pos = np.arange(len(groups))
-    bars = ax.bar(x_pos, proportions, color=bar_colors, alpha=0.7, edgecolor="black", linewidth=1.5)
+    bars = ax.bar(x_pos, proportions, width=0.5, color=bar_colors, alpha=0.7, edgecolor="black", linewidth=1.5)
 
     # Add error bars
     ax.errorbar(
-        x_pos, proportions, yerr=np.array(cis).T, fmt="none", ecolor="black", capsize=5, capthick=2, linewidth=2
+        x_pos, proportions, yerr=np.array(cis).T, fmt="none", ecolor="black", capsize=5, capthick=1.5, linewidth=1.5
     )
 
-    # Add value labels on bars
-    for i, (prop, bar) in enumerate(zip(proportions, bars)):
+    # Add sample sizes as text on bars
+    for i, (prop, bar, n_total, n_success) in enumerate(zip(proportions, bars, n_totals, n_successes)):
         ax.text(
             bar.get_x() + bar.get_width() / 2,
-            prop + 0.02,
-            f"{prop:.2%}",
+            prop / 2,
+            f"{n_success}/{n_total}",
             ha="center",
-            va="bottom",
-            fontsize=11,
+            va="center",
+            fontsize=9,
+            fontname="Arial",
             fontweight="bold",
+            color="white" if prop > 0.3 else "black",
         )
 
+    # Add significance annotation if there are exactly 2 groups and result is significant
+    if len(groups) == 2 and sig_symbol != "ns":
+        y_max = max(proportions) + max([ci[1] for ci in cis])
+        bar_height = y_max + 0.05
+        ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
+        ax.text(0.5, bar_height + 0.02, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial")
+
+    # Add p-value text in top-left corner
+    if p_value < 0.001:
+        p_text = f"p < 0.001"
+    elif p_value < 0.01:
+        p_text = f"p = {p_value:.3f}"
+    else:
+        p_text = f"p = {p_value:.3f}"
+
+    ax.text(
+        0.02,
+        0.98,
+        p_text,
+        transform=ax.transAxes,
+        fontsize=10,
+        fontname="Arial",
+        verticalalignment="top",
+        horizontalalignment="left",
+        bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
+    )
+
+    # Clean formatting matching F1 style
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    ax.grid(False)
+
+    # Add tick marks pointing outward
+    ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(labels, fontsize=12)
-    ax.set_ylabel("Proportion", fontsize=13)
-    ax.set_title(f"{metric}\n(Fisher's Exact Test)", fontsize=14, fontweight="bold")
-    ax.set_ylim(0, 1.1)
-    ax.grid(True, alpha=0.3, axis="y")
+    ax.set_xticklabels(display_labels, fontsize=10, fontname="Arial")
+    ax.set_ylabel(f"Proportion\n{metric}", fontsize=11, fontname="Arial")
+    ax.set_ylim(0, 1.0 if sig_symbol == "ns" else 1.15)
+
+    # Format y-axis tick labels
+    ax.tick_params(axis="y", labelsize=9)
+    for label in ax.get_yticklabels():
+        label.set_fontname("Arial")
+
+    # Remove top and right spines for cleaner look
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.5)
+    ax.spines["bottom"].set_linewidth(1.5)
 
     plt.tight_layout()
 
