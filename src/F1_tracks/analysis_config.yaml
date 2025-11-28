@@ -256,10 +256,10 @@ analysis_parameters:
       - "auc"
       - "overall_interaction_rate"
       - "time_to_first_interaction"  # Time until fly first interacts with ball
-      - "ball_proximity_proportion"  # Proportion of time spent near ball (requires position data)
 
     # Pattern-based metric search patterns
     additional_patterns:
+      - "ball_proximity"  # Will match ball_proximity_proportion_70px, _140px, _200px
       - "velocity"
       - "speed"
       - "pause"
