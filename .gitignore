@@ -916,3 +916,5 @@ src/F1_tracks/mask_downsampling_comparison.png
 src/F1_tracks/mask_linear_dilated.png
 src/F1_tracks/mask_nearest.png
 src/F1_tracks/mask_linear.png
+src/F1_tracks/LC10_2/test_ball_euclidean_distance_permutation_results_adaptive_trimmed.csv
+src/F1_tracks/LC10_2/test_ball_euclidean_distance_permutation_results_percentage.csv

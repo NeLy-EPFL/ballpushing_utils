@@ -1061,25 +1061,28 @@ class F1AnalysisFramework:
 
         return rejected, corrected_p
 
-    def calculate_ball_proximity_time(self, df, proximity_threshold=70, movement_threshold=100, n_avg=100):
+    def calculate_ball_proximity_time(self, df, proximity_thresholds=[70, 140, 200], movement_threshold=100, n_avg=100):
         """
-        Calculate the proportion of time each fly spends near the ball.
+        Calculate the proportion of time each fly spends near the ball at multiple distance thresholds.
 
         This metric is calculated from fly position data by:
         1. Filtering data to keep only points after fly first moves >movement_threshold from starting position
         2. Calculating Euclidean distance between fly thorax and ball center
-        3. Computing proportion of time where distance < proximity_threshold
+        3. Computing proportion of time where distance < proximity_threshold for each threshold
 
         Args:
             df: DataFrame with fly and ball position data (requires fly_positions data)
-            proximity_threshold: Distance threshold for proximity in pixels (default: 70)
+            proximity_thresholds: List of distance thresholds for proximity in pixels (default: [70, 140, 200])
             movement_threshold: Distance fly must move from start before counting (default: 100)
             n_avg: Number of initial points to average for starting position (default: 100)
 
         Returns:
-            DataFrame with fly, condition, and ball_proximity_proportion columns
+            DataFrame with fly, condition, and ball_proximity_proportion_XXpx columns for each threshold
         """
-        print(f"\n📏 Calculating ball proximity time (threshold={proximity_threshold}px)...")
+        if not isinstance(proximity_thresholds, list):
+            proximity_thresholds = [proximity_thresholds]
+
+        print(f"\n📏 Calculating ball proximity time (thresholds={proximity_thresholds}px)...")
 
         # Check for required columns
         required_cols = ["fly", "x_thorax_fly_0", "y_thorax_fly_0"]
@@ -1162,24 +1165,31 @@ class F1AnalysisFramework:
             # Calculate distance to ball
             distance_to_ball = np.sqrt((fly_x - ball_x) ** 2 + (fly_y - ball_y) ** 2)
 
-            # Calculate proportion near ball
-            near_ball = distance_to_ball < proximity_threshold
-            proportion_near = near_ball.sum() / len(near_ball) if len(near_ball) > 0 else 0
+            # Calculate proportion near ball for each threshold
+            result_dict = {
+                "fly": fly_id,
+                "F1_condition": f1_condition,
+                "Pretraining": pretraining,
+                "Genotype": genotype,
+                "n_timepoints": len(fly_data),
+            }
 
-            results.append(
-                {
-                    "fly": fly_id,
-                    "F1_condition": f1_condition,
-                    "Pretraining": pretraining,
-                    "Genotype": genotype,
-                    "ball_proximity_proportion": proportion_near,
-                    "n_timepoints": len(fly_data),
-                    "n_near_ball": near_ball.sum(),
-                }
-            )
+            for threshold in proximity_thresholds:
+                near_ball = distance_to_ball < threshold
+                proportion_near = near_ball.sum() / len(near_ball) if len(near_ball) > 0 else 0
+                result_dict[f"ball_proximity_proportion_{threshold}px"] = proportion_near
+                result_dict[f"n_near_ball_{threshold}px"] = near_ball.sum()
+
+            results.append(result_dict)
 
         result_df = pd.DataFrame(results)
-        print(f"  ✓ Calculated ball proximity for {len(result_df)} flies")
+
+        # Print summary for each threshold
+        for threshold in proximity_thresholds:
+            col_name = f"ball_proximity_proportion_{threshold}px"
+            if col_name in result_df.columns:
+                mean_proximity = result_df[col_name].mean()
+                print(f"  ✓ {threshold}px: mean proximity = {mean_proximity:.3f} ({len(result_df)} flies)")
 
         return result_df
 
@@ -1216,15 +1226,15 @@ class F1AnalysisFramework:
 
         # Calculate ball proximity if requested and data supports it
         if include_proximity:
-            proximity_data = self.calculate_ball_proximity_time(df_enriched)
+            proximity_data = self.calculate_ball_proximity_time(df_enriched, proximity_thresholds=[70, 140, 200])
 
             if proximity_data is not None:
                 # Merge proximity data back to main dataframe
                 # This is per-fly metric, so merge on fly identifier
-                df_enriched = df_enriched.merge(
-                    proximity_data[["fly", "ball_proximity_proportion"]], on="fly", how="left"
-                )
-                print(f"  ✓ Added 'ball_proximity_proportion' metric")
+                proximity_cols = [col for col in proximity_data.columns if col.startswith("ball_proximity_proportion_")]
+                merge_cols = ["fly"] + proximity_cols
+                df_enriched = df_enriched.merge(proximity_data[merge_cols], on="fly", how="left")
+                print(f"  ✓ Added {len(proximity_cols)} ball proximity metrics: {proximity_cols}")
 
         return df_enriched
 
@@ -1249,21 +1259,25 @@ class F1AnalysisFramework:
         # Calculate ball proximity if fly positions data is available
         if df_positions is not None:
             try:
-                # Calculate ball proximity metric
-                proximity_data = self.calculate_ball_proximity_time(df_positions)
+                # Calculate ball proximity metric with multiple thresholds
+                proximity_data = self.calculate_ball_proximity_time(df_positions, proximity_thresholds=[70, 140, 200])
 
                 if proximity_data is not None:
-                    # Merge proximity metric into main dataframe
+                    # Merge proximity metrics into main dataframe
+                    proximity_cols = [
+                        col for col in proximity_data.columns if col.startswith("ball_proximity_proportion_")
+                    ]
+                    merge_cols = ["fly"] + proximity_cols
                     df = df.merge(
-                        proximity_data[["fly", "ball_proximity_proportion"]],
+                        proximity_data[merge_cols],
                         on="fly",
                         how="left",
                         suffixes=("", "_proximity"),
                     )
-                    print(f"✓ Added 'ball_proximity_proportion' metric to dataset")
+                    print(f"✓ Added {len(proximity_cols)} ball proximity metrics to dataset: {proximity_cols}")
             except Exception as e:
                 print(f"⚠️  Error calculating ball proximity: {e}")
-                print("   Ball proximity metric will not be available")
+                print("   Ball proximity metrics will not be available")
 
         detected_cols = self.detect_columns(df, mode)
         if not all(key in detected_cols for key in ["primary", "secondary", "ball_condition"]):
