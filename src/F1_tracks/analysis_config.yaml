@@ -66,7 +66,7 @@ analysis_modes:
   tnt_lc10_2:
     description: "TNT LC10-2 flies tested across pretraining and genotype"
     dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/summary/pooled_summary.feather"
-    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251027_16_F1_coordinates_F1_TNT_LC10-2_Data/fly_positions/pooled_fly_positions.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251128_15_fly_positions_F1_TNT_LC10-2_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
