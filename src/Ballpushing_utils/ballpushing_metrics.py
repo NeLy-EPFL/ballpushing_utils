@@ -1154,13 +1154,33 @@ class BallPushingMetrics:
                         )
 
         else:
-            adjusted_nb_events = (
-                len(events)
-                * self.fly.config.adjusted_events_normalisation
-                / (self.tracking_data.duration - self.tracking_data.chamber_exit_times[fly_idx])
-                if self.tracking_data.duration > 0
-                else 0
-            )
+            # Non-F1 experiments: safely get chamber_exit_time for this fly
+            chamber_exit_time = None
+            if hasattr(self.tracking_data, "chamber_exit_times") and self.tracking_data.chamber_exit_times:
+                chamber_exit_time = self.tracking_data.chamber_exit_times.get(fly_idx)
+            elif hasattr(self.tracking_data, "chamber_exit_time"):
+                chamber_exit_time = self.tracking_data.chamber_exit_time
+
+            # Calculate adjusted events, handling missing chamber_exit_time
+            if self.tracking_data.duration > 0:
+                if chamber_exit_time is not None and chamber_exit_time >= 0:
+                    time_after_chamber = self.tracking_data.duration - chamber_exit_time
+                    if time_after_chamber > 0:
+                        adjusted_nb_events = (
+                            len(events) * self.fly.config.adjusted_events_normalisation / time_after_chamber
+                        )
+                    else:
+                        # If time_after_chamber <= 0, fall back to full duration
+                        adjusted_nb_events = (
+                            len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
+                        )
+                else:
+                    # No chamber_exit_time available, use full duration
+                    adjusted_nb_events = (
+                        len(events) * self.fly.config.adjusted_events_normalisation / self.tracking_data.duration
+                    )
+            else:
+                adjusted_nb_events = 0
 
         return adjusted_nb_events
 
