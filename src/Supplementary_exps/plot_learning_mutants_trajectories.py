@@ -35,9 +35,66 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 
+def _normalize_genotype_string(s: str) -> str:
+    """Create a canonical key for a genotype string (for duplicate detection).
+
+    - Strips leading/trailing whitespace
+    - Collapses internal whitespace to single spaces
+    - Lowercases for comparison
+    """
+    if not isinstance(s, str):
+        return str(s)
+    # Strip and collapse whitespace
+    collapsed = " ".join(s.strip().split())
+    return collapsed.lower()
+
+
+def normalize_genotypes_column(df: pd.DataFrame, col_name: str = "Genotype"):
+    """Normalize the genotype labels and report merges.
+
+    Returns
+    -------
+    df_norm : pd.DataFrame
+        DataFrame with a normalized `col_name` where visually duplicate genotypes
+        (case/whitespace variants) are unified to a canonical representative.
+    report : dict
+        {"before": set, "after": set, "merged": dict}
+        - before: original unique labels
+        - after: normalized unique labels
+        - merged: mapping of original label -> canonical label (only entries that changed)
+    """
+    if col_name not in df.columns:
+        return df, {"before": set(), "after": set(), "merged": {}}
+
+    original = df[col_name].astype(str).tolist()
+    before_set = set(original)
+
+    # Build map from normalized key to canonical label (first seen pretty label)
+    key_to_canonical = {}
+    merged_map = {}
+    for label in original:
+        key = _normalize_genotype_string(label)
+        if key not in key_to_canonical:
+            # Use the first nicely formatted version as canonical: collapse internal spaces
+            pretty = " ".join(label.strip().split())
+            key_to_canonical[key] = pretty
+        canonical = key_to_canonical[key]
+        if label != canonical:
+            merged_map[label] = canonical
+
+    # Apply normalization: map each row to its canonical
+    df_norm = df.copy()
+    df_norm[col_name] = df_norm[col_name].astype(str).apply(lambda s: key_to_canonical[_normalize_genotype_string(s)])
+
+    after_set = set(df_norm[col_name].unique())
+
+    report = {"before": before_set, "after": after_set, "merged": merged_map}
+    return df_norm, report
+
+
 def load_coordinates_dataset():
     """Load the learning mutants coordinates dataset"""
-    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251124_13_summary_learning_mutants_Data/coordinates/pooled_coordinates.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251126_14_summary_learning_mutants_Data/coordinates/pooled_coordinates.feather"
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
@@ -804,7 +861,7 @@ Examples:
     )
 
     parser.add_argument(
-        "--control", type=str, default=None, help="Control genotype name (default: alphabetically first genotype)"
+        "--control", type=str, default="PR", help="Control genotype name (default: alphabetically first genotype)"
     )
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
@@ -814,6 +871,30 @@ Examples:
     # Load data
     print("Loading learning mutants coordinates data...")
     data = load_coordinates_dataset()
+
+    # Normalize Genotype labels to avoid case/whitespace duplicates
+    data, norm_report = normalize_genotypes_column(data, col_name="Genotype")
+    print("\nGenotype normalization summary (trajectories):")
+    print(f"  Unique before: {len(norm_report['before'])}")
+    print(f"  Unique after : {len(norm_report['after'])}")
+    if norm_report["merged"]:
+        print("  Merged variants (original -> canonical):")
+        for orig, canon in sorted(norm_report["merged"].items()):
+            print(f"    '{orig}' -> '{canon}'")
+    else:
+        print("  No case/whitespace merges detected.")
+
+    # Print per-genotype individual counts (unique flies) after normalization
+    if "fly" in data.columns:
+        print("\nPer-genotype individual counts (trajectories):")
+        for genotype in sorted(data["Genotype"].unique()):
+            n_flies = data[data["Genotype"] == genotype]["fly"].nunique()
+            print(f"  {genotype}: {n_flies} individuals (unique fly)")
+    else:
+        print("\nPer-genotype row counts (no 'fly' column found):")
+        for genotype in sorted(data["Genotype"].unique()):
+            n_rows = len(data[data["Genotype"] == genotype])
+            print(f"  {genotype}: {n_rows} rows")
 
     # Generate plots
     generate_all_trajectory_plots(

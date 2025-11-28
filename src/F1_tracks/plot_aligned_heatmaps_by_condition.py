@@ -7,6 +7,7 @@ Uses template matching to align each fly's video to the template.
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 from pathlib import Path
 import pandas as pd
 from scipy.ndimage import gaussian_filter
@@ -240,8 +241,60 @@ def get_video_path_from_fly_id(fly_id, videos_base):
     return video_path
 
 
+def get_ball_position_in_template(data, arena_params, template_shape, condition):
+    """
+    Get the median ball position in template coordinates.
+
+    Args:
+        data: DataFrame with ball position data
+        arena_params: Arena transformation parameters
+        template_shape: Template image shape
+        condition: Condition name (to determine which ball to use)
+
+    Returns:
+        Tuple of (x_template, y_template) or None if ball not found
+    """
+    # Determine which ball to use based on condition
+    # Control/no pretraining: ball_0, Experimental/pretrained: ball_1
+    if condition in ["control", "n"]:
+        ball_x_col = "x_centre_ball_0"
+        ball_y_col = "y_centre_ball_0"
+    else:
+        ball_x_col = "x_centre_ball_1"
+        ball_y_col = "y_centre_ball_1"
+
+    # Check if ball columns exist
+    if ball_x_col not in data.columns or ball_y_col not in data.columns:
+        return None
+
+    # Get ball positions (use median to get typical position)
+    ball_x_video = data[ball_x_col].median()
+    ball_y_video = data[ball_y_col].median()
+
+    if pd.isna(ball_x_video) or pd.isna(ball_y_video):
+        return None
+
+    # Transform to template coordinates
+    x_arena = ball_x_video - arena_params["arena_x"]
+    y_arena = ball_y_video - arena_params["arena_y"]
+
+    scale = arena_params["scale"]
+    x_template = x_arena / scale
+    y_template = y_arena / scale
+
+    # Check if within template bounds
+    template_h, template_w = template_shape[:2]
+    if 0 <= x_template < template_w and 0 <= y_template < template_h:
+        return (x_template, y_template)
+
+    return None
+
+
 def create_heatmap_on_template(data, template, template_binary, bins=100, blur_sigma=2.0, alpha=0.7):
-    """Create a heatmap overlaid on template image, masked to white areas only."""
+    """Create a heatmap overlaid on template image, masked to white areas only.
+
+    Heatmap is computed at 'bins' resolution then upscaled to template size to preserve mask details.
+    """
     # Create per-fly heatmaps
     template_h, template_w = template.shape[:2]
 
@@ -277,13 +330,16 @@ def create_heatmap_on_template(data, template, template_binary, bins=100, blur_s
     if blur_sigma > 0:
         avg_heatmap = gaussian_filter(avg_heatmap, sigma=blur_sigma)
 
-    # Create mask from template binary (resize to match heatmap bins)
-    template_mask = cv2.resize(template_binary.astype(np.uint8), (bins, bins), interpolation=cv2.INTER_NEAREST)
-    template_mask = template_mask > 0  # Convert to boolean
+    # Upscale heatmap to match template size (width, height = template_w, template_h)
+    # histogram2d returns (x_bins, y_bins), so we need to transpose before resize
+    heatmap_upscaled = cv2.resize(avg_heatmap.T, (template_w, template_h), interpolation=cv2.INTER_LINEAR)
 
-    # Apply mask: set non-white areas to NaN
-    heatmap_display = avg_heatmap.copy()
-    heatmap_display[~template_mask.T] = np.nan  # Transpose to match image coords
+    # Use original template binary as mask (already at full resolution)
+    template_mask = template_binary > 0  # shape (template_h, template_w)
+
+    # Now heatmap_upscaled is (template_h, template_w) after transpose
+    heatmap_display = heatmap_upscaled.copy()
+    heatmap_display[~template_mask] = np.nan
 
     # Also set zeros to NaN for transparency
     heatmap_display[heatmap_display == 0] = np.nan
@@ -294,11 +350,16 @@ def create_heatmap_on_template(data, template, template_binary, bins=100, blur_s
 def main():
     parser = argparse.ArgumentParser(description="Create aligned heatmaps grouped by condition")
     parser.add_argument(
+        "--test-mode",
+        action="store_true",
+        help="Enable test mode: only process 2 flies per condition and save a debug heatmap for orientation check",
+    )
+    parser.add_argument(
         "--group-by",
         type=str,
         choices=["F1_condition", "Pretraining"],
-        default="F1_condition",
-        help="Column to group flies by (default: F1_condition)",
+        default="Pretraining",
+        help="Column to group flies by (default: Pretraining)",
     )
     parser.add_argument(
         "--bins",
@@ -404,7 +465,15 @@ def main():
     aligned_data_by_condition = {condition: [] for condition in conditions}
 
     fly_ids = df["fly"].unique()
-    if args.max_flies:
+    if args.test_mode:
+        # Only pick 2 flies per condition for quick test
+        test_fly_ids = []
+        for condition in conditions:
+            cond_fly_ids = df[df[args.group_by] == condition]["fly"].unique()
+            test_fly_ids.extend(cond_fly_ids[:2])
+        fly_ids = np.array(test_fly_ids)
+        print(f"\nTEST MODE: Only processing {len(fly_ids)} flies (2 per condition)")
+    elif args.max_flies:
         fly_ids = fly_ids[: args.max_flies]
 
     processed_count = 0
@@ -451,6 +520,7 @@ def main():
     # Concatenate data for each condition
     print("\n7. Creating heatmaps...")
     condition_data = {}
+    ball_positions = {}  # Store ball positions for each condition
     for condition in conditions:
         if aligned_data_by_condition[condition]:
             condition_df = pd.concat(aligned_data_by_condition[condition], ignore_index=True)
@@ -458,6 +528,20 @@ def main():
             n_flies = condition_df["fly"].nunique()
             n_points = len(condition_df)
             print(f"   {condition}: {n_flies} flies, {n_points:,} points")
+
+            # Get ball position for this condition (using first fly's data for arena params)
+            # We need to re-detect arena for one video to get the transformation
+            sample_fly = condition_df["fly"].iloc[0]
+            sample_video = get_video_path_from_fly_id(sample_fly, videos_base)
+            if sample_video:
+                sample_arena_params = detect_arena_in_video(sample_video, template_binary)
+                if sample_arena_params:
+                    ball_pos = get_ball_position_in_template(
+                        condition_df, sample_arena_params, template.shape, condition
+                    )
+                    if ball_pos:
+                        ball_positions[condition] = ball_pos
+                        print(f"     Ball position: ({ball_pos[0]:.1f}, {ball_pos[1]:.1f})")
 
     # Create figure with subplots
     n_conditions = len(condition_data)
@@ -505,22 +589,52 @@ def main():
             "name": "linear_clipped",
             "vmax_percentile": args.clip_percentile,
             "transform": None,
-            "label": f"Avg. Normalized Density (clipped at {args.clip_percentile}th percentile)",
+            "label": f"Avg. Normalized Density (fraction/bin)\n(clipped at {args.clip_percentile}th percentile)",
         },
         {
             "name": "log",
             "vmax_percentile": None,
             "transform": "log",
-            "label": "Log₁₀ Avg. Normalized Density",
+            "label": "Log₁₀ Avg. Normalized Density\n(fraction/bin)",
         },
         {
             "name": "sqrt",
             "vmax_percentile": None,
             "transform": "sqrt",
-            "label": "√(Avg. Normalized Density)",
+            "label": "√(Avg. Normalized Density)\n(√[fraction/bin])",
         },
     ]
 
+    # In test mode, only plot the first (linear) scale and save a debug image for orientation
+    if args.test_mode:
+        print("\nTEST MODE: Plotting debug heatmap for orientation check...")
+        fig, ax = plt.subplots(figsize=(10, 12))
+        ax.imshow(template_rgb, aspect="auto", alpha=1.0)
+        # Just use the first condition's heatmap
+        for condition, heatmap in heatmaps.items():
+            if heatmap is not None:
+                cmap = plt.get_cmap("viridis")
+                cmap.set_bad(alpha=0)
+                im = ax.imshow(
+                    heatmap,
+                    extent=(0, template.shape[1], template.shape[0], 0),
+                    origin="upper",
+                    cmap=cmap,
+                    alpha=0.7,
+                    interpolation="bilinear",
+                )
+                ax.set_title(f"DEBUG: {condition}", fontsize=16, fontweight="bold")
+                plt.colorbar(im, ax=ax, label="Debug Density", fraction=0.046, pad=0.04)
+                break  # Only plot one for speed
+        plt.tight_layout()
+        debug_path = output_dir / "debug_heatmap_orientation.png"
+        fig.savefig(debug_path, dpi=200, bbox_inches="tight")
+        print(f"   Saved debug orientation heatmap to: {debug_path}")
+        plt.close()
+        print("\nTest mode complete. Exiting early.")
+        return
+
+    # Normal plotting for all scale configs
     for scale_config in scale_configs:
         scale_type = scale_config["name"]
         print(f"\n   Creating {scale_type} scale version...")
@@ -584,8 +698,8 @@ def main():
                 heatmap_display[mask] = np.nan
 
                 im = ax.imshow(
-                    heatmap_display.T,
-                    extent=[0, template.shape[1], template.shape[0], 0],
+                    heatmap_display,
+                    extent=(0, template.shape[1], template.shape[0], 0),
                     origin="upper",
                     cmap=cmap,
                     alpha=0.7,
@@ -614,13 +728,122 @@ def main():
 
         plt.tight_layout()
 
-        # Save figure
+        # Save figure (standard version without proximity circle)
         output_filename = f"aligned_heatmaps_by_{args.group_by}_{scale_type}.png"
         output_path = output_dir / output_filename
         fig.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"   Saved {scale_type} scale heatmap to: {output_path}")
 
         plt.close()
+
+        # Create version with proximity circles if ball positions are available
+        if ball_positions:
+            # Create versions with different proximity radii
+            proximity_radii = [70, 140, 200]
+
+            for proximity_radius_px in proximity_radii:
+                print(f"   Creating {scale_type} scale version with {proximity_radius_px}px proximity circle...")
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(8 * n_cols, 10 * n_rows))
+
+                # Handle single subplot case
+                if n_conditions == 1:
+                    axes = np.array([axes])
+                axes_flat = axes.flatten() if n_conditions > 1 else axes
+
+                for idx, (condition, data) in enumerate(condition_data.items()):
+                    ax = axes_flat[idx]
+
+                    # Show template as background
+                    ax.imshow(template_rgb, aspect="auto", alpha=1.0)
+
+                    # Get pre-computed heatmap
+                    heatmap = heatmaps[condition]
+
+                    if heatmap is not None:
+                        cmap = plt.get_cmap("viridis")
+                        cmap.set_bad(alpha=0)
+
+                        # Apply transformation if requested
+                        heatmap_display = heatmap.copy()
+                        mask = np.isnan(heatmap_display) | (heatmap_display == 0)
+
+                        if scale_config["transform"] == "log":
+                            heatmap_display[~mask] = np.log10(heatmap_display[~mask] + 1e-10)
+                            vmin = None
+                            vmax = None
+                        elif scale_config["transform"] == "sqrt":
+                            heatmap_display[~mask] = np.sqrt(heatmap_display[~mask])
+                            vmin = 0
+                            vmax = np.sqrt(scale_vmax) if scale_vmax is not None else None
+                        else:
+                            vmin = 0
+                            vmax = scale_vmax if scale_vmax is not None else global_vmax
+
+                        heatmap_display[mask] = np.nan
+
+                        im = ax.imshow(
+                            heatmap_display,
+                            extent=(0, template.shape[1], template.shape[0], 0),
+                            origin="upper",
+                            cmap=cmap,
+                            alpha=0.7,
+                            interpolation="bilinear",
+                            vmin=vmin,
+                            vmax=vmax,
+                        )
+
+                        cbar = plt.colorbar(im, ax=ax, label=scale_config["label"], fraction=0.046, pad=0.04)
+
+                    # Draw proximity circle if ball position is available
+                    if condition in ball_positions:
+                        ball_x, ball_y = ball_positions[condition]
+
+                        circle = Circle(
+                            (ball_x, ball_y),
+                            proximity_radius_px,
+                            color="red",
+                            fill=False,
+                            linestyle="--",
+                            linewidth=2,
+                            alpha=0.8,
+                            label=f"{proximity_radius_px}px proximity",
+                        )
+                        ax.add_patch(circle)
+
+                        # Add small dot at ball center
+                        ax.plot(ball_x, ball_y, "r+", markersize=10, markeredgewidth=2, alpha=0.8)
+
+                    # Add title and stats
+                    n_flies = data["fly"].nunique()
+                    n_points = len(data)
+                    title = f"{condition}\n{n_flies} flies, {n_points:,} points"
+                    if condition in ball_positions:
+                        title += f"\n(red circle: {proximity_radius_px}px proximity)"
+                    ax.set_title(title, fontsize=14, fontweight="bold")
+
+                    ax.set_xlim(0, template.shape[1])
+                    ax.set_ylim(template.shape[0], 0)
+                    ax.set_xlabel("X (template pixels)", fontsize=12)
+                    ax.set_ylabel("Y (template pixels)", fontsize=12)
+                    ax.set_aspect("equal")
+
+                # Hide empty subplots
+                for idx in range(n_conditions, len(axes_flat)):
+                    axes_flat[idx].axis("off")
+
+                plt.tight_layout()
+
+                # Save figure with proximity circles
+                output_filename_prox = (
+                    f"aligned_heatmaps_by_{args.group_by}_{scale_type}_with_proximity_{proximity_radius_px}px.png"
+                )
+                output_path_prox = output_dir / output_filename_prox
+                fig.savefig(output_path_prox, dpi=300, bbox_inches="tight")
+                print(
+                    f"   Saved {scale_type} scale heatmap with {proximity_radius_px}px proximity to: {output_path_prox}"
+                )
+
+                plt.close()
 
     print("\n8. COMPLETE!")
     print("=" * 70)

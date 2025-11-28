@@ -78,8 +78,8 @@ from Ballpushing_utils import utilities, config
 
 CONFIG = {
     "PATHS": {
-        "data_root": [Path("/mnt/upramdya_data/MD/MagnetBlock/Videos")],
-        "dataset_dir": Path("/mnt/upramdya_data/MD/MagnetBlock/Datasets"),
+        "data_root": [Path("/mnt/upramdya_data/MD/Learning_mutants/Videos")],
+        "dataset_dir": Path("/mnt/upramdya_data/MD/Learning_mutants/Datasets"),
         "excluded_folders": [],
         "output_summary_dir": None,  # "250419_transposed_control_folders"  # Optional output directory for summary files, should be a Path object
         "config_path": "config.json",
@@ -91,7 +91,7 @@ CONFIG = {
             # "F1_coordinates",  # For F1 experiments only
             # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps)
             # "standardized_contacts",
-            # "summary",  # Re-enabled for testing the optimization
+            "summary",  # Re-enabled for testing the optimization
             "coordinates",  # For regular experiments
             # "fly_positions",
         ],  # Metrics to process (add/remove as needed)

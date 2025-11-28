@@ -344,10 +344,11 @@ def plot_proximity_comparison(data, group_by="F1_condition", control_value="cont
 def main():
     parser = argparse.ArgumentParser(description="Calculate and plot ball proximity time")
     parser.add_argument(
-        "--proximity-threshold",
+        "--proximity-thresholds",
         type=float,
-        default=70,
-        help="Distance threshold for proximity in pixels (default: 70)",
+        nargs="+",
+        default=[70, 140, 200],
+        help="Distance thresholds for proximity in pixels (default: 70 140 200)",
     )
 
     args = parser.parse_args()
@@ -400,33 +401,39 @@ def main():
         print("   ERROR: No data remaining after filter!")
         return
 
-    # Calculate ball proximity proportions
-    print(f"\n3. Calculating ball proximity proportions (threshold={args.proximity_threshold}px)...")
-    proximity_data = calculate_ball_proximity_proportion(df_filtered, proximity_threshold=args.proximity_threshold)
-    print(f"   Calculated proximity for {len(proximity_data)} flies")
+    # Process each proximity threshold
+    for threshold in args.proximity_thresholds:
+        print(f"\n{'='*70}")
+        print(f"PROCESSING PROXIMITY THRESHOLD: {threshold}px")
+        print(f"{'='*70}")
 
-    if len(proximity_data) == 0:
-        print("   ERROR: No proximity data calculated!")
-        return
+        # Calculate ball proximity proportions
+        print(f"\n3. Calculating ball proximity proportions (threshold={threshold}px)...")
+        proximity_data = calculate_ball_proximity_proportion(df_filtered, proximity_threshold=threshold)
+        print(f"   Calculated proximity for {len(proximity_data)} flies")
 
-    # Save results to CSV
-    csv_path = output_dir / f"ball_proximity_proportions_threshold{args.proximity_threshold}.csv"
-    proximity_data.to_csv(csv_path, index=False)
-    print(f"   Saved results to: {csv_path}")
+        if len(proximity_data) == 0:
+            print("   ERROR: No proximity data calculated!")
+            continue
 
-    # Plot by F1_condition
-    print("\n4. Plotting by F1_condition...")
-    output_path_f1 = output_dir / f"ball_proximity_by_F1_condition_threshold{args.proximity_threshold}.png"
-    plot_proximity_comparison(
-        proximity_data, group_by="F1_condition", control_value="control", output_path=output_path_f1
-    )
+        # Save results to CSV
+        csv_path = output_dir / f"ball_proximity_proportions_threshold{int(threshold)}.csv"
+        proximity_data.to_csv(csv_path, index=False)
+        print(f"   Saved results to: {csv_path}")
 
-    # Plot by Pretraining
-    print("\n5. Plotting by Pretraining...")
-    output_path_pretraining = output_dir / f"ball_proximity_by_Pretraining_threshold{args.proximity_threshold}.png"
-    plot_proximity_comparison(
-        proximity_data, group_by="Pretraining", control_value="n", output_path=output_path_pretraining
-    )
+        # Plot by F1_condition
+        print(f"\n4. Plotting by F1_condition (threshold={threshold}px)...")
+        output_path_f1 = output_dir / f"ball_proximity_by_F1_condition_threshold{int(threshold)}.png"
+        plot_proximity_comparison(
+            proximity_data, group_by="F1_condition", control_value="control", output_path=output_path_f1
+        )
+
+        # Plot by Pretraining
+        print(f"\n5. Plotting by Pretraining (threshold={threshold}px)...")
+        output_path_pretraining = output_dir / f"ball_proximity_by_Pretraining_threshold{int(threshold)}.png"
+        plot_proximity_comparison(
+            proximity_data, group_by="Pretraining", control_value="n", output_path=output_path_pretraining
+        )
 
     print("\n" + "=" * 70)
     print("COMPLETE!")

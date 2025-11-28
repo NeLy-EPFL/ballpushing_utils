@@ -41,6 +41,95 @@ from statsmodels.stats.multitest import multipletests
 import time
 
 
+def _normalize_genotype_string(s):
+    """Normalize a single genotype string to avoid duplicates due to case/spacing.
+
+    - Strips leading/trailing whitespace
+    - Collapses internal whitespace to single spaces
+    - Preserves original case by default, but returns a compare key (lowercased)
+    """
+    if pd.isna(s):
+        return s, s
+    original = str(s)
+    cleaned = " ".join(original.strip().split())  # trim + collapse spaces
+    compare_key = cleaned.lower()
+    return cleaned, compare_key
+
+
+def normalize_genotypes_column(df, col_name="Genotype"):
+    """Normalize the Genotype column and merge duplicates that differ only by case/spacing.
+
+    Returns a tuple: (df_copy, merge_report)
+    - df_copy: DataFrame with normalized `Genotype`
+    - merge_report: dict mapping compare_key -> list of original variants observed
+    """
+    if col_name not in df.columns:
+        return df.copy(), {}
+
+    df = df.copy()
+    originals = df[col_name].astype(str).tolist()
+    normalized = []
+    keys = []
+    for s in originals:
+        cleaned, key = _normalize_genotype_string(s)
+        normalized.append(cleaned)
+        keys.append(key)
+
+    df[col_name] = normalized
+
+    # Build report of variants per key
+    report = {}
+    for orig, key in zip(originals, keys):
+        report.setdefault(key, set()).add(orig)
+
+    # If multiple variants map to the same key, choose a canonical label:
+    # Prefer the most frequent cleaned label among those variants
+    variant_counts = df.groupby(col_name).size().to_dict()
+    key_to_canonical = {}
+    for key, variants in report.items():
+        # Map variants to their cleaned form and count
+        cleaned_variants = {
+            " ".join(str(v).strip().split()): variant_counts.get(" ".join(str(v).strip().split()), 0) for v in variants
+        }
+        # Pick the cleaned variant with max count; tie-breaker: shortest string
+        canonical = (
+            sorted(cleaned_variants.items(), key=lambda x: (-x[1], len(x[0])))[0][0] if cleaned_variants else key
+        )
+        key_to_canonical[key] = canonical
+
+    # Apply canonical mapping by compare key
+    df[col_name] = [key_to_canonical[k] for k in keys]
+
+    # Convert to categorical to lock consistent ordering
+    ordered = sorted(df[col_name].unique())
+    df[col_name] = pd.Categorical(df[col_name], categories=ordered, ordered=True)
+
+    # Convert sets to sorted lists for printing
+    report = {k: sorted(list(v)) for k, v in report.items()}
+    return df, report
+
+
+def print_genotype_individual_counts(df, group_col="Genotype", subject_candidates=None):
+    """Print a summary of how many individuals are present per genotype.
+
+    Prefers a subject identifier column (e.g., 'fly'), falling back to row counts.
+    """
+    if subject_candidates is None:
+        subject_candidates = ["fly", "Fly", "subject", "Subject", "id", "ID"]
+
+    subject_col = next((c for c in subject_candidates if c in df.columns), None)
+
+    print("\nPer-genotype individual counts:")
+    if subject_col:
+        for genotype in sorted(pd.Series(df[group_col]).astype(str).unique()):
+            n = df[df[group_col] == genotype][subject_col].nunique()
+            print(f"  {genotype}: {n} individuals (unique {subject_col})")
+    else:
+        for genotype in sorted(pd.Series(df[group_col]).astype(str).unique()):
+            n = len(df[df[group_col] == genotype])
+            print(f"  {genotype}: {n} rows (no subject id found)")
+
+
 def generate_genotype_mannwhitney_plots(
     data,
     metrics,
@@ -82,7 +171,29 @@ def generate_genotype_mannwhitney_plots(
         metric_start_time = time.time()
         print(f"Generating Mann-Whitney jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
+        # Check data availability before filtering
+        original_data_counts = data.groupby(y).size()
+
         plot_data = data.dropna(subset=[metric, y])
+
+        # Report data loss due to NaN values
+        filtered_data_counts = plot_data.groupby(y).size()
+        total_original = len(data)
+        total_filtered = len(plot_data)
+
+        if total_filtered < total_original:
+            pct_kept = 100 * total_filtered / total_original
+            print(
+                f"  ⚠️  Data filtering: kept {total_filtered}/{total_original} rows ({pct_kept:.1f}%) after removing NaN values"
+            )
+
+            # Show per-genotype NaN statistics
+            for genotype in sorted(data[y].unique()):
+                orig_count = original_data_counts.get(genotype, 0)
+                filt_count = filtered_data_counts.get(genotype, 0)
+                if orig_count != filt_count:
+                    nan_count = orig_count - filt_count
+                    print(f"    {genotype}: {filt_count}/{orig_count} samples ({nan_count} NaN values for {metric})")
 
         # Get all genotypes
         genotypes = sorted(plot_data[y].unique())
@@ -525,7 +636,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         Number of samples to use in test mode
     """
     # Load the learning mutants dataset
-    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251125_10_summary_learning_mutants_Data/summary/pooled_summary.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251126_14_summary_learning_mutants_Data/summary/pooled_summary.feather"
 
     print(f"Loading learning mutants dataset from: {dataset_path}")
     try:
@@ -655,6 +766,9 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
     """
     Analyze binary metrics using Fisher's exact test for genotype comparisons.
 
+    For 2 groups: Uses Fisher's exact test
+    For 3+ groups: Uses overall chi-square test followed by pairwise Fisher's tests with FDR correction
+
     Parameters:
     -----------
     data : pd.DataFrame
@@ -672,18 +786,19 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
 
     Returns:
     --------
-    pd.DataFrame
-        Statistics results for binary metrics
+    tuple
+        (pairwise_results_df, overall_results_df) - DataFrames with pairwise and overall statistics
     """
     if not binary_metrics:
         print("No binary metrics to analyze")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     print(f"\n{'='*50}")
     print(f"BINARY METRICS ANALYSIS")
     print(f"{'='*50}")
 
     results = []
+    overall_results = []  # Store overall test results
 
     if output_dir:
         output_dir = Path(output_dir)
@@ -691,6 +806,7 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
 
     # Get unique groups
     genotypes = sorted(data[y].unique())
+    n_genotypes = len(genotypes)
 
     # Determine control genotype
     if control_genotype is None:
@@ -701,6 +817,7 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
 
     print(f"Control genotype: {control_genotype}")
     print(f"Test genotypes: {test_genotypes}")
+    print(f"Number of genotypes: {n_genotypes}")
 
     for metric in binary_metrics:
         print(f"\nAnalyzing binary metric: {metric}")
@@ -709,7 +826,56 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
         if output_dir and should_skip_metric(metric, output_dir, overwrite):
             continue
 
-        # Test each genotype vs control
+        # Create contingency table
+        contingency = pd.crosstab(data[y], data[metric], margins=True)
+        print(f"Contingency table for {metric}:")
+        print(contingency)
+
+        # Calculate proportions for each genotype
+        proportions = data.groupby(y)[metric].agg(["count", "sum", "mean"]).round(4)
+        proportions["proportion"] = proportions["mean"]
+        proportions["n_success"] = proportions["sum"]
+        proportions["n_total"] = proportions["count"]
+        print(f"\nProportions for {metric}:")
+        print(proportions[["n_success", "n_total", "proportion"]])
+
+        # For 3+ groups, perform overall chi-square test first
+        overall_p = None
+        overall_chi2 = None
+        if n_genotypes > 2:
+            try:
+                # Overall chi-square test
+                ct_values = pd.crosstab(data[y], data[metric])
+                chi2, overall_p, dof, expected = chi2_contingency(ct_values)
+                overall_chi2 = chi2
+                min_expected = expected.min()
+
+                print(f"\n  Overall Chi-square test: χ²={chi2:.3f}, p={overall_p:.4f}, df={dof}")
+                print(f"  Min expected frequency: {min_expected:.1f}")
+
+                if min_expected < 5:
+                    print(f"  ⚠️  Warning: Some expected frequencies < 5, chi-square may not be valid")
+
+                # Store overall result
+                overall_results.append(
+                    {
+                        "metric": metric,
+                        "grouping": y,
+                        "n_groups": n_genotypes,
+                        "chi2": chi2,
+                        "p_value": overall_p,
+                        "dof": dof,
+                        "min_expected": min_expected,
+                        "significant": overall_p < 0.05,
+                    }
+                )
+
+            except Exception as e:
+                print(f"  Error in overall chi-square test: {e}")
+
+        # Pairwise comparisons: each genotype vs control
+        pairwise_results_for_metric = []
+
         for test_genotype in test_genotypes:
             # Get data for this comparison
             test_data = data[data[y] == test_genotype][metric].dropna()
@@ -720,38 +886,28 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
                 continue
 
             # Create 2x2 contingency table for Fisher's exact test
-            test_success = test_data.sum()
+            test_success = int(test_data.sum())
             test_total = len(test_data)
-            control_success = control_data_subset.sum()
+            control_success = int(control_data_subset.sum())
             control_total = len(control_data_subset)
 
             # Fisher's exact test
             try:
                 table = [[test_success, test_total - test_success], [control_success, control_total - control_success]]
+
+                # Run Fisher's exact test
                 fisher_result = fisher_exact(table)
-                odds_ratio = fisher_result[0]
-                p_value = fisher_result[1]
+
+                # Extract results (fisher_exact returns (oddsratio, pvalue))
+                odds_ratio = float(fisher_result[0])
+                p_value = float(fisher_result[1])
 
                 # Effect size (difference in proportions)
                 test_prop = test_success / test_total if test_total > 0 else 0
                 control_prop = control_success / control_total if control_total > 0 else 0
                 effect_size = test_prop - control_prop
 
-                # Determine significance level
-                if p_value < 0.001:
-                    sig_level = "***"
-                    significant = True
-                elif p_value < 0.01:
-                    sig_level = "**"
-                    significant = True
-                elif p_value < 0.05:
-                    sig_level = "*"
-                    significant = True
-                else:
-                    sig_level = "ns"
-                    significant = False
-
-                results.append(
+                pairwise_results_for_metric.append(
                     {
                         "metric": metric,
                         "control": control_genotype,
@@ -765,39 +921,99 @@ def analyze_binary_metrics(data, binary_metrics, y="Genotype", output_dir=None, 
                         "effect_size": effect_size,
                         "odds_ratio": odds_ratio,
                         "p_value": p_value,
-                        "significant": significant,
-                        "sig_level": sig_level,
+                        "p_value_uncorrected": p_value,  # Store uncorrected p-value
                         "test_type": "Fisher exact",
+                        "overall_chi2": overall_chi2,
+                        "overall_p": overall_p,
                     }
                 )
 
-                print(f"  {test_genotype} vs {control_genotype}: OR={odds_ratio:.3f}, p={p_value:.4f} {sig_level}")
+                print(f"  {test_genotype} vs {control_genotype}: OR={odds_ratio:.3f}, p={p_value:.4f}")
 
             except Exception as e:
                 print(f"  Error testing {test_genotype} vs {control_genotype}: {e}")
 
+        # Apply FDR correction if we have multiple comparisons for this metric
+        if len(pairwise_results_for_metric) > 1:
+            p_values = [r["p_value"] for r in pairwise_results_for_metric]
+            reject, p_corrected, _, _ = multipletests(p_values, alpha=0.05, method="fdr_bh")
+
+            print(f"\n  FDR correction (Benjamini-Hochberg) applied to {len(p_values)} comparisons:")
+            for i, result in enumerate(pairwise_results_for_metric):
+                result["p_value_fdr"] = p_corrected[i]
+                result["significant_fdr"] = reject[i]
+
+                # Update significance level based on FDR-corrected p-value
+                if p_corrected[i] < 0.001:
+                    sig_level = "***"
+                elif p_corrected[i] < 0.01:
+                    sig_level = "**"
+                elif p_corrected[i] < 0.05:
+                    sig_level = "*"
+                else:
+                    sig_level = "ns"
+
+                result["sig_level_fdr"] = sig_level
+                print(
+                    f"    {result['test']} vs {result['control']}: p_uncorrected={result['p_value']:.4f}, p_fdr={p_corrected[i]:.4f} {sig_level}"
+                )
+        else:
+            # No FDR correction needed for single comparison
+            for result in pairwise_results_for_metric:
+                result["p_value_fdr"] = result["p_value"]
+                result["significant_fdr"] = result["p_value"] < 0.05
+
+                # Determine significance level
+                if result["p_value"] < 0.001:
+                    sig_level = "***"
+                elif result["p_value"] < 0.01:
+                    sig_level = "**"
+                elif result["p_value"] < 0.05:
+                    sig_level = "*"
+                else:
+                    sig_level = "ns"
+
+                result["sig_level_fdr"] = sig_level
+
+        # Add all pairwise results for this metric to the overall results list
+        results.extend(pairwise_results_for_metric)
+
         # Create visualization
         if output_dir:
-            create_binary_metric_plot(data, metric, y, output_dir, control_genotype)
+            create_binary_metric_plot(data, metric, y, output_dir, control_genotype, n_genotypes)
 
     results_df = pd.DataFrame(results)
+    overall_df = pd.DataFrame(overall_results)
 
     if output_dir and not results_df.empty:
         stats_file = output_dir / "binary_metrics_statistics.csv"
         results_df.to_csv(stats_file, index=False)
         print(f"\nBinary metrics statistics saved to: {stats_file}")
 
-    return results_df
+    if output_dir and not overall_df.empty:
+        overall_file = output_dir / "binary_metrics_overall_tests.csv"
+        overall_df.to_csv(overall_file, index=False)
+        print(f"Overall chi-square tests saved to: {overall_file}")
+
+    return results_df, overall_df
 
 
-def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None):
-    """Create a visualization for binary metrics showing proportions"""
+def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None, n_genotypes=2):
+    """Create a visualization for binary metrics showing proportions with significance annotations"""
+
+    import matplotlib
+
+    # Set Arial font globally for editable text in PDFs
+    matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts for editable text in PDF
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
     # Calculate proportions
     prop_data = data.groupby(y)[metric].agg(["count", "sum", "mean"]).reset_index()
     prop_data["proportion"] = prop_data["mean"]
-    prop_data["n_success"] = prop_data["sum"]
-    prop_data["n_total"] = prop_data["count"]
+    prop_data["n_success"] = prop_data["sum"].astype(int)
+    prop_data["n_total"] = prop_data["count"].astype(int)
 
     # Sort by genotype (control first if specified)
     if control_genotype:
@@ -805,9 +1021,50 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None
         prop_data = prop_data.sort_values(["sort_key", y]).reset_index(drop=True)
         prop_data = prop_data.drop(columns=["sort_key"])
 
+    # Calculate statistical significance for each comparison vs control
+    significance_results = {}
+    if control_genotype and n_genotypes > 1:
+        control_data_subset = data[data[y] == control_genotype][metric].dropna()
+        control_success = int(control_data_subset.sum())
+        control_total = len(control_data_subset)
+
+        for _, row in prop_data.iterrows():
+            genotype = row[y]
+            if genotype == control_genotype:
+                continue
+
+            test_data = data[data[y] == genotype][metric].dropna()
+            test_success = int(test_data.sum())
+            test_total = len(test_data)
+
+            if test_total > 0 and control_total > 0:
+                try:
+                    table = [
+                        [test_success, test_total - test_success],
+                        [control_success, control_total - control_success],
+                    ]
+                    fisher_result = fisher_exact(table)
+
+                    # Extract p-value (fisher_exact returns (oddsratio, pvalue))
+                    p_value = float(fisher_result[1])
+
+                    # Determine significance level
+                    if p_value < 0.001:
+                        sig_level = "***"
+                    elif p_value < 0.01:
+                        sig_level = "**"
+                    elif p_value < 0.05:
+                        sig_level = "*"
+                    else:
+                        sig_level = "ns"
+
+                    significance_results[genotype] = {"p_value": p_value, "sig_level": sig_level}
+                except Exception:
+                    pass
+
     # Use color palette
-    n_genotypes = len(prop_data)
-    colors = sns.color_palette("husl", n_genotypes)
+    n_groups = len(prop_data)
+    colors = sns.color_palette("husl", n_groups)
 
     # Calculate confidence intervals (Wilson score interval)
     def wilson_ci(successes, total, confidence=0.95):
@@ -830,8 +1087,8 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None
     ci_df = pd.DataFrame(ci_data)
     prop_data = pd.concat([prop_data, ci_df], axis=1)
 
-    # Create the plot
-    fig_height = max(6, n_genotypes * 0.6)
+    # Create the plot with two subplots
+    fig_height = max(6, n_groups * 0.6)
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, fig_height))
 
     # Plot 1: Proportion with confidence intervals (horizontal bars)
@@ -844,20 +1101,32 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None
     xerr = [yerr_lower, yerr_upper]
     ax1.errorbar(prop_data["proportion"], y_positions, xerr=xerr, fmt="none", color="black", capsize=5)
 
-    # Add sample sizes on bars
+    # Add sample sizes and significance annotations on bars
     for i, (bar, row) in enumerate(zip(bars, prop_data.itertuples())):
         width = bar.get_width()
-        ax1.text(
-            width + 0.01, bar.get_y() + bar.get_height() / 2.0, f"n={row.n_total}", ha="left", va="center", fontsize=10
-        )
+        genotype = getattr(row, y)
 
-    ax1.set_ylabel("Genotype")
-    ax1.set_xlabel(f"Proportion of {metric}")
-    ax1.set_title(f"{metric} - Proportions with 95% CI")
+        # Add sample size
+        text_x = width + 0.01
+        text = f"n={row.n_total}"
+
+        # Add significance if available
+        if genotype in significance_results:
+            sig_level = significance_results[genotype]["sig_level"]
+            if sig_level != "ns":
+                text += f" {sig_level}"
+
+        ax1.text(text_x, bar.get_y() + bar.get_height() / 2.0, text, ha="left", va="center", fontsize=10)
+
+    ax1.set_ylabel("Genotype", fontsize=11)
+    ax1.set_xlabel(f"Proportion of {metric}", fontsize=11)
+    ax1.set_title(f"{metric} - Proportions with 95% CI", fontsize=12)
     ax1.set_yticks(y_positions)
     ax1.set_yticklabels(prop_data[y])
     ax1.set_xlim(0, 1.1)
     ax1.grid(True, alpha=0.3)
+    ax1.set_facecolor("white")
+    fig.patch.set_facecolor("white")
 
     # Plot 2: Stacked bar chart showing counts (horizontal bars)
     ax2.barh(y_positions, prop_data["n_success"], label=f"{metric}=1", color="lightgreen", alpha=0.8)
@@ -870,19 +1139,20 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_genotype=None
         alpha=0.8,
     )
 
-    ax2.set_ylabel("Genotype")
-    ax2.set_xlabel("Count")
-    ax2.set_title(f"{metric} - Raw Counts")
+    ax2.set_ylabel("Genotype", fontsize=11)
+    ax2.set_xlabel("Count", fontsize=11)
+    ax2.set_title(f"{metric} - Raw Counts", fontsize=12)
     ax2.set_yticks(y_positions)
     ax2.set_yticklabels(prop_data[y])
-    ax2.legend()
+    ax2.legend(fontsize=10)
     ax2.grid(True, alpha=0.3)
+    ax2.set_facecolor("white")
 
     plt.tight_layout()
 
     # Save the plot
     output_file = output_dir / f"{metric}_binary_analysis.pdf"
-    plt.savefig(output_file, dpi=300, bbox_inches="tight")
+    plt.savefig(output_file, dpi=300, bbox_inches="tight", format="pdf")
     plt.close()
 
     print(f"  Binary plot saved: {output_file}")
@@ -914,6 +1184,25 @@ def main(overwrite=True, test_mode=False):
     # Load the dataset
     print("Loading dataset...")
     dataset = load_and_clean_dataset(test_mode=test_mode, test_sample_size=200)
+
+    # Normalize Genotype values to avoid duplicates due to case/spacing
+    if "Genotype" in dataset.columns:
+        before = sorted(dataset["Genotype"].astype(str).unique())
+        dataset, merge_report = normalize_genotypes_column(dataset, col_name="Genotype")
+        after = sorted([str(x) for x in pd.Series(dataset["Genotype"]).astype(str).unique()])
+        print(f"🔤 Genotype normalization: {len(before)} unique -> {len(after)} unique")
+        # Print mergers where multiple variants map to same key
+        merged = {k: v for k, v in merge_report.items() if len(v) > 1}
+        if merged:
+            print("  Merged variants (case/spacing differences):")
+            for key, variants in merged.items():
+                canonical = " ".join(str(variants[0]).strip().split()).lower()
+                print(f"   - Key '{key}': {variants}")
+        else:
+            print("  No case/spacing duplicate genotypes detected.")
+
+        # Print per-genotype individual counts after normalization
+        print_genotype_individual_counts(dataset, group_col="Genotype")
 
     # Check for Genotype column
     if "Genotype" not in dataset.columns:
@@ -1015,6 +1304,13 @@ def main(overwrite=True, test_mode=False):
 
     print(f"📊 Found {len(available_metrics)} metrics after filtering")
 
+    # Define explicit binary metrics to look for
+    all_possible_binary_metrics = ["has_finished", "has_major", "has_significant", "pulled", "pushed"]
+    predefined_binary_metrics = [metric for metric in all_possible_binary_metrics if metric in available_metrics]
+
+    print(f"Checking for binary metrics: {all_possible_binary_metrics}")
+    print(f"Found predefined binary metrics in dataset: {predefined_binary_metrics}")
+
     # Categorize metrics
     def categorize_metrics(col):
         """Categorize metrics for appropriate analysis"""
@@ -1044,23 +1340,29 @@ def main(overwrite=True, test_mode=False):
 
     print(f"\n📋 Categorizing {len(available_metrics)} available metrics...")
     continuous_metrics = []
-    binary_metrics = []
+    binary_metrics = list(predefined_binary_metrics)  # Start with predefined binary metrics
     excluded_metrics = []
 
     for col in available_metrics:
+        # Skip if already in predefined binary metrics
+        if col in predefined_binary_metrics:
+            continue
+
         category = categorize_metrics(col)
 
         if category == "continuous":
             continuous_metrics.append(col)
         elif category == "binary":
-            binary_metrics.append(col)
+            if col not in binary_metrics:
+                binary_metrics.append(col)
         elif category == "insufficient_data":
             non_nan_count = dataset[col].count()
             total_count = len(dataset)
             print(f"  ⚠️  {col}: Only {non_nan_count}/{total_count} non-NaN values, including anyway")
             non_nan_values = dataset[col].dropna().unique()
             if len(non_nan_values) >= 2 and set(non_nan_values) == {0, 1}:
-                binary_metrics.append(col)
+                if col not in binary_metrics:
+                    binary_metrics.append(col)
             else:
                 continuous_metrics.append(col)
         else:
@@ -1162,7 +1464,7 @@ def main(overwrite=True, test_mode=False):
 
     # Process binary metrics
     if binary_metrics:
-        print(f"\n--- BINARY METRICS ANALYSIS (Fisher's exact tests) ---")
+        print(f"\n--- BINARY METRICS ANALYSIS (Fisher's exact tests with FDR correction) ---")
         binary_data = dataset[["Genotype"] + binary_metrics].copy()
 
         print(f"Analyzing binary metrics for learning mutants experiments...")
@@ -1171,7 +1473,7 @@ def main(overwrite=True, test_mode=False):
         binary_output_dir = base_output_dir / "binary_analysis"
         binary_output_dir.mkdir(parents=True, exist_ok=True)
 
-        binary_results = analyze_binary_metrics(
+        binary_results, overall_binary_results = analyze_binary_metrics(
             binary_data,
             binary_metrics,
             y="Genotype",
@@ -1179,6 +1481,12 @@ def main(overwrite=True, test_mode=False):
             overwrite=overwrite,
             control_genotype=control_genotype,
         )
+
+        print(f"\nBinary metrics analysis completed:")
+        if not binary_results.empty:
+            print(f"  Pairwise comparisons: {len(binary_results)}")
+        if not overall_binary_results.empty:
+            print(f"  Overall tests (chi-square): {len(overall_binary_results)}")
 
     print(f"\n{'='*60}")
     print("✅ Learning mutants genotype analysis complete! Check output directory for results.")
