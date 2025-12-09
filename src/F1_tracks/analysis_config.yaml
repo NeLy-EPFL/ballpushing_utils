@@ -101,6 +101,7 @@ analysis_modes:
     brain_region_mapping:
       "TNTxDDC": "Olfaction"
       "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for DDC
     coordinates:
       coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
@@ -124,10 +125,10 @@ analysis_modes:
 
   # Pooled modes - combine data from multiple experiments for shared controls
   tnt_ddc_pooled:
-    description: "TNT DDC with pooled EmptyGal4 controls from MB247 and LC10-2"
+    description: "TNT DDC with pooled EmptySplit controls from MB247 and LC10-2"
     primary_dataset: "tnt_ddc"  # Reference to main mode
     pool_from_modes: ["tnt_mb247", "tnt_lc10_2"]  # Pool controls from these modes
-    shared_genotypes: ["TNTxEmptyGal4"]  # Genotypes to pool
+    shared_genotypes: ["TNTxEmptySplit"]  # Genotypes to pool
     grouping_variables:
       primary: "pretraining"
       secondary: "genotype"
@@ -135,6 +136,7 @@ analysis_modes:
     brain_region_mapping:
       "TNTxDDC": "Olfaction"
       "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for DDC pooled
     coordinates:
       coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
@@ -157,10 +159,10 @@ analysis_modes:
           progress: true
 
   tnt_mb247_pooled:
-    description: "TNT MB247 with pooled EmptyGal4 controls from DDC and LC10-2"
+    description: "TNT MB247 with pooled EmptySplit controls from DDC and LC10-2"
     primary_dataset: "tnt_mb247"
     pool_from_modes: ["tnt_ddc", "tnt_lc10_2"]
-    shared_genotypes: ["TNTxEmptyGal4"]
+    shared_genotypes: ["TNTxEmptySplit"]
     grouping_variables:
       primary: "pretraining"
       secondary: "genotype"
@@ -168,6 +170,7 @@ analysis_modes:
     brain_region_mapping:
       "TNTxMB247": "MB"
       "TNTxEmptyGal4": "Control"
+      "TNTxEmptySplit": "Control"
     # Coordinate plotting specific settings for MB247 pooled
     coordinates:
       coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/F1_coordinates/pooled_F1_coordinates.feather"
@@ -190,10 +193,10 @@ analysis_modes:
           progress: true
 
   tnt_lc10_2_pooled:
-    description: "TNT LC10-2 with pooled EmptyGal4 controls from MB247 and DDC"
+    description: "TNT LC10-2 with pooled EmptySplit controls from MB247 and DDC"
     primary_dataset: "tnt_lc10_2"
     pool_from_modes: ["tnt_mb247", "tnt_ddc"]
-    shared_genotypes: ["TNTxEmptyGal4", "TNTxEmptySplit"]
+    shared_genotypes: ["TNTxEmptySplit"]
     grouping_variables:
       primary: "pretraining"
       secondary: "genotype"

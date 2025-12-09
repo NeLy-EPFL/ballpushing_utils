@@ -166,7 +166,7 @@ def format_pretraining_label(value):
 class F1AnalysisFramework:
     """Unified framework for F1 tracks analysis."""
 
-    def __init__(self, config_path=None, output_dir=None):
+    def __init__(self, config_path=None, output_dir=None, control_filter=None):
         """Initialize the framework with configuration.
 
         Args:
@@ -176,6 +176,12 @@ class F1AnalysisFramework:
                        - tnt_mb247: /mnt/upramdya_data/MD/F1_Tracks/MB247
                        - tnt_lc10_2: /mnt/upramdya_data/MD/F1_Tracks/LC10-2
                        - tnt_ddc: /mnt/upramdya_data/MD/F1_Tracks/DDC
+            control_filter: Which control genotypes to include. Options:
+                           - None: Include all genotypes in brain_region_mapping (default)
+                           - 'EmptyGal4': Only TNTxEmptyGal4
+                           - 'EmptySplit': Only TNTxEmptySplit
+                           - 'both': Both EmptyGal4 and EmptySplit
+                           - 'none': No controls (only experimental genotypes)
         """
         if config_path is None:
             config_path = Path(__file__).parent / "analysis_config.yaml"
@@ -185,6 +191,9 @@ class F1AnalysisFramework:
 
         # Store custom output directory if provided
         self.custom_output_dir = Path(output_dir) if output_dir else None
+
+        # Store control filter preference
+        self.control_filter = control_filter
 
         # Storage for global axis ranges (will be populated when loading all data)
         self.global_axis_ranges = {}
@@ -234,6 +243,9 @@ class F1AnalysisFramework:
                 initial_shape = df.shape
                 df = df[~df["Date"].isin(excluded_dates)]
                 print(f"Removed excluded dates {excluded_dates}. Shape: {initial_shape} -> {df.shape}")
+
+            # Filter genotypes based on brain_region_mapping
+            df = self._filter_allowed_genotypes(df, mode)
 
             return df
 
@@ -325,6 +337,9 @@ class F1AnalysisFramework:
                 df_combined = df_combined[~df_combined["Date"].isin(excluded_dates)]
                 print(f"  Removed excluded dates {excluded_dates}. Shape: {initial_shape} -> {df_combined.shape}")
 
+            # Filter genotypes based on brain_region_mapping
+            df_combined = self._filter_allowed_genotypes(df_combined, mode)
+
             # Print genotype distribution
             if genotype_col in df_combined.columns:
                 print(f"\n  📊 Genotype distribution in pooled dataset:")
@@ -336,6 +351,100 @@ class F1AnalysisFramework:
         else:
             print(f"\n  ℹ️  No additional data pooled, using primary dataset only")
             return df_primary
+
+    def _filter_allowed_genotypes(self, df, mode):
+        """Filter dataframe to only include genotypes specified in brain_region_mapping,
+        with optional control genotype filtering.
+
+        Args:
+            df: DataFrame to filter
+            mode: Analysis mode
+
+        Returns:
+            Filtered DataFrame
+        """
+        mode_config = self.config["analysis_modes"][mode]
+        brain_region_mapping = mode_config.get("brain_region_mapping")
+
+        if not brain_region_mapping:
+            return df
+
+        # Find genotype column
+        genotype_col = None
+        for col in df.columns:
+            if "genotype" in col.lower():
+                genotype_col = col
+                break
+
+        if not genotype_col:
+            print("  ⚠️  Could not find genotype column for filtering")
+            return df
+
+        # Get allowed genotypes from brain_region_mapping
+        allowed_genotypes = list(brain_region_mapping.keys())
+
+        # Apply control filter if specified
+        if self.control_filter:
+            filtered_genotypes = self._apply_control_filter(allowed_genotypes, mode)
+            if filtered_genotypes != allowed_genotypes:
+                print(f"  🎯 Control filter '{self.control_filter}' applied")
+                allowed_genotypes = filtered_genotypes
+
+        # Filter dataframe
+        initial_shape = df.shape
+        df_filtered = df[df[genotype_col].isin(allowed_genotypes)]
+
+        if df_filtered.shape[0] < initial_shape[0]:
+            removed_count = initial_shape[0] - df_filtered.shape[0]
+            removed_genotypes = set(df[~df[genotype_col].isin(allowed_genotypes)][genotype_col].unique())
+            print(f"  🔍 Filtered genotypes: removed {removed_count} rows")
+            print(f"     Removed genotypes: {', '.join(sorted(removed_genotypes))}")
+            print(f"     Kept genotypes: {', '.join(sorted(allowed_genotypes))}")
+            print(f"     Shape: {initial_shape} -> {df_filtered.shape}")
+
+        return df_filtered
+
+    def _apply_control_filter(self, genotypes, mode):
+        """Apply control filter to genotype list.
+
+        Args:
+            genotypes: List of genotype names
+            mode: Analysis mode
+
+        Returns:
+            Filtered list of genotypes
+        """
+        if not self.control_filter or self.control_filter.lower() == "none":
+            # 'none' means no controls at all - only experimental genotypes
+            if self.control_filter and self.control_filter.lower() == "none":
+                return [g for g in genotypes if "Empty" not in g]
+            return genotypes
+
+        filter_lower = self.control_filter.lower()
+
+        # Start with all genotypes
+        result = []
+
+        for genotype in genotypes:
+            # Always keep non-control genotypes (experimental lines)
+            if "Empty" not in genotype:
+                result.append(genotype)
+                continue
+
+            # Filter control genotypes based on control_filter
+            if filter_lower == "both":
+                # Keep all controls
+                result.append(genotype)
+            elif filter_lower == "emptygal4":
+                # Keep only EmptyGal4
+                if "EmptyGal4" in genotype:
+                    result.append(genotype)
+            elif filter_lower == "emptysplit":
+                # Keep only EmptySplit
+                if "EmptySplit" in genotype:
+                    result.append(genotype)
+
+        return result
 
     def _load_fly_positions_data(self, mode):
         """Load fly positions data for the specified mode, with support for pooled modes."""
@@ -1062,6 +1171,11 @@ class F1AnalysisFramework:
             else:
                 plot_filename = plot_name
 
+            # Add control filter suffix to filename if specified
+            if self.control_filter:
+                control_suffix = self.control_filter.replace(" ", "")
+                plot_filename = f"{plot_filename}_{control_suffix}"
+
             # Save in both PNG and PDF formats
             formats_to_save = ["png", "pdf"]
 
@@ -1659,7 +1773,19 @@ class F1AnalysisFramework:
             data_display[data_display[x_col] == condition][y_col].dropna().values for condition in unique_values
         ]
 
-        # Add scatter with converted data FIRST (so boxplot appears on top)
+        # Create boxplot with converted data FIRST (drawn below)
+        box_plot = sns.boxplot(
+            data=data_display,
+            x=x_col,
+            y=y_col,
+            ax=ax,
+            order=unique_values,
+            palette=[color_mapping.get(v, "gray") for v in unique_values],
+            width=0.6,
+            zorder=1,  # Lower z-order so scatter appears on top
+        )
+
+        # Add scatter with converted data on top
         for i, condition in enumerate(unique_values):
             condition_data = groups_converted[i]
             x_pos = np.random.normal(i, 0.04, size=len(condition_data))
@@ -1671,20 +1797,8 @@ class F1AnalysisFramework:
                 color=color_mapping.get(condition, "gray"),
                 edgecolors="black",
                 linewidths=0.5,
-                zorder=1,  # Lower z-order so boxplot appears on top
+                zorder=2,  # Higher z-order so scatter appears on top
             )
-
-        # Create boxplot with converted data (drawn on top)
-        box_plot = sns.boxplot(
-            data=data_display,
-            x=x_col,
-            y=y_col,
-            ax=ax,
-            order=unique_values,
-            palette=[color_mapping.get(v, "gray") for v in unique_values],
-            width=0.6,
-            zorder=2,  # Higher z-order so it appears on top of scatter
-        )
 
         # Style boxplot (F1 style: transparent boxes, colored edges)
         for patch in box_plot.patches:
@@ -1839,15 +1953,7 @@ class F1AnalysisFramework:
             genotype_val = group.split(" + ")[0]
             colors.append(genotype_color_map[genotype_val])
 
-        # Add scatter with converted data FIRST (so boxplot appears on top)
-        for i, group in enumerate(unique_groups):
-            group_data = groups_converted[i]
-            x_pos = np.random.normal(i, 0.04, size=len(group_data))
-            ax.scatter(
-                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=1
-            )
-
-        # Create boxplot with converted data (drawn on top)
+        # Create boxplot with converted data FIRST (drawn below)
         box_plot = sns.boxplot(
             data=data_display,
             x="combined_group",
@@ -1856,8 +1962,16 @@ class F1AnalysisFramework:
             order=unique_groups,
             palette=colors,
             width=0.6,
-            zorder=2,
+            zorder=1,  # Lower z-order so scatter appears on top
         )
+
+        # Add scatter with converted data on top
+        for i, group in enumerate(unique_groups):
+            group_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(group_data))
+            ax.scatter(
+                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=2
+            )
 
         # Style based on pretraining
         for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
@@ -2090,7 +2204,19 @@ class F1AnalysisFramework:
             data_display[data_display[x_col] == condition][y_col].dropna().values for condition in unique_values
         ]
 
-        # Add scatter with converted data FIRST (so boxplot appears on top)
+        # Create boxplot with converted data FIRST (drawn below)
+        box_plot = sns.boxplot(
+            data=data_display,
+            x=x_col,
+            y=y_col,
+            ax=ax,
+            order=unique_values,
+            palette=[color_mapping.get(v, "gray") for v in unique_values],
+            width=0.6,
+            zorder=1,  # Lower z-order so scatter appears on top
+        )
+
+        # Add scatter with converted data on top
         for i, condition in enumerate(unique_values):
             condition_data = groups_converted[i]
             x_pos = np.random.normal(i, 0.04, size=len(condition_data))
@@ -2102,20 +2228,8 @@ class F1AnalysisFramework:
                 color=color_mapping.get(condition, "gray"),
                 edgecolors="black",
                 linewidths=0.5,
-                zorder=1,  # Lower z-order so boxplot appears on top
+                zorder=2,  # Higher z-order so scatter appears on top
             )
-
-        # Create boxplot with converted data (drawn on top)
-        box_plot = sns.boxplot(
-            data=data_display,
-            x=x_col,
-            y=y_col,
-            ax=ax,
-            order=unique_values,
-            palette=[color_mapping.get(v, "gray") for v in unique_values],
-            width=0.6,
-            zorder=2,  # Higher z-order so it appears on top of scatter
-        )
 
         # Style boxplot (F1 style: transparent boxes, colored edges)
         for patch in box_plot.patches:
@@ -2309,15 +2423,7 @@ class F1AnalysisFramework:
             genotype = group.split(" + ")[0]
             colors.append(genotype_color_map.get(genotype, "gray"))
 
-        # Add scatter with converted data FIRST (so boxplot appears on top)
-        for i, group in enumerate(unique_groups):
-            group_data = groups_converted[i]
-            x_pos = np.random.normal(i, 0.04, size=len(group_data))
-            ax.scatter(
-                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=1
-            )
-
-        # Create boxplot with converted data (drawn on top)
+        # Create boxplot with converted data FIRST (drawn below)
         box_plot = sns.boxplot(
             data=data_display,
             x="combined_group",
@@ -2326,8 +2432,16 @@ class F1AnalysisFramework:
             order=unique_groups,
             palette=colors,
             width=0.6,
-            zorder=2,
+            zorder=1,  # Lower z-order so scatter appears on top
         )
+
+        # Add scatter with converted data on top
+        for i, group in enumerate(unique_groups):
+            group_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(group_data))
+            ax.scatter(
+                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=2
+            )
 
         # Style based on pretraining
         for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
@@ -2488,7 +2602,7 @@ class F1AnalysisFramework:
                         p_text = "p < 0.001"
                     else:
                         p_text = f"p = {p_val:.3f}"
-                        fontweight="bold",
+                        fontweight = ("bold",)
 
                     # Add stars for significant results
                     if result["significant"]:
@@ -4569,11 +4683,24 @@ def main():
         action="store_true",
         help="Display plots in addition to saving them. By default, plots are only saved.",
     )
+    parser.add_argument(
+        "--controls",
+        choices=["EmptyGal4", "EmptySplit", "both", "none"],
+        default=None,
+        help=(
+            "Filter which control genotypes to include in analysis. "
+            "EmptyGal4: only TNTxEmptyGal4, "
+            "EmptySplit: only TNTxEmptySplit, "
+            "both: include both controls, "
+            "none: exclude all controls (experimental genotypes only). "
+            "Default: include all genotypes in brain_region_mapping config."
+        ),
+    )
 
     args = parser.parse_args()
 
-    # Initialize framework
-    framework = F1AnalysisFramework(args.config, args.output_dir)
+    # Initialize framework with control filter
+    framework = F1AnalysisFramework(args.config, args.output_dir, args.controls)
 
     # Override show_plots config based on --show argument
     framework.config["output"]["show_plots"] = args.show
