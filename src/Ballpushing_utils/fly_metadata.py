@@ -46,33 +46,47 @@ class FlyMetadata:
         return {var: data[arena_key] for var, data in self.experiment.metadata.items() if arena_key in data}
 
     def load_brain_regions(self, brain_regions_path):
-        # Get the brain regions table
+        # Safe defaults
+        self.nickname = "PR"
+        self.brain_region = "Control"
+        self.simplified_nickname = "PR"
+        self.split = "m"
+
+        # Load brain regions lookup table
         brain_regions = pd.read_csv(brain_regions_path, index_col=0)
 
-        # If the fly's genotype is defined in the arena metadata, find the associated nickname and brain region from the brain_regions_path file
-        if "Genotype" in self.arena_metadata:
-            try:
-                genotype = self.arena_metadata["Genotype"]
+        # Get genotype from arena metadata (may be missing)
+        genotype = self.arena_metadata.get("Genotype", None)
 
-                # If the genotype is None, skip the fly
-                if genotype.lower() == "none":
-                    print(f"Genotype is None: {self.name} is empty.")
-                    return
+        # Rule 1: If no Genotype entry, keep defaults (PR/Control)
+        if genotype is None or str(genotype).strip() == "":
+            return self.nickname, self.brain_region
 
-                # Convert to lowercase for comparison
-                lowercase_index = brain_regions.index.str.lower()
-                matched_index = lowercase_index.get_loc(genotype.lower())
+        genotype_str = str(genotype).strip()
 
-                self.nickname = brain_regions.iloc[matched_index]["Nickname"]
-                self.brain_region = brain_regions.iloc[matched_index]["Simplified region"]
-                self.simplified_nickname = brain_regions.iloc[matched_index]["Simplified Nickname"]
-                self.split = brain_regions.iloc[matched_index]["Split"]
-            except KeyError:
-                #print(f"Genotype {genotype} not found in brain regions table for {self.name}. Defaulting to PR")
-                self.nickname = "PR"
-                self.brain_region = "Control"
-                self.simplified_nickname = "PR"
-                self.split = "m"
+        # Rule 2: If Genotype exists but is "none", this fly is empty -> skip
+        if genotype_str.lower() == "none":
+            print(f"Genotype is None: {self.name} is empty.")
+            # Raise TypeError so upstream loader skips this fly gracefully
+            raise TypeError("Empty fly (Genotype == none)")
+
+        # Rule 3/4: If genotype maps in table, set dynamically; else nickname := genotype
+        try:
+            lowercase_index = brain_regions.index.str.lower()
+            matched_index = lowercase_index.get_loc(genotype_str.lower())
+            row = brain_regions.iloc[matched_index]
+
+            self.nickname = row["Nickname"]
+            self.brain_region = row["Simplified region"]
+            # Optional columns with safe fallbacks
+            self.simplified_nickname = row.get("Simplified Nickname", self.nickname)
+            self.split = row.get("Split", self.split)
+        except KeyError:
+            # Unmapped genotype: nickname becomes the genotype; brain region unknown
+            self.nickname = genotype_str
+            self.brain_region = "Unknown"
+            self.simplified_nickname = genotype_str
+            # self.split remains default
 
         return self.nickname, self.brain_region
 

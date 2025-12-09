@@ -92,8 +92,8 @@ analysis_modes:
 
   tnt_ddc:
     description: "TNT DDC flies tested across pretraining and genotype"
-    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
-    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_14_fly_positions_F1_TNT_DDC_Data/fly_positions/pooled_fly_positions.feather"
+    dataset_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+    fly_positions_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/fly_positions/pooled_fly_positions.feather"
     grouping_variables:
       primary: "pretraining"  # Column name will be auto-detected with "pretrain" in name
       secondary: "genotype"   # Column name will be auto-detected with "genotype"
@@ -103,8 +103,8 @@ analysis_modes:
       "TNTxEmptyGal4": "Control"
     # Coordinate plotting specific settings for DDC
     coordinates:
-      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
-      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
       alternative_coordinates_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/F1_coordinates/pooled_F1_coordinates.feather"
       alternative_summary_paths:
@@ -137,8 +137,8 @@ analysis_modes:
       "TNTxEmptyGal4": "Control"
     # Coordinate plotting specific settings for DDC pooled
     coordinates:
-      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
-      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251124_13_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
+      coordinates_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/F1_coordinates/pooled_F1_coordinates.feather"
+      summary_path: "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251203_09_F1_coordinates_F1_TNT_DDC_Data/summary/pooled_summary.feather"
       alternative_coordinates_paths:
         - "/mnt/upramdya_data/MD/F1_Tracks/Datasets/latest_F1_TNT_DDC/F1_coordinates/pooled_F1_coordinates.feather"
       alternative_summary_paths:

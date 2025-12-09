@@ -88,7 +88,7 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "F1"  # "MagnetBlock"  # "TNT"
+    experiment_type: str = "MagnetBlock"  # "MagnetBlock"  # "TNT"
     time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"

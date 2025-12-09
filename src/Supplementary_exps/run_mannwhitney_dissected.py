@@ -486,7 +486,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         Number of samples to use in test mode
     """
     # Load the dissected experiments dataset
-    dataset_path = "/mnt/upramdya_data/MD/Antennae_dissection/Datasets/251117_19_summary_antennae_cutting_Data/summary/pooled_summary.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Antennae_dissection/Datasets/251205_13_summary_antennae_cutting_Data/summary/pooled_summary.feather"
 
     print(f"Loading dissected experiments dataset from: {dataset_path}")
     try:
@@ -555,6 +555,37 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         print(f"Dropped columns: {columns_to_drop}")
 
     print(f"Dataset cleaning completed successfully")
+
+    # Normalize Dissected values to expected labels
+    if "Dissected" in dataset.columns:
+        print("Normalizing 'Dissected' values to ['dissected', 'non-dissected']")
+        # Create a copy to avoid SettingWithCopy warnings
+        dissected_series = dataset["Dissected"].copy()
+
+        # Standardize to strings for mapping
+        def _normalize_dissection_value(v):
+            if pd.isna(v):
+                return np.nan
+            # Convert to lowercase string for comparison
+            s = str(v).strip().lower()
+            if s in {"y", "yes", "true", "1"}:
+                return "dissected"
+            if s in {"n", "no", "false", "0"}:
+                return "non-dissected"
+            # Already in expected form or other labels
+            if s in {"dissected", "non-dissected"}:
+                return s
+            # Fallback: keep original to avoid unintended relabeling
+            return s
+
+        dataset["Dissected"] = dissected_series.apply(_normalize_dissection_value)
+
+        # Report resulting groups
+        try:
+            groups_after = sorted([g for g in dataset["Dissected"].unique() if pd.notna(g)])
+            print(f"'Dissected' groups after normalization: {groups_after}")
+        except Exception:
+            pass
 
     # Add test mode sampling for faster debugging
     if test_mode and len(dataset) > test_sample_size:
@@ -864,7 +895,7 @@ def main(overwrite=True, test_mode=False):
         print("🧪 TEST MODE: Only processing first 3 metrics for debugging")
 
     # Define output directory
-    base_output_dir = Path("/mnt/upramdya_data/MD/Ballpushing_Balltypes/Plots/Summary_metrics/Dissected_Mannwhitney")
+    base_output_dir = Path("/mnt/upramdya_data/MD/Antennae_dissection/Plots/Summary_metrics/Dissected_Mannwhitney")
 
     # Ensure the output directory exists
     base_output_dir.mkdir(parents=True, exist_ok=True)

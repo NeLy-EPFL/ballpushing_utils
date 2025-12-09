@@ -54,6 +54,130 @@ from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact
 from statsmodels.stats.multitest import multipletests
 import scipy.stats as stats_module
+import matplotlib
+
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def is_distance_metric(metric_name):
+    """Check if a metric represents distance (in pixels)"""
+    distance_keywords = [
+        "distance",
+        "dist",
+        "head_ball",
+        "fly_distance_moved",
+        "max_distance",
+        "distance_moved",
+        "distance_ratio",
+    ]
+    return any(keyword in metric_name.lower() for keyword in distance_keywords)
+
+
+def is_time_metric(metric_name):
+    """Check if a metric represents time (in seconds)"""
+    time_keywords = ["time", "duration", "pause", "stop", "freeze", "chamber_exit_time", "time_chamber_beginning"]
+    # Exclude ratio metrics
+    if "ratio" in metric_name.lower():
+        return False
+    return any(keyword in metric_name.lower() for keyword in time_keywords)
+
+
+def convert_metric_data(data, metric_name):
+    """Convert metric data from pixels to mm or seconds to minutes"""
+    if is_distance_metric(metric_name):
+        return data / PIXELS_PER_MM
+    elif is_time_metric(metric_name):
+        return data / 60  # Convert seconds to minutes
+    return data
+
+
+def get_metric_unit(metric_name):
+    """Get the display unit for a metric"""
+    if is_distance_metric(metric_name):
+        return "(mm)"
+    elif is_time_metric(metric_name):
+        return "(min)"
+    return ""
+
+
+def get_elegant_metric_name(metric_name):
+    """Convert metric code names to elegant display names"""
+    metric_map = {
+        # Event metrics
+        "nb_events": "Number of events",
+        "has_major": "Has major event",
+        "first_major_event": "First major event",
+        "first_major_event_time": "First major event time",
+        "max_event": "Max event",
+        "max_event_time": "Max event time",
+        "final_event": "Final event",
+        "final_event_time": "Final event time",
+        "has_significant": "Has significant event",
+        "nb_significant_events": "Number of significant events",
+        "significant_ratio": "Significant event ratio",
+        "first_significant_event": "First significant event",
+        "first_significant_event_time": "First significant event time",
+        # Distance metrics
+        "max_distance": "Max ball distance",
+        "distance_moved": "Total ball distance moved",
+        "distance_ratio": "Distance ratio",
+        "fly_distance_moved": "Fly distance moved",
+        # Interaction metrics
+        "overall_interaction_rate": "Interaction rate",
+        "interaction_persistence": "Interaction persistence",
+        "interaction_proportion": "Interaction proportion",
+        "time_to_first_interaction": "Time to first interaction",
+        # Push/pull metrics
+        "pushed": "Number of pushes",
+        "pulled": "Number of pulls",
+        "pulling_ratio": "Pulling ratio",
+        "head_pushing_ratio": "Head pushing ratio",
+        # Velocity metrics
+        "normalized_velocity": "Normalized velocity",
+        "velocity_during_interactions": "Velocity during interactions",
+        "velocity_trend": "Velocity trend",
+        # Pause/stop metrics
+        "has_long_pauses": "Has long pauses",
+        "nb_stops": "Number of stops",
+        "total_stop_duration": "Total stop duration",
+        "median_stop_duration": "Median stop duration",
+        "nb_pauses": "Number of pauses",
+        "total_pause_duration": "Total pause duration",
+        "median_pause_duration": "Median pause duration",
+        "nb_long_pauses": "Number of long pauses",
+        "total_long_pause_duration": "Total long pause duration",
+        "median_long_pause_duration": "Median long pause duration",
+        "pauses_persistence": "Pauses persistence",
+        "cumulated_breaks_duration": "Total break duration",
+        # Freeze metrics
+        "nb_freeze": "Number of freezes",
+        "median_freeze_duration": "Median freeze duration",
+        # Chamber metrics
+        "chamber_time": "Chamber time",
+        "chamber_ratio": "Chamber ratio",
+        "chamber_exit_time": "Chamber exit time",
+        "time_chamber_beginning": "Time in chamber (early)",
+        # Task completion
+        "has_finished": "Task completed",
+        "persistence_at_end": "Persistence at end",
+        # Other behavioral metrics
+        "fraction_not_facing_ball": "Fraction not facing ball",
+        "leg_visibility_ratio": "Leg visibility ratio",
+        "flailing": "Leg flailing",
+        "median_head_ball_distance": "Median head-ball distance",
+        "mean_head_ball_distance": "Mean head-ball distance",
+    }
+    return metric_map.get(metric_name, metric_name)
+
+
+def format_metric_label(metric_name):
+    """Format metric name with elegant display name and appropriate unit"""
+    elegant_name = get_elegant_metric_name(metric_name)
+    unit = get_metric_unit(metric_name)
+    if unit:
+        return f"{elegant_name} {unit}"
+    return elegant_name
 
 
 def load_f1_dataset(test_mode=False, test_sample_size=500):
@@ -871,25 +995,33 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
             print(f"    ⚠️  No data available for {metric}")
             continue
 
-        # Get control and experimental data
-        control_data = metric_data[metric_data[y_col] == control_condition][metric]
-        experimental_data = metric_data[metric_data[y_col] == experimental_condition][metric]
+        # Get raw data and convert if needed
+        control_data_raw = metric_data[metric_data[y_col] == control_condition][metric]
+        experimental_data_raw = metric_data[metric_data[y_col] == experimental_condition][metric]
 
-        if len(control_data) == 0 or len(experimental_data) == 0:
+        if len(control_data_raw) == 0 or len(experimental_data_raw) == 0:
             print(f"    ⚠️  Insufficient data for comparison in {metric}")
             continue
 
-        # Perform statistical test based on test_type
+        # Store sample sizes
+        n_control = len(control_data_raw)
+        n_experimental = len(experimental_data_raw)
+
+        # Perform statistical test on RAW data (before conversion)
         try:
             if test_type == "permutation":
-                # Permutation test on means
-                mean_diff, p_value = permutation_test_means(control_data, experimental_data)
+                # Permutation test on RAW means
+                mean_diff, p_value = permutation_test_means(control_data_raw, experimental_data_raw)
                 statistic = mean_diff  # Store mean difference as statistic
                 test_name = "Permutation test (means)"
             else:
-                # Mann-Whitney U test (default)
-                statistic, p_value = mannwhitneyu(experimental_data, control_data, alternative="two-sided")
+                # Mann-Whitney U test on RAW data (default)
+                statistic, p_value = mannwhitneyu(experimental_data_raw, control_data_raw, alternative="two-sided")
                 test_name = "Mann-Whitney U"
+
+            # Convert data for plotting (pixels to mm, seconds to minutes if needed)
+            control_data = convert_metric_data(control_data_raw, metric)
+            experimental_data = convert_metric_data(experimental_data_raw, metric)
 
             # Determine significance level
             if p_value < 0.001:
@@ -901,7 +1033,7 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
             else:
                 sig_level = "ns"
 
-            # Calculate effect sizes
+            # Calculate effect sizes on CONVERTED data for display
             control_median = control_data.median()
             experimental_median = experimental_data.median()
             median_diff = experimental_median - control_median
@@ -920,14 +1052,14 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
             else:
                 percent_change_mean = np.nan
 
-            # Store results for summary
+            # Store results for summary (use sample sizes from raw data)
             result_dict = {
                 "metric": metric,
-                "metric_display_name": map_metric_name(metric),
+                "metric_display_name": get_elegant_metric_name(metric),
                 "control_condition": control_condition,
                 "experimental_condition": experimental_condition,
-                "control_n": len(control_data),
-                "experimental_n": len(experimental_data),
+                "control_n": n_control,
+                "experimental_n": n_experimental,
                 "control_median": control_median,
                 "control_mean": control_mean,
                 "control_std": control_data.std(),
@@ -959,6 +1091,9 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
             p_value = 1.0
             sig_level = "ns"
             statistic = np.nan
+            # Still convert data for plotting even if test fails
+            control_data = convert_metric_data(control_data_raw, metric)
+            experimental_data = convert_metric_data(experimental_data_raw, metric)
 
         # Create the plot with smaller figure size for publication-quality layout
         fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
@@ -996,17 +1131,16 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
         bp["boxes"][1].set_edgecolor("black")
         bp["boxes"][1].set_linewidth(1.5)
 
-        # Add individual data points as larger filled circles matching box colors
+        # Add individual data points as larger filled circles matching box colors (using CONVERTED data)
         x_jitter = 0.08  # Amount of horizontal jitter
-        for i, (condition, color) in enumerate(
-            [(control_condition, control_color), (experimental_condition, experimental_color)]
+        for i, (condition_data_to_plot, color) in enumerate(
+            [(control_data, control_color), (experimental_data, experimental_color)]
         ):
-            condition_data = metric_data[metric_data[y_col] == condition][metric]
             # Add random jitter to x positions
-            x_positions = np.random.normal(i, x_jitter, size=len(condition_data))
+            x_positions = np.random.normal(i, x_jitter, size=len(condition_data_to_plot))
             ax.scatter(
                 x_positions,
-                condition_data,
+                condition_data_to_plot,
                 s=25,  # Smaller point size for cleaner look
                 c=color,
                 alpha=0.6,  # Translucent
@@ -1014,9 +1148,9 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
                 zorder=3,
             )  # Draw on top
 
-        # Add significance annotation
-        y_max = metric_data[metric].max()
-        y_min = metric_data[metric].min()
+        # Add significance annotation (using CONVERTED data for y-axis limits)
+        y_max = max(control_data.max(), experimental_data.max())
+        y_min = min(control_data.min(), experimental_data.min())
         y_range = y_max - y_min
 
         # Draw significance bar and asterisks
@@ -1027,11 +1161,9 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
                 0.5, bar_height + 0.02 * y_range, sig_level, ha="center", va="bottom", fontsize=12, fontname="Arial"
             )
 
-        # Add p-value text in top-left corner of plot
+        # Always add p-value text in top-left corner (for both significant and non-significant)
         if p_value < 0.001:
             p_text = f"p < 0.001"
-        elif p_value < 0.01:
-            p_text = f"p = {p_value:.3f}"
         else:
             p_text = f"p = {p_value:.3f}"
 
@@ -1055,13 +1187,15 @@ def create_f1_pretraining_plots(data, metrics, output_dir, y_col="Pretraining", 
         # Add tick marks pointing outward
         ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
 
-        # Set x-axis labels using mapped informative labels
+        # Set x-axis labels with sample sizes
         ax.set_xticks([0, 1])
-        ax.set_xticklabels([control_label, experimental_label], fontsize=10, fontname="Arial")
+        control_label_with_n = f"{control_label}\n(n={n_control})"
+        experimental_label_with_n = f"{experimental_label}\n(n={n_experimental})"
+        ax.set_xticklabels([control_label_with_n, experimental_label_with_n], fontsize=10, fontname="Arial")
 
-        # Set y-axis label with mapped metric name
-        metric_display_name = map_metric_name(metric)
-        ax.set_ylabel(metric_display_name, fontsize=11, fontname="Arial")
+        # Set y-axis label with elegant metric name and units
+        ylabel = format_metric_label(metric)
+        ax.set_ylabel(ylabel, fontsize=11, fontname="Arial")
 
         # Format y-axis tick labels
         ax.tick_params(axis="y", labelsize=9)
@@ -1555,15 +1689,18 @@ def create_binary_metric_plot_f1(data, metric, y, output_dir, control_condition=
                     bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
                 )
 
-    # Set x-axis labels using mapped informative labels
+    # Set x-axis labels with sample sizes
     ax.set_xticks(x_positions)
-    x_labels = [
-        map_condition_labels(str(cond)) if map_condition_labels(str(cond)) else str(cond) for cond in prop_data[y]
-    ]
+    x_labels = []
+    for i, row in prop_data.iterrows():
+        cond = row[y]
+        n_total = row["n_total"]
+        label = map_condition_labels(str(cond)) if map_condition_labels(str(cond)) else str(cond)
+        x_labels.append(f"{label}\n(n={n_total})")
     ax.set_xticklabels(x_labels, fontsize=10, fontname="Arial")
 
-    # Set y-axis label with mapped metric name
-    metric_display_name = map_metric_name(metric)
+    # Set y-axis label with elegant metric name
+    metric_display_name = get_elegant_metric_name(metric)
     ax.set_ylabel(f"Proportion\n{metric_display_name}", fontsize=11, fontname="Arial")
 
     # Adjust y-axis limit to accommodate significance bars

@@ -26,6 +26,142 @@ from matplotlib.patches import Rectangle
 from itertools import combinations
 from tqdm import tqdm
 
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def is_distance_metric(metric_name):
+    """Check if a metric represents distance (in pixels)"""
+    distance_keywords = [
+        "distance",
+        "dist",
+        "head_ball",
+        "fly_distance_moved",
+        "max_distance",
+        "distance_moved",
+        "distance_ratio",
+    ]
+    return any(keyword in metric_name.lower() for keyword in distance_keywords)
+
+
+def is_time_metric(metric_name):
+    """Check if a metric represents time (in seconds)"""
+    time_keywords = ["time", "duration", "pause", "stop", "freeze", "chamber_exit_time", "time_chamber_beginning"]
+    # Exclude ratio metrics
+    if "ratio" in metric_name.lower():
+        return False
+    return any(keyword in metric_name.lower() for keyword in time_keywords)
+
+
+def convert_metric_data(data, metric_name):
+    """Convert metric data from pixels to mm or seconds to minutes"""
+    if is_distance_metric(metric_name):
+        return data / PIXELS_PER_MM
+    elif is_time_metric(metric_name):
+        return data / 60  # Convert seconds to minutes
+    return data
+
+
+def get_metric_unit(metric_name):
+    """Get the display unit for a metric"""
+    if is_distance_metric(metric_name):
+        return "(mm)"
+    elif is_time_metric(metric_name):
+        return "(min)"
+    return ""
+
+
+def get_elegant_metric_name(metric_name):
+    """Convert metric code names to elegant display names"""
+    metric_map = {
+        # Event metrics
+        "nb_events": "Number of events",
+        "has_major": "Has major event",
+        "first_major_event": "First major event",
+        "first_major_event_time": "First major event time",
+        "max_event": "Max event",
+        "max_event_time": "Max event time",
+        "final_event": "Final event",
+        "final_event_time": "Final event time",
+        "has_significant": "Has significant event",
+        "nb_significant_events": "Number of significant events",
+        "significant_ratio": "Significant event ratio",
+        "first_significant_event": "First significant event",
+        "first_significant_event_time": "First significant event time",
+        # Distance metrics
+        "max_distance": "Max ball distance",
+        "distance_moved": "Total ball distance moved",
+        "distance_ratio": "Distance ratio",
+        "fly_distance_moved": "Fly distance moved",
+        # Interaction metrics
+        "overall_interaction_rate": "Interaction rate",
+        "interaction_persistence": "Interaction persistence",
+        "interaction_proportion": "Interaction proportion",
+        "time_to_first_interaction": "Time to first interaction",
+        # Push/pull metrics
+        "pushed": "Number of pushes",
+        "pulled": "Number of pulls",
+        "pulling_ratio": "Pulling ratio",
+        "head_pushing_ratio": "Head pushing ratio",
+        # Velocity metrics
+        "normalized_velocity": "Normalized velocity",
+        "velocity_during_interactions": "Velocity during interactions",
+        "velocity_trend": "Velocity trend",
+        # Pause/stop metrics
+        "has_long_pauses": "Has long pauses",
+        "nb_stops": "Number of stops",
+        "total_stop_duration": "Total stop duration",
+        "median_stop_duration": "Median stop duration",
+        "nb_pauses": "Number of pauses",
+        "total_pause_duration": "Total pause duration",
+        "median_pause_duration": "Median pause duration",
+        "nb_long_pauses": "Number of long pauses",
+        "total_long_pause_duration": "Total long pause duration",
+        "median_long_pause_duration": "Median long pause duration",
+        "pauses_persistence": "Pauses persistence",
+        "cumulated_breaks_duration": "Total break duration",
+        # Freeze metrics
+        "nb_freeze": "Number of freezes",
+        "median_freeze_duration": "Median freeze duration",
+        # Chamber metrics
+        "chamber_time": "Chamber time",
+        "chamber_ratio": "Chamber ratio",
+        "chamber_exit_time": "Chamber exit time",
+        "time_chamber_beginning": "Time in chamber (early)",
+        # Task completion
+        "has_finished": "Task completed",
+        "persistence_at_end": "Persistence at end",
+        # Other behavioral metrics
+        "fraction_not_facing_ball": "Fraction not facing ball",
+        "leg_visibility_ratio": "Leg visibility ratio",
+        "flailing": "Leg flailing",
+        "median_head_ball_distance": "Median head-ball distance",
+        "mean_head_ball_distance": "Mean head-ball distance",
+        # Ball proximity metrics
+        "ball_proximity_proportion_70px": "Ball proximity (<70px)",
+        "ball_proximity_proportion_140px": "Ball proximity (<140px)",
+        "ball_proximity_proportion_200px": "Ball proximity (<200px)",
+    }
+    return metric_map.get(metric_name, metric_name)
+
+
+def format_metric_label(metric_name):
+    """Format metric name with elegant display name and appropriate unit"""
+    elegant_name = get_elegant_metric_name(metric_name)
+    unit = get_metric_unit(metric_name)
+    if unit:
+        return f"{elegant_name} {unit}"
+    return elegant_name
+
+
+def format_pretraining_label(value):
+    """Convert pretraining code to intuitive label"""
+    if str(value).lower() == "n":
+        return "Control"
+    elif str(value).lower() == "y":
+        return "Pretrained"
+    return str(value)
+
 
 class F1AnalysisFramework:
     """Unified framework for F1 tracks analysis."""
@@ -49,6 +185,9 @@ class F1AnalysisFramework:
 
         # Store custom output directory if provided
         self.custom_output_dir = Path(output_dir) if output_dir else None
+
+        # Storage for global axis ranges (will be populated when loading all data)
+        self.global_axis_ranges = {}
 
         # Initialize brain region mappings if available
         self.setup_brain_region_mappings()
@@ -415,6 +554,44 @@ class F1AnalysisFramework:
 
         print(f"Detected columns: {detected_cols}")
         return detected_cols
+
+    def calculate_global_axis_ranges(self, df, metrics_to_analyze):
+        """Calculate global min/max ranges for all metrics after conversion.
+
+        Args:
+            df: DataFrame with all data
+            metrics_to_analyze: List of metric column names
+
+        Returns:
+            Dictionary mapping metric names to (min, max) tuples
+        """
+        print(f"\n📊 Calculating global axis ranges for {len(metrics_to_analyze)} metrics...")
+
+        ranges = {}
+        for metric in metrics_to_analyze:
+            if metric not in df.columns:
+                continue
+
+            # Get raw data
+            raw_data = df[metric].dropna()
+
+            if len(raw_data) == 0:
+                continue
+
+            # Convert data
+            converted_data = convert_metric_data(raw_data, metric)
+
+            # Calculate range with some padding (5% on each side)
+            data_min = converted_data.min()
+            data_max = converted_data.max()
+            data_range = data_max - data_min
+            padding = data_range * 0.05
+
+            ranges[metric] = (data_min - padding, data_max + padding)
+
+            print(f"  {metric}: [{data_min:.2f}, {data_max:.2f}] -> [{ranges[metric][0]:.2f}, {ranges[metric][1]:.2f}]")
+
+        return ranges
 
     def filter_for_test_ball(self, df, ball_condition_col):
         """Filter dataset for test ball condition."""
@@ -851,6 +1028,10 @@ class F1AnalysisFramework:
 
     def _save_plot(self, fig, plot_name, mode):
         """Save plot to file in both PNG and PDF formats."""
+        # Set PDF font to Type 42 (TrueType) for editability
+        plt.rcParams["pdf.fonttype"] = 42
+        plt.rcParams["ps.fonttype"] = 42
+
         output_config = self.config["output"]
         if output_config["save_plots"]:
             # Determine output directory
@@ -1338,8 +1519,12 @@ class F1AnalysisFramework:
                 metrics_to_analyze = [metric_type]
 
         if not metrics_to_analyze:
-            print("No metrics found to analyze")
+            print("❌ No metrics found to analyze")
             return
+
+        # Calculate global axis ranges from all data
+        print(f"\n🔍 Calculating global axis ranges across all {len(metrics_to_analyze)} metrics...")
+        self.global_axis_ranges = self.calculate_global_axis_ranges(df_clean, metrics_to_analyze)
 
         # Storage for all results (for markdown summary)
         all_results = []
@@ -1462,67 +1647,98 @@ class F1AnalysisFramework:
         unique_values = sorted(data[x_col].unique())
         color_mapping = self.create_color_mapping(mode, unique_values, var_type)
 
-        # Create boxplot
+        # Prepare data for statistical tests (RAW, unconverted)
+        groups_raw = [data[data[x_col] == condition][y_col].dropna().values for condition in unique_values]
+
+        # Convert data for display
+        data_display = data.copy()
+        data_display[y_col] = convert_metric_data(data_display[y_col], y_col)
+
+        # Prepare converted data for plotting
+        groups_converted = [
+            data_display[data_display[x_col] == condition][y_col].dropna().values for condition in unique_values
+        ]
+
+        # Add scatter with converted data FIRST (so boxplot appears on top)
+        for i, condition in enumerate(unique_values):
+            condition_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(condition_data))
+            ax.scatter(
+                x_pos,
+                condition_data,
+                alpha=0.6,
+                s=50,
+                color=color_mapping.get(condition, "gray"),
+                edgecolors="black",
+                linewidths=0.5,
+                zorder=1,  # Lower z-order so boxplot appears on top
+            )
+
+        # Create boxplot with converted data (drawn on top)
         box_plot = sns.boxplot(
-            data=data,
+            data=data_display,
             x=x_col,
             y=y_col,
             ax=ax,
             order=unique_values,
             palette=[color_mapping.get(v, "gray") for v in unique_values],
+            width=0.6,
+            zorder=2,  # Higher z-order so it appears on top of scatter
         )
 
-        # Style boxplot
+        # Style boxplot (F1 style: transparent boxes, colored edges)
         for patch in box_plot.patches:
-            patch.set_facecolor("none")
-            patch.set_edgecolor("black")
-            patch.set_linewidth(1.5)
+            patch.set_facecolor("white")
+            patch.set_alpha(0.7)
+            patch.set_edgecolor(patch.get_facecolor())
+            patch.set_linewidth(2)
 
         for line in ax.lines:
             line.set_color("black")
             line.set_linewidth(1.5)
 
-        # Add scatter
+        # Formatting with elegant metric name
+        ax.set_title(title, fontsize=14, fontweight="bold", fontname="Arial")
+        ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12, fontname="Arial")
+        ax.set_ylabel(format_metric_label(y_col), fontsize=12, fontname="Arial")
+
+        # Apply global axis range if available
+        if y_col in self.global_axis_ranges:
+            ax.set_ylim(self.global_axis_ranges[y_col])
+
+        # Add sample sizes to x-axis labels
+        x_labels = []
         for i, condition in enumerate(unique_values):
-            condition_data = data[data[x_col] == condition]
-            color = color_mapping.get(condition, "black")
+            n = len(groups_raw[i])
+            # Format pretraining labels if this is pretraining column
+            if var_type == "pretraining":
+                display_name = format_pretraining_label(condition)
+            else:
+                display_name = str(condition)
+            x_labels.append(f"{display_name}\n(n={n})")
+        ax.set_xticklabels(x_labels, fontname="Arial")
 
-            y_values = condition_data[y_col].values
-            x_positions = np.random.normal(i, 0.1, size=len(y_values))
-
-            ax.scatter(x_positions, y_values, c=color, s=30, alpha=0.7, edgecolors="black", linewidth=0.5)
-
-        # Formatting
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12)
-        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
-
-        # Add sample sizes
-        for i, condition in enumerate(unique_values):
-            n = len(data[data[x_col] == condition])
-            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
-
-        # Statistical testing with permutation tests
-        groups = [data[data[x_col] == condition][y_col].values for condition in unique_values]
-
-        if len(groups) < 2:
+        # Statistical testing with permutation tests on RAW data
+        if len(groups_raw) < 2:
             return ax
 
         # Perform permutation tests for mean and median
-        p_mean, diff_mean = self._permutation_test(groups, lambda x: [np.mean(g) for g in x])
-        p_median, diff_median = self._permutation_test(groups, lambda x: [np.median(g) for g in x])
+        p_mean, diff_mean = self._permutation_test(groups_raw, lambda x: [np.mean(g) for g in x])
+        p_median, diff_median = self._permutation_test(groups_raw, lambda x: [np.median(g) for g in x])
 
         # For multiple groups, apply FDR correction
-        if len(groups) > 2:
+        if len(groups_raw) > 2:
             # Pairwise comparisons
             p_values_mean = []
             p_values_median = []
             comparisons = []
 
-            for i in range(len(groups)):
-                for j in range(i + 1, len(groups)):
-                    p_m, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.mean(g) for g in x])
-                    p_md, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.median(g) for g in x])
+            for i in range(len(groups_raw)):
+                for j in range(i + 1, len(groups_raw)):
+                    p_m, _ = self._permutation_test([groups_raw[i], groups_raw[j]], lambda x: [np.mean(g) for g in x])
+                    p_md, _ = self._permutation_test(
+                        [groups_raw[i], groups_raw[j]], lambda x: [np.median(g) for g in x]
+                    )
                     p_values_mean.append(p_m)
                     p_values_median.append(p_md)
                     comparisons.append(f"{unique_values[i]} vs {unique_values[j]}")
@@ -1540,21 +1756,21 @@ class F1AnalysisFramework:
             p_median_display = p_median
             test_label = "Permutation test"
 
-        # Bootstrap confidence intervals for mean and median
+        # Bootstrap confidence intervals for mean and median (on converted data for display)
         ci_text_lines = []
         for i, condition in enumerate(unique_values):
-            group_data = groups[i]
+            group_data_converted = convert_metric_data(groups_raw[i], y_col)
             # Mean CI
-            ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data, np.mean)
+            ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data_converted, np.mean)
             # Median CI
-            ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data, np.median)
+            ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data_converted, np.median)
             ci_text_lines.append(f"{condition}:")
             ci_text_lines.append(f"  μ={mean_est:.3f} [{ci_low_mean:.3f}, {ci_high_mean:.3f}]")
             ci_text_lines.append(f"  M={median_est:.3f} [{ci_low_median:.3f}, {ci_high_median:.3f}]")
 
         # Calculate effect size for 2-group comparison
-        if len(groups) == 2:
-            cohens_d = self._cohens_d(groups[0], groups[1])
+        if len(groups_raw) == 2:
+            cohens_d = self._cohens_d(groups_raw[0], groups_raw[1])
             effect_text = f"Cohen's d = {cohens_d:.3f}"
         else:
             effect_text = ""
@@ -1605,13 +1821,43 @@ class F1AnalysisFramework:
         unique_genotypes = list(set(genotype_vals))
         genotype_color_map = self.create_color_mapping(mode, unique_genotypes, "brain_region")
 
-        # Create boxplot
+        # Prepare data for statistical tests (RAW, unconverted)
+        groups_raw = [data_copy[data_copy["combined_group"] == group][y_col].dropna().values for group in unique_groups]
+
+        # Convert data for display
+        data_display = data_copy.copy()
+        data_display[y_col] = convert_metric_data(data_display[y_col], y_col)
+
+        # Prepare converted data for plotting
+        groups_converted = [
+            data_display[data_display["combined_group"] == group][y_col].dropna().values for group in unique_groups
+        ]
+
+        # Prepare colors
         colors = []
         for group in unique_groups:
             genotype_val = group.split(" + ")[0]
             colors.append(genotype_color_map[genotype_val])
 
-        box_plot = sns.boxplot(data=data_copy, x="combined_group", y=y_col, ax=ax, order=unique_groups, palette=colors)
+        # Add scatter with converted data FIRST (so boxplot appears on top)
+        for i, group in enumerate(unique_groups):
+            group_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(group_data))
+            ax.scatter(
+                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=1
+            )
+
+        # Create boxplot with converted data (drawn on top)
+        box_plot = sns.boxplot(
+            data=data_display,
+            x="combined_group",
+            y=y_col,
+            ax=ax,
+            order=unique_groups,
+            palette=colors,
+            width=0.6,
+            zorder=2,
+        )
 
         # Style based on pretraining
         for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
@@ -1648,51 +1894,46 @@ class F1AnalysisFramework:
                 med.set_color(brain_region_color)
                 med.set_linewidth(2)
 
-        # Add scatter
-        sns.stripplot(
-            data=data_copy,
-            x="combined_group",
-            y=y_col,
-            ax=ax,
-            size=6,
-            alpha=0.7,
-            jitter=True,
-            dodge=False,
-            color="black",
-            order=unique_groups,
-        )
-
-        # Formatting
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.set_xlabel("Genotype + Pretraining", fontsize=12)
-        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
+        # Formatting with elegant metric name
+        ax.set_title(title, fontsize=14, fontweight="bold", fontname="Arial")
+        ax.set_xlabel("Genotype + Pretraining", fontsize=12, fontname="Arial")
+        ax.set_ylabel(format_metric_label(y_col), fontsize=12, fontname="Arial")
         ax.tick_params(axis="x", rotation=45)
 
-        # Add sample sizes
+        # Apply global axis range if available
+        if y_col in self.global_axis_ranges:
+            ax.set_ylim(self.global_axis_ranges[y_col])
+
+        # Add sample sizes to x-axis labels
+        x_labels = []
         for i, group in enumerate(unique_groups):
-            n = len(data_copy[data_copy["combined_group"] == group])
-            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
+            n = len(groups_raw[i])
+            genotype, pretraining = group.split(" + ")
+            pretraining_label = format_pretraining_label(pretraining)
+            display_label = f"{genotype} + {pretraining_label}"
+            x_labels.append(f"{display_label}\n(n={n})")
+        ax.set_xticklabels(x_labels, fontname="Arial", rotation=45, ha="right")
 
-        # Statistical testing with permutation tests
-        groups = [data_copy[data_copy["combined_group"] == group][y_col].values for group in unique_groups]
-
-        if len(groups) < 2:
+        # Statistical testing with permutation tests on RAW data
+        if len(groups_raw) < 2:
             return ax
 
         # Perform permutation tests for mean and median
-        p_mean, diff_mean = self._permutation_test(groups, lambda x: [np.mean(g) for g in x])
-        p_median, diff_median = self._permutation_test(groups, lambda x: [np.median(g) for g in x])
+        p_mean, diff_mean = self._permutation_test(groups_raw, lambda x: [np.mean(g) for g in x])
+        p_median, diff_median = self._permutation_test(groups_raw, lambda x: [np.median(g) for g in x])
 
         # For multiple groups, apply FDR correction
-        if len(groups) > 2:
+        if len(groups_raw) > 2:
             # Pairwise comparisons
             p_values_mean = []
             p_values_median = []
 
-            for i in range(len(groups)):
-                for j in range(i + 1, len(groups)):
-                    p_m, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.mean(g) for g in x])
-                    p_md, _ = self._permutation_test([groups[i], groups[j]], lambda x: [np.median(g) for g in x])
+            for i in range(len(groups_raw)):
+                for j in range(i + 1, len(groups_raw)):
+                    p_m, _ = self._permutation_test([groups_raw[i], groups_raw[j]], lambda x: [np.mean(g) for g in x])
+                    p_md, _ = self._permutation_test(
+                        [groups_raw[i], groups_raw[j]], lambda x: [np.median(g) for g in x]
+                    )
                     p_values_mean.append(p_m)
                     p_values_median.append(p_md)
 
@@ -1710,14 +1951,14 @@ class F1AnalysisFramework:
             test_label = "Permutation test"
 
         # Bootstrap confidence intervals for mean and median (for 2 groups only, to keep annotation manageable)
-        if len(groups) == 2:
+        if len(groups_raw) == 2:
             ci_text_lines = []
             for i, group in enumerate(unique_groups):
-                group_data = groups[i]
+                group_data_converted = convert_metric_data(groups_raw[i], y_col)
                 # Mean CI
-                ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data, np.mean)
+                ci_low_mean, ci_high_mean, mean_est = self._bootstrap_ci(group_data_converted, np.mean)
                 # Median CI
-                ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data, np.median)
+                ci_low_median, ci_high_median, median_est = self._bootstrap_ci(group_data_converted, np.median)
                 ci_text_lines.append(f"{group}:")
                 ci_text_lines.append(f"  μ={mean_est:.3f} [{ci_low_mean:.3f}, {ci_high_mean:.3f}]")
                 ci_text_lines.append(f"  M={median_est:.3f} [{ci_low_median:.3f}, {ci_high_median:.3f}]")
@@ -1736,8 +1977,8 @@ class F1AnalysisFramework:
             )
 
         # Calculate effect size for 2-group comparison
-        if len(groups) == 2:
-            cohens_d = self._cohens_d(groups[0], groups[1])
+        if len(groups_raw) == 2:
+            cohens_d = self._cohens_d(groups_raw[0], groups_raw[1])
             effect_text = f"Cohen's d = {cohens_d:.3f}"
         else:
             effect_text = ""
@@ -1837,86 +2078,117 @@ class F1AnalysisFramework:
         unique_values = sorted(data[x_col].unique())
         color_mapping = self.create_color_mapping(mode, unique_values, var_type)
 
-        # Create boxplot
+        # Prepare data for statistical tests (RAW, unconverted)
+        groups_raw = [data[data[x_col] == condition][y_col].dropna().values for condition in unique_values]
+
+        # Convert data for display
+        data_display = data.copy()
+        data_display[y_col] = convert_metric_data(data_display[y_col], y_col)
+
+        # Prepare converted data for plotting
+        groups_converted = [
+            data_display[data_display[x_col] == condition][y_col].dropna().values for condition in unique_values
+        ]
+
+        # Add scatter with converted data FIRST (so boxplot appears on top)
+        for i, condition in enumerate(unique_values):
+            condition_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(condition_data))
+            ax.scatter(
+                x_pos,
+                condition_data,
+                alpha=0.6,
+                s=50,
+                color=color_mapping.get(condition, "gray"),
+                edgecolors="black",
+                linewidths=0.5,
+                zorder=1,  # Lower z-order so boxplot appears on top
+            )
+
+        # Create boxplot with converted data (drawn on top)
         box_plot = sns.boxplot(
-            data=data,
+            data=data_display,
             x=x_col,
             y=y_col,
             ax=ax,
             order=unique_values,
             palette=[color_mapping.get(v, "gray") for v in unique_values],
+            width=0.6,
+            zorder=2,  # Higher z-order so it appears on top of scatter
         )
 
-        # Style boxplot
+        # Style boxplot (F1 style: transparent boxes, colored edges)
         for patch in box_plot.patches:
-            patch.set_facecolor("none")
-            patch.set_edgecolor("black")
-            patch.set_linewidth(1.5)
+            patch.set_facecolor("white")
+            patch.set_alpha(0.7)
+            patch.set_edgecolor(patch.get_facecolor())
+            patch.set_linewidth(2)
 
-        for line in ax.lines:
+        # Style whiskers and medians
+        for i, line in enumerate(ax.lines):
             line.set_color("black")
             line.set_linewidth(1.5)
 
-        # Add scatter
+        # Formatting with elegant metric name
+        ax.set_title(title, fontsize=14, fontweight="bold", fontname="Arial")
+        ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12, fontname="Arial")
+        ax.set_ylabel(format_metric_label(y_col), fontsize=12, fontname="Arial")
+
+        # Apply global axis range if available
+        if y_col in self.global_axis_ranges:
+            ax.set_ylim(self.global_axis_ranges[y_col])
+
+        # Add sample sizes to x-axis labels
+        x_labels = []
         for i, condition in enumerate(unique_values):
-            condition_data = data[data[x_col] == condition]
-            color = color_mapping.get(condition, "black")
+            n = len(groups_raw[i])
+            # Format pretraining labels if this is pretraining column
+            if var_type == "pretraining":
+                display_name = format_pretraining_label(condition)
+            else:
+                display_name = str(condition)
+            x_labels.append(f"{display_name}\n(n={n})")
+        ax.set_xticklabels(x_labels, fontname="Arial")
 
-            y_values = condition_data[y_col].values
-            x_positions = np.random.normal(i, 0.1, size=len(y_values))
-
-            ax.scatter(x_positions, y_values, c=color, s=30, alpha=0.7, edgecolors="black", linewidth=0.5)
-
-        # Formatting
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.set_xlabel(x_col.replace("_", " ").title(), fontsize=12)
-        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
-
-        # Add sample sizes
-        for i, condition in enumerate(unique_values):
-            n = len(data[data[x_col] == condition])
-            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=10, fontweight="bold")
-
-        # Statistical testing with pairwise comparisons
-        groups = [data[data[x_col] == condition][y_col].values for condition in unique_values]
+        # Statistical testing with pairwise comparisons on RAW data
         group_names = unique_values
 
         pairwise_results = []
 
-        if len(groups) >= 2:
+        if len(groups_raw) >= 2:
             # Perform all pairwise comparisons
             p_values = []
             comparisons = []
 
-            for i in range(len(groups)):
-                for j in range(i + 1, len(groups)):
+            for i in range(len(groups_raw)):
+                for j in range(i + 1, len(groups_raw)):
                     # Choose statistical test based on test_type
                     if test_type == "permutation":
                         # Permutation test for mean difference
                         p_value, diff_value = self._permutation_test(
-                            [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                            [groups_raw[i], groups_raw[j]], lambda x: [np.mean(g) for g in x]
                         )
                     else:  # mannwhitney
                         # Mann-Whitney U test
                         from scipy.stats import mannwhitneyu
 
-                        statistic, p_value = mannwhitneyu(groups[i], groups[j], alternative="two-sided")
-                        diff_value = np.median(groups[i]) - np.median(groups[j])
+                        statistic, p_value = mannwhitneyu(groups_raw[i], groups_raw[j], alternative="two-sided")
+                        diff_value = np.median(groups_raw[i]) - np.median(groups_raw[j])
 
                     p_values.append(p_value)
                     comparisons.append((group_names[i], group_names[j]))
 
-                    # Store detailed results
+                    # Store detailed results (converted for display)
                     pairwise_results.append(
                         {
                             "group1": group_names[i],
                             "group2": group_names[j],
-                            "n1": len(groups[i]),
-                            "n2": len(groups[j]),
-                            "mean1": np.mean(groups[i]),
-                            "mean2": np.mean(groups[j]),
-                            "median1": np.median(groups[i]),
-                            "median2": np.median(groups[j]),
+                            "n1": len(groups_raw[i]),
+                            "n2": len(groups_raw[j]),
+                            "mean1": np.mean(convert_metric_data(groups_raw[i], y_col)),
+                            "mean2": np.mean(convert_metric_data(groups_raw[j], y_col)),
+                            "median1": np.median(convert_metric_data(groups_raw[i], y_col)),
+                            "median2": np.median(convert_metric_data(groups_raw[j], y_col)),
                             "p_value_raw": p_value,
                             "diff_value": diff_value,
                             "test_type": test_type,
@@ -1932,7 +2204,7 @@ class F1AnalysisFramework:
                     result["p_value_fdr"] = p_corrected[idx]
                     result["significant"] = p_corrected[idx] < 0.05
 
-                # Draw significance bars on plot
+                # Draw significance bars and p-values for ALL comparisons
                 y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
                 y_max = ax.get_ylim()[1]
                 bar_height = y_range * 0.02
@@ -1942,76 +2214,65 @@ class F1AnalysisFramework:
 
                 for idx, (comp_i, comp_j) in enumerate(comparisons):
                     result = pairwise_results[idx]
+
+                    # Find group indices
+                    i = group_names.index(comp_i)
+                    j = group_names.index(comp_j)
+
+                    # Find a good y position for this bar
+                    max_overlap_level = 0
+                    for existing_i, existing_j, level in bar_y_positions:
+                        # Check if bars would overlap
+                        if not (j < existing_i or i > existing_j):
+                            max_overlap_level = max(max_overlap_level, level + 1)
+
+                    bar_level = max_overlap_level
+                    y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
+                    bar_y_positions.append((i, j, bar_level))
+
+                    # Draw bar for all comparisons
+                    ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
+                    ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+                    ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+
+                    # Add p-value text (always show, regardless of significance)
+                    p_val = result["p_value_fdr"]
+                    if p_val < 0.001:
+                        p_text = "p < 0.001"
+                    else:
+                        p_text = f"p = {p_val:.3f}"
+
+                    # Add stars for significant results
                     if result["significant"]:
-                        # Find group indices
-                        i = group_names.index(comp_i)
-                        j = group_names.index(comp_j)
-
-                        # Find a good y position for this bar
-                        max_overlap_level = 0
-                        for existing_i, existing_j, level in bar_y_positions:
-                            # Check if bars would overlap
-                            if not (j < existing_i or i > existing_j):
-                                max_overlap_level = max(max_overlap_level, level + 1)
-
-                        bar_level = max_overlap_level
-                        y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
-                        bar_y_positions.append((i, j, bar_level))
-
-                        # Draw significance bar
-                        ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
-                        ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
-                        ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
-
-                        # Add significance stars
-                        p_val = result["p_value_fdr"]
                         if p_val < 0.001:
                             stars = "***"
                         elif p_val < 0.01:
                             stars = "**"
-                        elif p_val < 0.05:
-                            stars = "*"
                         else:
-                            stars = ""
+                            stars = "*"
+                        p_text = f"{stars} {p_text}"
 
-                        if stars:
-                            ax.text(
-                                (i + j) / 2,
-                                y_bar + bar_height,
-                                stars,
-                                ha="center",
-                                va="bottom",
-                                fontsize=12,
-                                fontweight="bold",
-                            )
+                    ax.text(
+                        (i + j) / 2,
+                        y_bar + bar_height,
+                        p_text,
+                        ha="center",
+                        va="bottom",
+                        fontsize=11,
+                        fontweight="bold",
+                        fontname="Arial",
+                    )
 
-                        # Add p-value annotation in top corner (only for the first significant comparison)
-                        if idx == 0 or len([r for r in pairwise_results[:idx] if r["significant"]]) == 0:
-                            p_text = f"p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
-                            ax.text(
-                                0.02,
-                                0.98,
-                                p_text,
-                                transform=ax.transAxes,
-                                fontsize=10,
-                                fontname="Arial",
-                                verticalalignment="top",
-                                horizontalalignment="left",
-                                bbox=dict(
-                                    boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1
-                                ),
-                            )
-
-                # Adjust y-axis limits to accommodate significance bars
-                if pairwise_results and any(r["significant"] for r in pairwise_results):
+                # Adjust y-axis limits to accommodate all bars and labels
+                if pairwise_results:
                     max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
                     ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
 
         return {
             "groups": group_names,
-            "n_samples": [len(g) for g in groups],
-            "means": [np.mean(g) for g in groups],
-            "medians": [np.median(g) for g in groups],
+            "n_samples": [len(g) for g in groups_raw],
+            "means": [np.mean(convert_metric_data(g, y_col)) for g in groups_raw],
+            "medians": [np.median(convert_metric_data(g, y_col)) for g in groups_raw],
             "pairwise": pairwise_results,
         }
 
@@ -2030,13 +2291,43 @@ class F1AnalysisFramework:
         unique_genotypes = list(set(genotype_vals))
         genotype_color_map = self.create_color_mapping(mode, unique_genotypes, "brain_region")
 
-        # Create boxplot
+        # Prepare data for statistical tests (RAW, unconverted)
+        groups_raw = [data_copy[data_copy["combined_group"] == group][y_col].dropna().values for group in unique_groups]
+
+        # Convert data for display
+        data_display = data_copy.copy()
+        data_display[y_col] = convert_metric_data(data_display[y_col], y_col)
+
+        # Prepare converted data for plotting
+        groups_converted = [
+            data_display[data_display["combined_group"] == group][y_col].dropna().values for group in unique_groups
+        ]
+
+        # Prepare colors
         colors = []
         for group in unique_groups:
             genotype = group.split(" + ")[0]
             colors.append(genotype_color_map.get(genotype, "gray"))
 
-        box_plot = sns.boxplot(data=data_copy, x="combined_group", y=y_col, ax=ax, order=unique_groups, palette=colors)
+        # Add scatter with converted data FIRST (so boxplot appears on top)
+        for i, group in enumerate(unique_groups):
+            group_data = groups_converted[i]
+            x_pos = np.random.normal(i, 0.04, size=len(group_data))
+            ax.scatter(
+                x_pos, group_data, alpha=0.6, s=50, color=colors[i], edgecolors="black", linewidths=0.5, zorder=1
+            )
+
+        # Create boxplot with converted data (drawn on top)
+        box_plot = sns.boxplot(
+            data=data_display,
+            x="combined_group",
+            y=y_col,
+            ax=ax,
+            order=unique_groups,
+            palette=colors,
+            width=0.6,
+            zorder=2,
+        )
 
         # Style based on pretraining
         for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
@@ -2064,40 +2355,34 @@ class F1AnalysisFramework:
                         line.set_color("black")
                         line.set_linewidth(1.5)
 
-        # Add scatter
-        sns.stripplot(
-            data=data_copy,
-            x="combined_group",
-            y=y_col,
-            ax=ax,
-            size=6,
-            alpha=0.7,
-            jitter=True,
-            dodge=False,
-            color="black",
-            order=unique_groups,
-        )
-
-        # Formatting
-        ax.set_title(title, fontsize=14, fontweight="bold")
-        ax.set_xlabel("Genotype + Pretraining", fontsize=12)
-        ax.set_ylabel(y_col.replace("_", " ").title(), fontsize=12)
+        # Formatting with elegant metric name
+        ax.set_title(title, fontsize=14, fontweight="bold", fontname="Arial")
+        ax.set_xlabel("Genotype + Pretraining", fontsize=12, fontname="Arial")
+        ax.set_ylabel(format_metric_label(y_col), fontsize=12, fontname="Arial")
         ax.tick_params(axis="x", rotation=45)
 
-        # Add sample sizes
+        # Apply global axis range if available
+        if y_col in self.global_axis_ranges:
+            ax.set_ylim(self.global_axis_ranges[y_col])
+
+        # Add sample sizes to x-axis labels
+        x_labels = []
         for i, group in enumerate(unique_groups):
-            n = len(data_copy[data_copy["combined_group"] == group])
-            ax.text(i, ax.get_ylim()[1] * 0.95, f"n={n}", ha="center", va="top", fontsize=9, fontweight="bold")
+            n = len(groups_raw[i])
+            genotype, pretraining = group.split(" + ")
+            pretraining_label = format_pretraining_label(pretraining)
+            display_label = f"{genotype} + {pretraining_label}"
+            x_labels.append(f"{display_label}\n(n={n})")
+        ax.set_xticklabels(x_labels, fontname="Arial", rotation=45, ha="right")
 
         # Statistical testing with SIMPLIFIED pairwise comparisons
         # NEW STRATEGY: Only compare pretraining within each genotype (n vs y)
         # This reduces comparisons from all-pairwise to just 2: ctrl n vs ctrl y, and tnt n vs tnt y
-        groups = [data_copy[data_copy["combined_group"] == group][y_col].values for group in unique_groups]
         group_names = unique_groups
 
         pairwise_results = []
 
-        if len(groups) >= 2:
+        if len(groups_raw) >= 2:
             # Build a mapping of group indices
             group_info = {}
             for i, group_name in enumerate(group_names):
@@ -2110,8 +2395,8 @@ class F1AnalysisFramework:
             p_values = []
             comparisons = []
 
-            for i in range(len(groups)):
-                for j in range(i + 1, len(groups)):
+            for i in range(len(groups_raw)):
+                for j in range(i + 1, len(groups_raw)):
                     group1_name = group_names[i]
                     group2_name = group_names[j]
 
@@ -2127,31 +2412,31 @@ class F1AnalysisFramework:
                         if test_type == "permutation":
                             # Permutation test for mean difference
                             p_value, diff_value = self._permutation_test(
-                                [groups[i], groups[j]], lambda x: [np.mean(g) for g in x]
+                                [groups_raw[i], groups_raw[j]], lambda x: [np.mean(g) for g in x]
                             )
                         else:  # mannwhitney
                             # Mann-Whitney U test
                             from scipy.stats import mannwhitneyu
 
-                            statistic, p_value = mannwhitneyu(groups[i], groups[j], alternative="two-sided")
-                            diff_value = np.median(groups[i]) - np.median(groups[j])
+                            statistic, p_value = mannwhitneyu(groups_raw[i], groups_raw[j], alternative="two-sided")
+                            diff_value = np.median(groups_raw[i]) - np.median(groups_raw[j])
 
                         p_values.append(p_value)
                         comparisons.append((group_names[i], group_names[j], i, j))
 
-                        # Store detailed results
+                        # Store detailed results (converted for display)
                         pairwise_results.append(
                             {
                                 "group1": group_names[i],
                                 "group2": group_names[j],
                                 "group1_idx": i,
                                 "group2_idx": j,
-                                "n1": len(groups[i]),
-                                "n2": len(groups[j]),
-                                "mean1": np.mean(groups[i]),
-                                "mean2": np.mean(groups[j]),
-                                "median1": np.median(groups[i]),
-                                "median2": np.median(groups[j]),
+                                "n1": len(groups_raw[i]),
+                                "n2": len(groups_raw[j]),
+                                "mean1": np.mean(convert_metric_data(groups_raw[i], y_col)),
+                                "mean2": np.mean(convert_metric_data(groups_raw[j], y_col)),
+                                "median1": np.median(convert_metric_data(groups_raw[i], y_col)),
+                                "median2": np.median(convert_metric_data(groups_raw[j], y_col)),
                                 "p_value_raw": p_value,
                                 "diff_value": diff_value,
                                 "comparison_type": "within_genotype",
@@ -2168,7 +2453,7 @@ class F1AnalysisFramework:
                     result["p_value_fdr"] = p_corrected[idx]
                     result["significant"] = p_corrected[idx] < 0.05
 
-                # Draw significance bars on plot
+                # Draw bars and p-values for ALL comparisons
                 y_range = ax.get_ylim()[1] - ax.get_ylim()[0]
                 y_max = ax.get_ylim()[1]
                 bar_height = y_range * 0.02
@@ -2177,71 +2462,65 @@ class F1AnalysisFramework:
                 bar_y_positions = []
 
                 for idx, result in enumerate(pairwise_results):
+                    # Always draw bars and p-values, not just for significant ones
+                    i = result["group1_idx"]
+                    j = result["group2_idx"]
+
+                    # Find a good y position for this bar
+                    max_overlap_level = 0
+                    for existing_i, existing_j, level in bar_y_positions:
+                        # Check if bars would overlap
+                        if not (j < existing_i or i > existing_j):
+                            max_overlap_level = max(max_overlap_level, level + 1)
+
+                    bar_level = max_overlap_level
+                    y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
+                    bar_y_positions.append((i, j, bar_level))
+
+                    # Draw bar for all comparisons
+                    ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
+                    ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+                    ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+
+                    # Add p-value text (always show)
+                    p_val = result["p_value_fdr"]
+                    if p_val < 0.001:
+                        p_text = "p < 0.001"
+                    else:
+                        p_text = f"p = {p_val:.3f}"
+                        fontweight="bold",
+
+                    # Add stars for significant results
                     if result["significant"]:
-                        i = result["group1_idx"]
-                        j = result["group2_idx"]
-
-                        # Find a good y position for this bar
-                        max_overlap_level = 0
-                        for existing_i, existing_j, level in bar_y_positions:
-                            # Check if bars would overlap
-                            if not (j < existing_i or i > existing_j):
-                                max_overlap_level = max(max_overlap_level, level + 1)
-
-                        bar_level = max_overlap_level
-                        y_bar = y_max + y_range * (0.05 + bar_level * 0.08)
-                        bar_y_positions.append((i, j, bar_level))
-
-                        # Draw significance bar
-                        ax.plot([i, j], [y_bar, y_bar], "k-", linewidth=1.5)
-                        ax.plot([i, i], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
-                        ax.plot([j, j], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
-
-                        # Add significance stars
-                        p_val = result["p_value_fdr"]
                         if p_val < 0.001:
                             stars = "***"
                         elif p_val < 0.01:
                             stars = "**"
-                        elif p_val < 0.05:
-                            stars = "*"
                         else:
-                            stars = ""
+                            stars = "*"
+                        p_text = f"{stars} {p_text}"
 
-                        if stars:
-                            ax.text(
-                                (i + j) / 2,
-                                y_bar + bar_height,
-                                stars,
-                                ha="center",
-                                va="bottom",
-                                fontsize=12,
-                                fontweight="bold",
-                            )
+                    ax.text(
+                        (i + j) / 2,
+                        y_bar + bar_height,
+                        p_text,
+                        ha="center",
+                        va="bottom",
+                        fontsize=11,
+                        fontweight="bold",
+                        fontname="Arial",
+                    )
 
-                        # Add p-value annotation next to the comparison
-                        # Place it slightly above the significance bar
-                        p_text = f"p < 0.001" if p_val < 0.001 else f"p = {p_val:.3f}"
-                        ax.text(
-                            (i + j) / 2,
-                            y_bar + bar_height * 3,
-                            p_text,
-                            ha="center",
-                            va="bottom",
-                            fontsize=9,
-                            bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
-                        )
-
-                # Adjust y-axis limits to accommodate significance bars
-                if pairwise_results and any(r["significant"] for r in pairwise_results):
+                # Adjust y-axis limits to accommodate all bars and labels
+                if pairwise_results:
                     max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
                     ax.set_ylim(ax.get_ylim()[0], y_max + y_range * (0.15 + max_bar_level * 0.08))
 
         return {
             "groups": group_names,
-            "n_samples": [len(g) for g in groups],
-            "means": [np.mean(g) for g in groups],
-            "medians": [np.median(g) for g in groups],
+            "n_samples": [len(g) for g in groups_raw],
+            "means": [np.mean(convert_metric_data(g, y_col)) for g in groups_raw],
+            "medians": [np.median(convert_metric_data(g, y_col)) for g in groups_raw],
             "pairwise": pairwise_results,
         }
 
@@ -2360,48 +2639,36 @@ class F1AnalysisFramework:
                 if "pairwise" in result_data and len(result_data["pairwise"]) > 0:
                     lines.append("**Pairwise Comparisons (FDR-corrected):**")
                     lines.append("")
-                    lines.append(
-                        "| Comparison | N1 vs N2 | Mean Diff | p (mean) | Median Diff | p (median) | Sig. Mean | Sig. Median |"
-                    )
-                    lines.append(
-                        "|------------|----------|-----------|----------|-------------|------------|-----------|-------------|"
-                    )
+                    lines.append("| Comparison | N1 vs N2 | Mean Diff | Median Diff | p-value (FDR) | Significant |")
+                    lines.append("|------------|----------|-----------|-------------|---------------|-------------|")
 
                     for pw in result_data["pairwise"]:
                         group1 = pw["group1"]
                         group2 = pw["group2"]
                         n_comp = f"{pw['n1']} vs {pw['n2']}"
-                        mean_diff = pw["mean_diff"]
-                        median_diff = pw["median_diff"]
-                        p_mean = pw["p_mean_fdr"]
-                        p_median = pw["p_median_fdr"]
-                        sig_mean = "✓" if pw.get("significant_mean", False) else ""
-                        sig_median = "✓" if pw.get("significant_median", False) else ""
+                        mean_diff = pw["mean1"] - pw["mean2"]
+                        median_diff = pw["median1"] - pw["median2"]
+                        p_val = pw.get("p_value_fdr", pw.get("p_value_raw", 0.0))
+                        significant = "✓" if pw.get("significant", False) else ""
 
                         lines.append(
-                            f"| {group1} vs {group2} | {n_comp} | {mean_diff:.4f} | {p_mean:.4f} | {median_diff:.4f} | {p_median:.4f} | {sig_mean} | {sig_median} |"
+                            f"| {group1} vs {group2} | {n_comp} | {mean_diff:.4f} | {median_diff:.4f} | {p_val:.4f} | {significant} |"
                         )
                     lines.append("")
 
                     # Highlight significant comparisons
-                    sig_mean_comps = [pw for pw in result_data["pairwise"] if pw.get("significant_mean", False)]
-                    sig_median_comps = [pw for pw in result_data["pairwise"] if pw.get("significant_median", False)]
+                    sig_comps = [pw for pw in result_data["pairwise"] if pw.get("significant", False)]
 
-                    if sig_mean_comps:
-                        lines.append("**Significant Mean Differences:**")
-                        for pw in sig_mean_comps:
-                            direction = "↑" if pw["mean_diff"] > 0 else "↓"
+                    if sig_comps:
+                        lines.append("**Significant Differences:**")
+                        for pw in sig_comps:
+                            mean_diff = pw["mean1"] - pw["mean2"]
+                            median_diff = pw["median1"] - pw["median2"]
+                            direction_mean = "↑" if mean_diff > 0 else "↓"
+                            direction_median = "↑" if median_diff > 0 else "↓"
+                            p_val = pw.get("p_value_fdr", pw.get("p_value_raw", 0.0))
                             lines.append(
-                                f"- {pw['group1']} vs {pw['group2']}: {direction} {abs(pw['mean_diff']):.4f} (p = {pw['p_mean_fdr']:.4f})"
-                            )
-                        lines.append("")
-
-                    if sig_median_comps:
-                        lines.append("**Significant Median Differences:**")
-                        for pw in sig_median_comps:
-                            direction = "↑" if pw["median_diff"] > 0 else "↓"
-                            lines.append(
-                                f"- {pw['group1']} vs {pw['group2']}: {direction} {abs(pw['median_diff']):.4f} (p = {pw['p_median_fdr']:.4f})"
+                                f"- {pw['group1']} vs {pw['group2']}: Mean {direction_mean} {abs(mean_diff):.4f}, Median {direction_median} {abs(median_diff):.4f} (p = {p_val:.4f})"
                             )
                         lines.append("")
 

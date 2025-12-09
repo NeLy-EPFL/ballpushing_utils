@@ -41,6 +41,130 @@ import scipy.stats as stats_module
 from statsmodels.stats.multitest import multipletests
 import time
 
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def is_distance_metric(metric_name):
+    """Check if a metric represents distance (in pixels)"""
+    distance_keywords = [
+        "distance",
+        "dist",
+        "head_ball",
+        "fly_distance_moved",
+        "max_distance",
+        "distance_moved",
+        "distance_ratio",
+    ]
+    return any(keyword in metric_name.lower() for keyword in distance_keywords)
+
+
+def is_time_metric(metric_name):
+    """Check if a metric represents time (in seconds)"""
+    time_keywords = ["time", "duration", "pause", "stop", "freeze", "chamber_exit_time", "time_chamber_beginning"]
+    # Exclude ratio metrics
+    if "ratio" in metric_name.lower():
+        return False
+    return any(keyword in metric_name.lower() for keyword in time_keywords)
+
+
+def convert_metric_data(data, metric_name):
+    """Convert metric data from pixels to mm or seconds to minutes"""
+    if is_distance_metric(metric_name):
+        return data / PIXELS_PER_MM
+    elif is_time_metric(metric_name):
+        return data / 60  # Convert seconds to minutes
+    return data
+
+
+def get_metric_unit(metric_name):
+    """Get the display unit for a metric"""
+    if is_distance_metric(metric_name):
+        return "(mm)"
+    elif is_time_metric(metric_name):
+        return "(min)"
+    return ""
+
+
+def get_elegant_metric_name(metric_name):
+    """Convert metric code names to elegant display names"""
+    metric_map = {
+        # Event metrics
+        "nb_events": "Number of events",
+        "has_major": "Has major event",
+        "first_major_event": "First major event",
+        "first_major_event_time": "First major event time",
+        "max_event": "Max event",
+        "max_event_time": "Max event time",
+        "final_event": "Final event",
+        "final_event_time": "Final event time",
+        "has_significant": "Has significant event",
+        "nb_significant_events": "Number of significant events",
+        "significant_ratio": "Significant event ratio",
+        "first_significant_event": "First significant event",
+        "first_significant_event_time": "First significant event time",
+        # Distance metrics
+        "max_distance": "Max ball distance",
+        "distance_moved": "Total ball distance moved",
+        "distance_ratio": "Distance ratio",
+        "fly_distance_moved": "Fly distance moved",
+        # Interaction metrics
+        "overall_interaction_rate": "Interaction rate",
+        "interaction_persistence": "Interaction persistence",
+        "interaction_proportion": "Interaction proportion",
+        "time_to_first_interaction": "Time to first interaction",
+        # Push/pull metrics
+        "pushed": "Number of pushes",
+        "pulled": "Number of pulls",
+        "pulling_ratio": "Pulling ratio",
+        "head_pushing_ratio": "Head pushing ratio",
+        # Velocity metrics
+        "normalized_velocity": "Normalized velocity",
+        "velocity_during_interactions": "Velocity during interactions",
+        "velocity_trend": "Velocity trend",
+        # Pause/stop metrics
+        "has_long_pauses": "Has long pauses",
+        "nb_stops": "Number of stops",
+        "total_stop_duration": "Total stop duration",
+        "median_stop_duration": "Median stop duration",
+        "nb_pauses": "Number of pauses",
+        "total_pause_duration": "Total pause duration",
+        "median_pause_duration": "Median pause duration",
+        "nb_long_pauses": "Number of long pauses",
+        "total_long_pause_duration": "Total long pause duration",
+        "median_long_pause_duration": "Median long pause duration",
+        "pauses_persistence": "Pauses persistence",
+        "cumulated_breaks_duration": "Total break duration",
+        # Freeze metrics
+        "nb_freeze": "Number of freezes",
+        "median_freeze_duration": "Median freeze duration",
+        # Chamber metrics
+        "chamber_time": "Chamber time",
+        "chamber_ratio": "Chamber ratio",
+        "chamber_exit_time": "Chamber exit time",
+        "time_chamber_beginning": "Time in chamber (early)",
+        # Task completion
+        "has_finished": "Task completed",
+        "persistence_at_end": "Persistence at end",
+        # Other behavioral metrics
+        "fraction_not_facing_ball": "Fraction not facing ball",
+        "leg_visibility_ratio": "Leg visibility ratio",
+        "flailing": "Leg flailing",
+        "median_head_ball_distance": "Median head-ball distance",
+        "mean_head_ball_distance": "Mean head-ball distance",
+    }
+
+    return metric_map.get(metric_name, metric_name)
+
+
+def format_metric_label(metric_name):
+    """Format metric name with elegant display name and appropriate unit"""
+    elegant_name = get_elegant_metric_name(metric_name)
+    unit = get_metric_unit(metric_name)
+    if unit:
+        return f"{elegant_name} {unit}"
+    return elegant_name
+
 
 def generate_magnet_mannwhitney_plots(
     data,
@@ -106,25 +230,29 @@ def generate_magnet_mannwhitney_plots(
         # Get test group (the non-control group)
         test_group = [g for g in groups if g != control_group][0]
 
-        # Perform Mann-Whitney U test
-        control_data = plot_data[plot_data[y] == control_group][metric].dropna()
-        test_data = plot_data[plot_data[y] == test_group][metric].dropna()
+        # Get raw data and convert if needed
+        control_data_raw = plot_data[plot_data[y] == control_group][metric].dropna()
+        test_data_raw = plot_data[plot_data[y] == test_group][metric].dropna()
 
-        if len(control_data) < 3 or len(test_data) < 3:
-            print(f"  ⚠️  Insufficient data for {metric} (control: {len(control_data)}, test: {len(test_data)})")
+        if len(control_data_raw) < 3 or len(test_data_raw) < 3:
+            print(f"  ⚠️  Insufficient data for {metric} (control: {len(control_data_raw)}, test: {len(test_data_raw)})")
             continue
 
-        # Perform Mann-Whitney U test
-        u_stat, p_value = mannwhitneyu(test_data, control_data, alternative="two-sided")
+        # Convert data for plotting (pixels to mm if needed)
+        control_data = convert_metric_data(control_data_raw, metric)
+        test_data = convert_metric_data(test_data_raw, metric)
 
-        # Calculate medians
+        # Perform Mann-Whitney U test on RAW data (before conversion)
+        u_stat, p_value = mannwhitneyu(test_data_raw, control_data_raw, alternative="two-sided")
+
+        # Calculate medians on CONVERTED data for display
         control_median = control_data.median()
         test_median = test_data.median()
         median_diff = test_median - control_median
 
         # Calculate effect size (rank-biserial correlation)
-        n1 = len(control_data)
-        n2 = len(test_data)
+        n1 = len(control_data_raw)
+        n2 = len(test_data_raw)
         effect_size = 1 - (2 * u_stat) / (n1 * n2)
 
         # Store results
@@ -146,13 +274,13 @@ def generate_magnet_mannwhitney_plots(
         # Create plot with smaller figure size for publication-quality layout
         fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
 
-        # Map to intuitive labels: "n" -> "Control", "y" -> "Magnet block"
+        # Map to intuitive labels with sample sizes: "n" -> "Control", "y" -> "Magnet block"
         if control_group == "n" and test_group == "y":
-            control_label = "Control"
-            test_label = "Magnet block"
+            control_label = f"Control\n(n={n1})"
+            test_label = f"Magnet block\n(n={n2})"
         else:
-            control_label = control_group
-            test_label = test_group
+            control_label = f"{control_group}\n(n={n1})"
+            test_label = f"{test_group}\n(n={n2})"
 
         # Create color palette (matching F1 style)
         colors = {control_group: "#ff7f0e", test_group: "#1f77b4"}  # Orange for control, blue for test
@@ -226,11 +354,9 @@ def generate_magnet_mannwhitney_plots(
                 0.5, bar_height + 0.02 * y_range, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial"
             )
 
-        # Add p-value text in top-left corner of plot
+        # Always add p-value text in top-left corner (for both significant and non-significant)
         if p_value < 0.001:
             p_text = f"p < 0.001"
-        elif p_value < 0.01:
-            p_text = f"p = {p_value:.3f}"
         else:
             p_text = f"p = {p_value:.3f}"
 
@@ -254,12 +380,13 @@ def generate_magnet_mannwhitney_plots(
         # Add tick marks pointing outward
         ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
 
-        # Set x-axis labels with intuitive labels
+        # Set x-axis labels with intuitive labels and sample sizes
         ax.set_xticks(positions)
         ax.set_xticklabels([control_label, test_label], fontsize=10, fontname="Arial")
 
-        # Set y-axis label
-        ax.set_ylabel(metric, fontsize=11, fontname="Arial")
+        # Set y-axis label with units
+        ylabel = format_metric_label(metric)
+        ax.set_ylabel(ylabel, fontsize=11, fontname="Arial")
 
         # Format y-axis tick labels
         ax.tick_params(axis="y", labelsize=9)
@@ -746,15 +873,16 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
     # Create plot with smaller figure size matching F1 style
     fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
 
-    # Map to intuitive labels: "n" -> "Control", "y" -> "Magnet block"
+    # Map to intuitive labels with sample sizes: "n" -> "Control", "y" -> "Magnet block"
     display_labels = []
-    for group in groups:
+    for i, group in enumerate(groups):
+        n = n_totals[i]
         if group == "n":
-            display_labels.append("Control")
+            display_labels.append(f"Control\n(n={n})")
         elif group == "y":
-            display_labels.append("Magnet block")
+            display_labels.append(f"Magnet block\n(n={n})")
         else:
-            display_labels.append(group)
+            display_labels.append(f"{group}\n(n={n})")
 
     # Use F1-style colors
     colors = {control_group: "#ff7f0e"}  # Orange for control
@@ -793,11 +921,9 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
         ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
         ax.text(0.5, bar_height + 0.02, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial")
 
-    # Add p-value text in top-left corner
+    # Always add p-value text in top-left corner (for both significant and non-significant)
     if p_value < 0.001:
         p_text = f"p < 0.001"
-    elif p_value < 0.01:
-        p_text = f"p = {p_value:.3f}"
     else:
         p_text = f"p = {p_value:.3f}"
 

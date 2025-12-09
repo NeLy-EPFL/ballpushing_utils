@@ -33,6 +33,9 @@ import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
 
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
 
 def load_coordinates_dataset():
     """Load the MagnetBlock experiments coordinates dataset"""
@@ -278,12 +281,32 @@ def create_trajectory_plot(
         control_group = "n"
         test_group = "y"
         data = data.copy()
-        data["label"] = data[group_col].apply(lambda x: "Magnet block" if x == "y" else "Control")
+        # Convert distance to mm
+        data[value_col] = data[value_col] / PIXELS_PER_MM
+
+        # Get sample sizes
+        n_control = data[data[group_col] == control_group][subject_col].nunique()
+        n_test = data[data[group_col] == test_group][subject_col].nunique()
+
+        data["label"] = data[group_col].apply(
+            lambda x: f"Magnet block (n={n_test})" if x == "y" else f"Control (n={n_control})"
+        )
         group_col_plot = "label"
     else:
         control_group = groups[0]
         test_group = groups[1]
-        group_col_plot = group_col
+        data = data.copy()
+        # Convert distance to mm
+        data[value_col] = data[value_col] / PIXELS_PER_MM
+
+        # Get sample sizes
+        n_control = data[data[group_col] == control_group][subject_col].nunique()
+        n_test = data[data[group_col] == test_group][subject_col].nunique()
+
+        data["label"] = data[group_col].apply(
+            lambda x: f"{test_group} (n={n_test})" if x == test_group else f"{control_group} (n={n_control})"
+        )
+        group_col_plot = "label"
 
     # Downsample data for plotting (every 290 frames as in notebook)
     print(f"  Downsampling data for plotting...")
@@ -294,7 +317,8 @@ def create_trajectory_plot(
     fig, ax = plt.subplots(figsize=(12, 6))
 
     # Color palette - blue for Magnet block, orange for Control (matching notebook)
-    label_colors = {"Magnet block": "blue", "Control": "orange"}
+    # Note: label_colors keys must match the actual labels with sample sizes
+    label_colors = {f"Magnet block (n={n_test})": "blue", f"Control (n={n_control})": "orange"}
 
     # Plot using seaborn lineplot (gives mean ± CI automatically)
     sns.lineplot(data=data_ds, x=time_col, y=value_col, hue=group_col_plot, palette=label_colors, ax=ax)
@@ -306,11 +330,11 @@ def create_trajectory_plot(
     y_min, y_max = ax.get_ylim()
     y_range = y_max - y_min
 
-    # Extend y-axis by 15% to make room for significance stars
-    ax.set_ylim(y_min, y_max + 0.15 * y_range)
+    # Extend y-axis by 20% to make room for significance stars and p-values
+    ax.set_ylim(y_min, y_max + 0.20 * y_range)
 
     # Update y_max after extension
-    y_max_extended = y_max + 0.15 * y_range
+    y_max_extended = y_max + 0.20 * y_range
 
     # Calculate time bin edges
     time_min = data[time_col].min()
@@ -329,33 +353,46 @@ def create_trajectory_plot(
             ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
             ax.axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
 
-            # Annotate significance levels
-            if time_bin in significant_bins:
-                p_value = permutation_results["p_values"][time_bin]
+            # Annotate significance levels and p-values for all bins
+            p_value = permutation_results["p_values"][time_bin]
 
-                if p_value < 0.001:
-                    significance = "***"
-                elif p_value < 0.01:
-                    significance = "**"
-                elif p_value < 0.05:
-                    significance = "*"
-                else:
-                    significance = ""
+            if p_value < 0.001:
+                significance = "***"
+            elif p_value < 0.01:
+                significance = "**"
+            elif p_value < 0.05:
+                significance = "*"
+            else:
+                significance = ""
 
-                if significance:
-                    # Position stars at top of plot (just below the extended limit)
-                    # Use 92% of the extended max to ensure they're visible
-                    y_position = y_max + 0.05 * y_range
-                    ax.text(
-                        bin_start + bin_width / 2,
-                        y_position,
-                        significance,
-                        ha="center",
-                        va="bottom",
-                        fontsize=16,
-                        color="red",
-                        fontweight="bold",
-                    )
+            # Add significance stars if significant
+            if significance and time_bin in significant_bins:
+                # Position stars at top of plot
+                y_star = y_max + 0.05 * y_range
+                ax.text(
+                    bin_start + bin_width / 2,
+                    y_star,
+                    significance,
+                    ha="center",
+                    va="bottom",
+                    fontsize=16,
+                    color="red",
+                    fontweight="bold",
+                )
+
+            # Add p-value for all bins (significant and non-significant)
+            y_pval = y_max + 0.11 * y_range
+            p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
+            p_color = "red" if time_bin in significant_bins else "gray"
+            ax.text(
+                bin_start + bin_width / 2,
+                y_pval,
+                p_text,
+                ha="center",
+                va="bottom",
+                fontsize=8,
+                color=p_color,
+            )
 
     # Set x-axis ticks: every 10 min from 60 min to 120 min
     xticks = list(range(3600, 7201, 600))
@@ -365,7 +402,7 @@ def create_trajectory_plot(
 
     # Formatting
     ax.set_xlabel("Time", fontsize=12)
-    ax.set_ylabel("Ball distance from start (px)", fontsize=12)
+    ax.set_ylabel("Ball distance from start (mm)", fontsize=12)
 
     # Set legend position to lower right
     ax.legend(loc="lower right", fontsize=12)
