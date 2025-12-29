@@ -36,7 +36,7 @@ from tqdm import tqdm
 
 def load_coordinates_dataset():
     """Load the dissected experiments coordinates dataset"""
-    dataset_path = "/mnt/upramdya_data/MD/Antennae_dissection/Datasets/251117_19_summary_antennae_cutting_Data/coordinates/pooled_coordinates.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Antennae_dissection/Datasets/251205_13_summary_antennae_cutting_Data/coordinates/pooled_coordinates.feather"
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
@@ -49,6 +49,37 @@ def load_coordinates_dataset():
     # Check for Dissected column
     if "Dissected" not in dataset.columns:
         raise ValueError(f"'Dissected' column not found in dataset. Available columns: {list(dataset.columns)}")
+
+    # Normalize Dissected values to expected labels
+    if "Dissected" in dataset.columns:
+        print("Normalizing 'Dissected' values to ['dissected', 'non-dissected']")
+        # Create a copy to avoid SettingWithCopy warnings
+        dissected_series = dataset["Dissected"].copy()
+
+        # Standardize to strings for mapping
+        def _normalize_dissection_value(v):
+            if pd.isna(v):
+                return np.nan
+            # Convert to lowercase string for comparison
+            s = str(v).strip().lower()
+            if s in {"y", "yes", "true", "1"}:
+                return "dissected"
+            if s in {"n", "no", "false", "0"}:
+                return "non-dissected"
+            # Already in expected form or other labels
+            if s in {"dissected", "non-dissected"}:
+                return s
+            # Fallback: keep original to avoid unintended relabeling
+            return s
+
+        dataset["Dissected"] = dissected_series.apply(_normalize_dissection_value)
+
+        # Report resulting groups
+        try:
+            groups_after = sorted([g for g in dataset["Dissected"].unique() if pd.notna(g)])
+            print(f"'Dissected' groups after normalization: {groups_after}")
+        except Exception:
+            pass
 
     print(f"Dissection groups: {sorted(dataset['Dissected'].unique())}")
 
@@ -405,7 +436,7 @@ def generate_trajectory_plot(data, n_bins=12, n_permutations=10000, output_dir=N
         Show progress bars
     """
     if output_dir is None:
-        output_dir = Path("/mnt/upramdya_data/MD/Antennae_dissection/Plots/trajectories")
+        output_dir = Path("/mnt/upramdya_data/MD/Antennae_dissection/Plots/Trajectories")
     else:
         output_dir = Path(output_dir)
 
@@ -527,8 +558,8 @@ Examples:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/mnt/upramdya_data/MD/Antennae_dissection/Plots/trajectories",
-        help="Directory to save plots (default: /mnt/upramdya_data/MD/Antennae_dissection/Plots/trajectories)",
+        default="/mnt/upramdya_data/MD/Antennae_dissection/Plots/Trajectories",
+        help="Directory to save plots (default: /mnt/upramdya_data/MD/Antennae_dissection/Plots/Trajectories)",
     )
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")

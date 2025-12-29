@@ -5,18 +5,35 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
 import numpy as np
+import argparse
 from matplotlib.colors import Normalize
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../Ballpushing_utils")))
 from utilities import brain_regions_path
 
-# Get output directory from command line argument
-if len(sys.argv) > 1:
-    OUTPUT_DIR = sys.argv[1]
-    print(f"🎯 Using output directory: {OUTPUT_DIR}")
-else:
-    OUTPUT_DIR = "."
-    print("⚠️  No output directory specified, using current directory")
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Generate hits heatmap with control mode selection")
+parser.add_argument("output_dir", nargs="?", default=".", help="Output directory for results")
+parser.add_argument(
+    "--control-mode",
+    type=str,
+    choices=["tailored", "emptysplit"],
+    default="tailored",
+    help="Control selection mode (default: tailored)",
+)
+args = parser.parse_args()
+
+OUTPUT_DIR = args.output_dir
+CONTROL_MODE = args.control_mode
+DATA_FILES_DIR = os.path.join(OUTPUT_DIR, "data_files")
+PLOTS_DIR = os.path.join(OUTPUT_DIR, "plots")
+
+print(f"🎯 Using output directory: {OUTPUT_DIR}")
+print(f"📁 Data files directory: {DATA_FILES_DIR}")
+print(f"🎨 Plots directory: {PLOTS_DIR}")
+print(
+    f"🎛️  Control mode: {'Tailored controls (split-based)' if CONTROL_MODE == 'tailored' else 'Empty-Split (universal control)'}"
+)
 
 # Configuration: Choose which analysis types to include
 # Options: "both", "static", "temporal"
@@ -25,13 +42,26 @@ ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
 
 def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
-    pca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_pca_stats_results_allmethods*tailored*.csv"))
-    sparsepca_files = glob.glob(os.path.join(OUTPUT_DIR, "static_sparsepca_stats_results_allmethods*tailored*.csv"))
+    # Determine control suffix based on control mode
+    control_suffix = "tailored*" if CONTROL_MODE == "tailored" else "emptysplit*"
+
+    # Try data_files subdirectory first
+    pca_files = glob.glob(os.path.join(DATA_FILES_DIR, f"static_pca_stats_results_allmethods*{control_suffix}.csv"))
+    sparsepca_files = glob.glob(
+        os.path.join(DATA_FILES_DIR, f"static_sparsepca_stats_results_allmethods*{control_suffix}.csv")
+    )
+
+    # Fallback to OUTPUT_DIR root if not found in data_files
+    if not pca_files and not sparsepca_files:
+        pca_files = glob.glob(os.path.join(OUTPUT_DIR, f"static_pca_stats_results_allmethods*{control_suffix}.csv"))
+        sparsepca_files = glob.glob(
+            os.path.join(OUTPUT_DIR, f"static_sparsepca_stats_results_allmethods*{control_suffix}.csv")
+        )
 
     all_files = [(f, "pca") for f in pca_files] + [(f, "sparsepca") for f in sparsepca_files]
 
     if not all_files:
-        print("No PCA result files found")
+        print(f"No PCA result files found for control mode: {CONTROL_MODE}")
         return "pca", []
 
     # Sort by modification time (most recent first)
@@ -49,11 +79,18 @@ def detect_most_recent_pca_method():
 # Detect most recent PCA method and get appropriate files
 pca_method, method_files = detect_most_recent_pca_method()
 
-# Find tailored CSVs for static and temporal based on detected method
+# Find CSVs for static and temporal based on detected method and control mode
+control_suffix = "tailored*" if CONTROL_MODE == "tailored" else "emptysplit*"
 if pca_method == "sparsepca":
-    pattern = os.path.join(OUTPUT_DIR, "*_sparsepca_*allmethods*tailored*.csv")
+    pattern = os.path.join(DATA_FILES_DIR, f"*_sparsepca_*allmethods*{control_suffix}.csv")
+    # Fallback to OUTPUT_DIR root
+    if not glob.glob(pattern):
+        pattern = os.path.join(OUTPUT_DIR, f"*_sparsepca_*allmethods*{control_suffix}.csv")
 else:
-    pattern = os.path.join(OUTPUT_DIR, "*_pca_*allmethods*tailored*.csv")
+    pattern = os.path.join(DATA_FILES_DIR, f"*_pca_*allmethods*{control_suffix}.csv")
+    # Fallback to OUTPUT_DIR root
+    if not glob.glob(pattern):
+        pattern = os.path.join(OUTPUT_DIR, f"*_pca_*allmethods*{control_suffix}.csv")
 
 tailored_csvs = glob.glob(pattern)
 print(f"Found CSV files matching pattern '{pattern}': {tailored_csvs}")
@@ -301,8 +338,8 @@ for ax in axes1:
 
 # Generate output filename based on analysis type
 filename_suffix = ANALYSIS_TYPE if ANALYSIS_TYPE != "both" else "static_temporal"
-png_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split.png")
-pdf_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split.pdf")
+png_path = os.path.join(PLOTS_DIR, f"mannwhitney_{filename_suffix}_tailored_split.png")
+pdf_path = os.path.join(PLOTS_DIR, f"mannwhitney_{filename_suffix}_tailored_split.pdf")
 fig1.savefig(png_path, dpi=200)
 fig1.savefig(pdf_path, dpi=200)
 plt.close(fig1)
@@ -386,8 +423,8 @@ cbar2.set_ticklabels(log_ticklabels)
 fig2.text(0.5, 0.01, "PCA Type", ha="center", va="bottom", fontsize=12)
 for ax in axes2:
     ax.set_yticklabels(ax.get_yticklabels(), fontsize=7)
-png_log_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.png")
-pdf_log_path = os.path.join(OUTPUT_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.pdf")
+png_log_path = os.path.join(PLOTS_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.png")
+pdf_log_path = os.path.join(PLOTS_DIR, f"mannwhitney_{filename_suffix}_tailored_split_log.pdf")
 fig2.savefig(png_log_path, dpi=200)
 fig2.savefig(pdf_log_path, dpi=200)
 plt.close(fig2)

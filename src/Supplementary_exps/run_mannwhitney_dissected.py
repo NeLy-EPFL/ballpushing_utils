@@ -895,7 +895,7 @@ def main(overwrite=True, test_mode=False):
         print("🧪 TEST MODE: Only processing first 3 metrics for debugging")
 
     # Define output directory
-    base_output_dir = Path("/mnt/upramdya_data/MD/Antennae_dissection/Plots/Summary_metrics/Dissected_Mannwhitney")
+    base_output_dir = Path("/mnt/upramdya_data/MD/Antennae_dissection/Plots/Mannwhitney")
 
     # Ensure the output directory exists
     base_output_dir.mkdir(parents=True, exist_ok=True)

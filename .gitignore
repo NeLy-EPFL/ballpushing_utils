@@ -918,3 +918,10 @@ src/F1_tracks/mask_nearest.png
 src/F1_tracks/mask_linear.png
 src/F1_tracks/LC10_2/test_ball_euclidean_distance_permutation_results_adaptive_trimmed.csv
 src/F1_tracks/LC10_2/test_ball_euclidean_distance_permutation_results_percentage.csv
+src/PCA/comparison_tailored_vs_emptysplit/
+src/PCA/consistency_comparison_20251209/
+src/PCA/detailed_metric_analysis_optimized_20251209/
+src/PCA/pca_analysis_results_emptysplit_20251219_163755/
+src/PCA/pca_analysis_results_tailored_20251219_163028/
+src/PCA/test_brain_region_improved/
+src/PCA/test_metrics_clip_1_5_white/

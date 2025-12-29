@@ -160,8 +160,17 @@ def get_subset_data(df, col="Nickname", value="random", force_control=None):
 
     # Get the associated control
     if force_control is not None:
-        associated_control = force_control
-        print(f"Forced control is: {associated_control}")
+        # In force_control mode (e.g., emptysplit), use Empty-Split for GAL4 lines (n) and split lines (y),
+        # but still use TNTxPR for mutants (m) since they don't carry GAL4
+        split_value = SplitRegistry[SplitRegistry["Nickname"] == nickname]["Split"].iloc[0]
+        if split_value == "m":
+            # Mutants should always use TNTxPR as control (no GAL4 present)
+            associated_control = "TNTxPR"
+            print(f"Mutant line - using TNTxPR control (split={split_value})")
+        else:
+            # GAL4 lines (n) and split lines (y) use the forced control (typically Empty-Split)
+            associated_control = force_control
+            print(f"Forced control is: {associated_control} (split={split_value})")
     else:
         split_value = SplitRegistry[SplitRegistry["Nickname"] == nickname]["Split"].iloc[0]
         associated_control = control_nicknames_dict.get(split_value)

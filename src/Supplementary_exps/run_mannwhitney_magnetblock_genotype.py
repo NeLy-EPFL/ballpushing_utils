@@ -212,20 +212,22 @@ def generate_magnet_genotype_plots(
 
         all_stats.extend(per_genotype_stats)
 
-        # Build compact plot: 2 boxes per genotype (n then y), colors per Magnet
+        # Build F1-style plot: Use combined grouping with genotype color and magnet as fill/no-fill
         # Prepare plotting data (converted for display)
         plot_rows = []
         for g in genotypes:
             sub = plot_df[plot_df[genotype_col] == g]
             if sub.empty:
                 continue
-            for mval, label in [("n", "Control"), ("y", "Magnet block")]:
+            for mval in ["n", "y"]:
                 vals = sub[sub[magnet_col] == mval][metric].dropna()
                 if len(vals) == 0:
                     continue
                 vals = convert_metric_data(vals, metric)
                 for v in vals:
-                    plot_rows.append({genotype_col: g, magnet_col: mval, metric: float(v)})
+                    plot_rows.append(
+                        {genotype_col: g, magnet_col: mval, metric: float(v), "combined_group": f"{g} + {mval}"}
+                    )
 
         if not plot_rows:
             print("  ⚠️  No values for plotting, skipping")
@@ -233,133 +235,184 @@ def generate_magnet_genotype_plots(
 
         df_plot = pd.DataFrame(plot_rows)
 
-        # Order: by genotype, within each genotype order n then y
-        df_plot[genotype_col] = pd.Categorical(df_plot[genotype_col], categories=genotypes, ordered=True)
-        df_plot[magnet_col] = pd.Categorical(df_plot[magnet_col], categories=["n", "y"], ordered=True)
+        # Create combined groups for plotting
+        unique_groups = sorted(df_plot["combined_group"].unique())
 
-        # Colors: genotype-based mapping; magnet differentiates within genotype by position
+        # Colors: genotype-based mapping (consistent across magnet conditions)
         # - Empty-Gal4/EmptySplit: gray
         # - DDC: brown
         # - Others: default to gray for consistency in DDC context
-        def _colors_for_genotype(g):
+        def _color_for_genotype(g):
             gs = (g or "").lower()
             if "ddc" in gs:
-                return {"n": "#8B4513", "y": "#8B4513"}
+                return "#8B4513"
             if "empty" in gs:
-                return {"n": "#7f7f7f", "y": "#7f7f7f"}
-            return {"n": "#7f7f7f", "y": "#7f7f7f"}
+                return "#7f7f7f"
+            return "#7f7f7f"
+
+        # Map colors to each combined group based on genotype
+        genotype_colors = {}
+        for g in genotypes:
+            genotype_colors[g] = _color_for_genotype(g)
+
+        colors = []
+        for group in unique_groups:
+            genotype = group.split(" + ")[0]
+            colors.append(genotype_colors[genotype])
 
         # Figure sizing: narrow publication-style
-        n_g = len(genotypes)
-        fig_w = max(2.5, min(10, 1.4 * n_g + 1.0))
-        fig, ax = plt.subplots(1, 1, figsize=(fig_w, 3.5))
+        n_groups = len(unique_groups)
+        fig_w = max(4, min(12, 0.8 * n_groups + 2.0))
+        fig, ax = plt.subplots(1, 1, figsize=(fig_w, 4.5))
 
-        # Positions: for each genotype allocate 2 positions (n,y) separated by small gap
-        positions = []
-        labels = []
-        box_data = []
-        colors = []
+        # Add scatter with jitter FIRST (so boxplot appears on top)
+        for i, group in enumerate(unique_groups):
+            group_data = df_plot[df_plot["combined_group"] == group][metric].values
+            x_pos = np.random.normal(i, 0.04, size=len(group_data))
+            ax.scatter(
+                x_pos,
+                group_data,
+                alpha=0.6,
+                s=50,
+                color=colors[i],
+                edgecolors="black",
+                linewidths=0.5,
+                zorder=2,
+            )
 
-        xpos = 0
-        for g in genotypes:
-            cmap = _colors_for_genotype(g)
-            g_vals_n = df_plot[(df_plot[genotype_col] == g) & (df_plot[magnet_col] == "n")][metric].values
-            g_vals_y = df_plot[(df_plot[genotype_col] == g) & (df_plot[magnet_col] == "y")][metric].values
-            if len(g_vals_n) == 0 and len(g_vals_y) == 0:
-                # skip empty genotype
-                continue
-            # n box
-            positions.append(xpos)
-            labels.append(f"{g}\n(n)")
-            box_data.append(g_vals_n)
-            colors.append(cmap["n"])
-            # y box
-            positions.append(xpos + 1)
-            labels.append(f"{g}\n(y)")
-            box_data.append(g_vals_y)
-            colors.append(cmap["y"])
-            # gap between genotypes
-            xpos += 3
-
-        # Boxplot drawing
-        bp = ax.boxplot(
-            box_data,
-            positions=positions,
-            widths=0.5,
-            patch_artist=True,
-            showfliers=False,
-            medianprops=dict(linewidth=2, color="black"),
-            boxprops=dict(linewidth=1.5, edgecolor="black"),
-            whiskerprops=dict(linewidth=1.5, color="black"),
-            capprops=dict(linewidth=1.5, color="black"),
+        # Create boxplot (drawn on top)
+        box_plot = sns.boxplot(
+            data=df_plot,
+            x="combined_group",
+            y=metric,
+            ax=ax,
+            order=unique_groups,
+            palette=colors,
+            width=0.6,
+            zorder=1,
         )
 
-        for i, b in enumerate(bp["boxes"]):
-            b.set_facecolor(colors[i])
-            b.set_alpha(0.7)
-            b.set_edgecolor("black")
+        # F1-style: filled boxes for magnet=y, white boxes for magnet=n
+        for i, (patch, group) in enumerate(zip(box_plot.patches, unique_groups)):
+            magnet = group.split(" + ")[1]
+            if magnet == "n":
+                # Control (no magnet): white fill, colored edge
+                patch.set_facecolor("white")
+                patch.set_edgecolor(colors[i])
+                patch.set_linewidth(2.5)
+            else:
+                # Magnet block: colored fill, black edge
+                patch.set_facecolor(colors[i])
+                patch.set_edgecolor("black")
+                patch.set_linewidth(1.5)
 
-        # Scatter points (jitter)
-        rng = np.random.default_rng(42)
-        for i, vals in enumerate(box_data):
-            if len(vals) == 0:
-                continue
-            x_jitter = rng.normal(positions[i], 0.08, size=len(vals))
-            ax.scatter(x_jitter, vals, s=16, c=colors[i], alpha=0.6, edgecolors="none", zorder=3)
+        # Style whiskers and medians to match box styling
+        for i, group in enumerate(unique_groups):
+            magnet = group.split(" + ")[1]
+            color = colors[i]
+            for j in range(i * 6, (i + 1) * 6):
+                if j < len(ax.lines):
+                    line = ax.lines[j]
+                    if magnet == "n":
+                        line.set_color(color)
+                        line.set_linewidth(2)
+                    else:
+                        line.set_color("black")
+                        line.set_linewidth(1.5)
 
-        # Add simple legend indicating color mapping per genotype
-        # One patch per genotype with its color
-        import matplotlib.patches as mpatches
-
-        legend_patches = []
-        added = set()
-        for g in genotypes:
-            if g in added:
-                continue
-            cmap = _colors_for_genotype(g)
-            # use 'n' color as representative
-            legend_patches.append(mpatches.Patch(color=cmap["n"], label=g))
-            added.add(g)
-        if legend_patches:
-            ax.legend(handles=legend_patches, loc="upper right", fontsize=8, title="Genotype colors")
-
-        # Per-genotype significance bars
-        # Map genotypes to x-range for their two boxes
-        ymax = np.max([np.max(v) for v in box_data if len(v)]) if any(len(v) for v in box_data) else 1.0
-        ymin = np.min([np.min(v) for v in box_data if len(v)]) if any(len(v) for v in box_data) else 0.0
+        # Per-genotype significance bars (connect n vs y within same genotype)
+        ymax = df_plot[metric].max()
+        ymin = df_plot[metric].min()
         yr = ymax - ymin if ymax > ymin else 1.0
 
-        # Bring corrected significance info into a dict
-        sig_map = {(s["Genotype"],): (s["significant"], s.get("p_corrected", s["p_value"])) for s in per_genotype_stats}
+        # Track bar positions to avoid overlaps
+        bar_y_positions = []
 
         for gi, g in enumerate(genotypes):
-            left = gi * 3  # positions for genotype block: left (n) and left+1 (y)
-            # find stats for this genotype
-            # some genotypes may have been skipped due to low n
+            # Find indices of n and y boxes for this genotype
+            group_n = f"{g} + n"
+            group_y = f"{g} + y"
+
+            if group_n not in unique_groups or group_y not in unique_groups:
+                continue
+
+            idx_n = unique_groups.index(group_n)
+            idx_y = unique_groups.index(group_y)
+
+            # Find stats for this genotype
             match = [s for s in per_genotype_stats if s["Genotype"] == g]
             if not match:
                 continue
+
             sig = match[0]["significant"]
             pval = match[0].get("p_corrected", match[0]["p_value"])
+
             if pval < 0.001:
-                sym = "***"
+                p_text = "p < 0.001"
+                stars = "***"
             elif pval < 0.01:
-                sym = "**"
+                p_text = f"p = {pval:.3f}"
+                stars = "**"
             elif pval < 0.05:
-                sym = "*"
+                p_text = f"p = {pval:.3f}"
+                stars = "*"
             else:
-                sym = "ns"
+                p_text = f"p = {pval:.3f}"
+                stars = "ns"
 
-            if sym != "ns":
-                h = ymax + 0.08 * yr
-                ax.plot([left, left + 1], [h, h], "k-", linewidth=1.3)
-                ax.text((left + left + 1) / 2, h + 0.02 * yr, sym, ha="center", va="bottom", fontsize=11)
+            # Find a good y position for this bar (avoid overlaps)
+            max_overlap_level = 0
+            for existing_i, existing_j, level in bar_y_positions:
+                if not (idx_y < existing_i or idx_n > existing_j):
+                    max_overlap_level = max(max_overlap_level, level + 1)
 
-        # Axes formatting
-        ax.set_xticks(positions)
-        ax.set_xticklabels(labels, fontsize=9)
-        ax.tick_params(axis="y", labelsize=9)
-        ax.set_ylabel(format_metric_label(metric), fontsize=11)
+            bar_level = max_overlap_level
+            y_bar = ymax + yr * (0.05 + bar_level * 0.08)
+            bar_y_positions.append((idx_n, idx_y, bar_level))
+            bar_height = yr * 0.02
+
+            # Draw bar
+            ax.plot([idx_n, idx_y], [y_bar, y_bar], "k-", linewidth=1.5)
+            ax.plot([idx_n, idx_n], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+            ax.plot([idx_y, idx_y], [y_bar - bar_height, y_bar], "k-", linewidth=1.5)
+
+            # Add p-value text (always show, bold if significant)
+            if sig:
+                full_text = f"{stars} {p_text}"
+                fontweight = "bold"
+            else:
+                full_text = p_text
+                fontweight = "normal"
+
+            ax.text(
+                (idx_n + idx_y) / 2,
+                y_bar + bar_height,
+                full_text,
+                ha="center",
+                va="bottom",
+                fontsize=10,
+                fontweight=fontweight,
+                fontname="Arial",
+            )
+
+        # Adjust y-axis limits to accommodate bars
+        if bar_y_positions:
+            max_bar_level = max((level for _, _, level in bar_y_positions), default=0)
+            ax.set_ylim(ymin - 0.05 * yr, ymax + yr * (0.15 + max_bar_level * 0.08))
+
+        # Axes formatting with improved labels
+        x_labels = []
+        for group in unique_groups:
+            genotype, magnet = group.split(" + ")
+            magnet_label = "Control" if magnet == "n" else "Magnet"
+            n = len(df_plot[df_plot["combined_group"] == group])
+            x_labels.append(f"{genotype}\n{magnet_label}\n(n={n})")
+
+        ax.set_xticks(range(len(unique_groups)))
+        ax.set_xticklabels(x_labels, fontsize=9, fontname="Arial", rotation=45, ha="right")
+        ax.tick_params(axis="y", labelsize=10)
+        ax.set_xlabel("Genotype + Magnet Condition", fontsize=11, fontname="Arial")
+        ax.set_ylabel(format_metric_label(metric), fontsize=11, fontname="Arial")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.spines["left"].set_linewidth(1.5)

@@ -476,7 +476,10 @@ def main():
     dataset = Config.cleanup_data(dataset)
 
     # Exclude problematic nicknames
-    exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS"]
+    exclude_nicknames = [
+        "Ple-Gal4.F a.k.a TH-Gal4",
+        "TNTxCS",
+    ]  # "MB247-Gal4", "854 (OK107-Gal4)", "7362 (C739-Gal4)"]
     dataset = dataset[~dataset["Nickname"].isin(exclude_nicknames)]
 
     # Rename columns

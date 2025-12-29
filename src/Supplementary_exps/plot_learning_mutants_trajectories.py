@@ -94,7 +94,7 @@ def normalize_genotypes_column(df: pd.DataFrame, col_name: str = "Genotype"):
 
 def load_coordinates_dataset():
     """Load the learning mutants coordinates dataset"""
-    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251126_14_summary_learning_mutants_Data/coordinates/pooled_coordinates.feather"
+    dataset_path = "/mnt/upramdya_data/MD/Learning_mutants/Datasets/251205_12_summary_learning_mutants_Data/coordinates/pooled_coordinates.feather"
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:

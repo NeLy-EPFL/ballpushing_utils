@@ -475,6 +475,13 @@ def main():
     parser.add_argument(
         "--with-hits-only", action="store_true", help="Also create version with only genotypes that have >0 consistency"
     )
+    parser.add_argument(
+        "--control-mode",
+        type=str,
+        choices=["tailored", "emptysplit"],
+        default="tailored",
+        help="Control selection mode (for labeling/documentation)",
+    )
 
     # NEW: Consistency type selection
     consistency_group = parser.add_mutually_exclusive_group()
@@ -522,6 +529,11 @@ def main():
 
     consistency_df = pd.read_csv(consistency_file)
     print(f"📊 Loaded consistency data: {len(consistency_df)} genotypes")
+
+    # Exclude problematic genotypes
+    exclude_genotypes = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4", "854 (OK107-Gal4)", "7362 (C739-Gal4)"]
+    consistency_df = consistency_df[~consistency_df["Genotype"].isin(exclude_genotypes)]
+    print(f"   Filtered to {len(consistency_df)} genotypes after exclusions")
 
     # Check if the selected consistency column exists
     if consistency_column not in consistency_df.columns:

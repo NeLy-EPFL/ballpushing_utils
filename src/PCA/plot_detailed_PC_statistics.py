@@ -15,6 +15,7 @@ from matplotlib.patches import Patch
 import sys
 import json
 import os
+import argparse
 from sklearn.decomposition import PCA, SparsePCA
 from sklearn.preprocessing import RobustScaler
 from scipy.spatial import distance
@@ -29,21 +30,73 @@ sys.path.append("/home/matthias/ballpushing_utils")
 import Config
 
 # === CONFIGURATION ===
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
 CONSISTENCY_DIR = "consistency_analysis"
-CONFIGS_PATH = "multi_condition_pca_optimization/top_configurations.json"
+CONFIGS_PATH = os.path.join(SCRIPT_DIR, "multi_condition_pca_optimization/top_configurations.json")
 
 # Consistency threshold for inclusion in detailed analysis
 MIN_CONSISTENCY_PERCENT = 80.0  # Only include hits with ≥80% consistency
 
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Generate detailed PCA plots with control mode selection")
+parser.add_argument("output_dir", nargs="?", default="best_pca_analysis", help="Output directory for plots")
+parser.add_argument(
+    "--control-mode",
+    type=str,
+    choices=["tailored", "emptysplit"],
+    default="tailored",
+    help="Control selection mode: 'tailored' for split-based controls or 'emptysplit' for universal Empty-Split control (default: tailored)",
+)
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default=None,
+    help="Path to pooled_summary.feather dataset (if not provided, uses hardcoded DATA_PATH)",
+)
+args = parser.parse_args()
+
 # Output directory
-if len(sys.argv) > 1:
-    OUTPUT_DIR = sys.argv[1]
+OUTPUT_DIR = args.output_dir
+CONTROL_MODE = args.control_mode
+
+# Use dataset from command line if provided, otherwise use hardcoded path
+if args.dataset:
+    DATA_PATH = args.dataset
+    print(f"📊 Using dataset from command line: {DATA_PATH}")
 else:
-    OUTPUT_DIR = "best_pca_analysis"
+    print(f"📊 Using default dataset: {DATA_PATH}")
+
+DATA_FILES_DIR = os.path.join(OUTPUT_DIR, "data_files")
+PLOTS_DIR = os.path.join(OUTPUT_DIR, "plots")
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(DATA_FILES_DIR, exist_ok=True)
+os.makedirs(PLOTS_DIR, exist_ok=True)
+
 print(f"🎯 Output directory: {OUTPUT_DIR}")
+print(f"📁 Data files directory: {DATA_FILES_DIR}")
+print(f"🎨 Plots directory: {PLOTS_DIR}")
+print(
+    f"🎛️  Control mode: {'Tailored controls (split-based)' if CONTROL_MODE == 'tailored' else 'Empty-Split (universal control)'}"
+)
+
+# Update CONSISTENCY_DIR to look in OUTPUT_DIR/data_files first (where PCA_Static.py saves files)
+# Priority: OUTPUT_DIR/data_files > default CONSISTENCY_DIR > OUTPUT_DIR
+consistency_in_output_data = os.path.exists(os.path.join(OUTPUT_DIR, "data_files", "genotype_consistency_scores.csv"))
+consistency_in_default = os.path.exists(os.path.join(CONSISTENCY_DIR, "genotype_consistency_scores.csv"))
+consistency_in_output = os.path.exists(os.path.join(OUTPUT_DIR, "genotype_consistency_scores.csv"))
+
+if consistency_in_output_data:
+    CONSISTENCY_DIR = os.path.join(OUTPUT_DIR, "data_files")
+    print(f"📁 Using consistency files from: {CONSISTENCY_DIR}")
+elif consistency_in_default:
+    print(f"📁 Using consistency files from: {CONSISTENCY_DIR}")
+elif consistency_in_output:
+    CONSISTENCY_DIR = OUTPUT_DIR
+    print(f"📁 Using consistency files from: {CONSISTENCY_DIR}")
+else:
+    print(f"⚠️  No consistency files found, will try: {CONSISTENCY_DIR}")
 
 # ------------------------------------------------------------------
 # Brain-region look-ups
@@ -131,28 +184,69 @@ def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_sta
 
 def load_consistency_results():
     """Load consistency analysis results and filter high-consistency hits"""
-    consistency_file = os.path.join(CONSISTENCY_DIR, "genotype_consistency_scores.csv")
+    # Try new format first (enhanced_consistency_scores.csv)
+    new_format_file = os.path.join(CONSISTENCY_DIR, "enhanced_consistency_scores.csv")
+    old_format_file = os.path.join(CONSISTENCY_DIR, "genotype_consistency_scores.csv")
 
-    if not os.path.exists(consistency_file):
-        print(f"❌ Consistency file not found: {consistency_file}")
+    consistency_file = None
+    if os.path.exists(new_format_file):
+        consistency_file = new_format_file
+        use_new_format = True
+        print(f"📊 Using new format consistency file: {new_format_file}")
+    elif os.path.exists(old_format_file):
+        consistency_file = old_format_file
+        use_new_format = False
+        print(f"📊 Using old format consistency file: {old_format_file}")
+    else:
+        print(f"❌ Consistency file not found. Tried:")
+        print(f"   - {new_format_file}")
+        print(f"   - {old_format_file}")
         return []
 
     consistency_df = pd.read_csv(consistency_file)
-    high_consistency = consistency_df[consistency_df["Consistency_Percent"] >= MIN_CONSISTENCY_PERCENT]
 
-    print(f"📊 CONSISTENCY FILTERING:")
-    print(f"   Total genotypes in consistency analysis: {len(consistency_df)}")
-    print(f"   High-consistency hits (≥{MIN_CONSISTENCY_PERCENT}%): {len(high_consistency)}")
+    # Handle different column names for different file formats
+    if use_new_format:
+        # New format uses Combined_Consistency (0.0-1.0 scale)
+        consistency_column = "Combined_Consistency"
+        threshold_value = MIN_CONSISTENCY_PERCENT / 100.0
 
-    if len(high_consistency) > 0:
-        print(f"\n🏆 HIGH-CONSISTENCY HITS:")
-        for _, row in high_consistency.head(20).iterrows():  # Show top 20
-            print(
-                f"   {row['Genotype']:<25}: {row['Consistency_Percent']:5.1f}% ({row['Hit_Count']}/{row['Total_Configs']})"
-            )
+        # Also support Optimized_Only_Consistency if Combined isn't available
+        if consistency_column not in consistency_df.columns and "Optimized_Only_Consistency" in consistency_df.columns:
+            consistency_column = "Optimized_Only_Consistency"
+            print(f"⚠️  Using Optimized_Only_Consistency instead of Combined_Consistency")
 
-        if len(high_consistency) > 20:
-            print(f"   ... and {len(high_consistency) - 20} more")
+        high_consistency = consistency_df[consistency_df[consistency_column] >= threshold_value]
+
+        print(f"📊 CONSISTENCY FILTERING:")
+        print(f"   Total genotypes in consistency analysis: {len(consistency_df)}")
+        print(f"   High-consistency hits (≥{MIN_CONSISTENCY_PERCENT}%): {len(high_consistency)}")
+        print(f"   Using column: {consistency_column}")
+
+        if len(high_consistency) > 0:
+            print(f"\n🏆 HIGH-CONSISTENCY HITS:")
+            for _, row in high_consistency.head(20).iterrows():  # Show top 20
+                cons_pct = row[consistency_column] * 100
+                hit_count = row.get("Total_Hit_Count", row.get("Hit_Count", "?"))
+                total_configs = row.get("Total_Configs", "?")
+                print(f"   {row['Genotype']:<25}: {cons_pct:5.1f}% ({hit_count}/{total_configs})")
+    else:
+        # Old format uses Consistency_Percent (0-100 scale)
+        high_consistency = consistency_df[consistency_df["Consistency_Percent"] >= MIN_CONSISTENCY_PERCENT]
+
+        print(f"📊 CONSISTENCY FILTERING:")
+        print(f"   Total genotypes in consistency analysis: {len(consistency_df)}")
+        print(f"   High-consistency hits (≥{MIN_CONSISTENCY_PERCENT}%): {len(high_consistency)}")
+
+        if len(high_consistency) > 0:
+            print(f"\n🏆 HIGH-CONSISTENCY HITS:")
+            for _, row in high_consistency.head(20).iterrows():  # Show top 20
+                print(
+                    f"   {row['Genotype']:<25}: {row['Consistency_Percent']:5.1f}% ({row['Hit_Count']}/{row['Total_Configs']})"
+                )
+
+    if len(high_consistency) > 20:
+        print(f"   ... and {len(high_consistency) - 20} more")
 
     return high_consistency["Genotype"].tolist()
 
@@ -204,7 +298,7 @@ def prepare_data():
     dataset = Config.cleanup_data(dataset)
 
     # Exclude problematic nicknames
-    exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"]
+    exclude_nicknames = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4", "854 (OK107-Gal4)", "7362 (C739-Gal4)"]
     dataset = dataset[~dataset["Nickname"].isin(exclude_nicknames)]
 
     # Rename columns
@@ -288,19 +382,19 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
     pca_with_meta = pd.concat([dataset_clean[metadata_cols].reset_index(drop=True), pca_scores_df], axis=1)
 
     # Save PCA results
-    scores_file = os.path.join(OUTPUT_DIR, f"best_{method_name.lower()}_scores.csv")
+    scores_file = os.path.join(DATA_FILES_DIR, f"best_{method_name.lower()}_scores.csv")
     pca_scores_df.to_csv(scores_file, index=False)
 
-    loadings_file = os.path.join(OUTPUT_DIR, f"best_{method_name.lower()}_loadings.csv")
+    loadings_file = os.path.join(DATA_FILES_DIR, f"best_{method_name.lower()}_loadings.csv")
     pca_loadings_df = pd.DataFrame(
         pca.components_, columns=static_metrics, index=[f"{method_name}{i+1}" for i in range(pca.components_.shape[0])]
     )
     pca_loadings_df.to_csv(loadings_file)
 
-    with_meta_file = os.path.join(OUTPUT_DIR, f"best_{method_name.lower()}_with_metadata.feather")
+    with_meta_file = os.path.join(DATA_FILES_DIR, f"best_{method_name.lower()}_with_metadata.feather")
     pca_with_meta.to_feather(with_meta_file)
 
-    print(f"   💾 Saved PCA results to {OUTPUT_DIR}")
+    print(f"   💾 Saved PCA results to {DATA_FILES_DIR}")
 
     # Run statistical analysis focusing on high-consistency hits
     selected_dims = pca_scores_df.columns
@@ -311,7 +405,13 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
     print(f"   🎯 Analyzing {len(analysis_genotypes)} high-consistency genotypes")
 
     for nickname in analysis_genotypes:
-        subset = Config.get_subset_data(pca_with_meta, col="Nickname", value=nickname, force_control=None)
+        # Determine which control to use based on CONTROL_MODE
+        if CONTROL_MODE == "emptysplit":
+            force_control = "Empty-Split"
+        else:
+            force_control = None  # Use tailored control from split registry
+
+        subset = Config.get_subset_data(pca_with_meta, col="Nickname", value=nickname, force_control=force_control)
         if subset.empty or (subset["Nickname"] == nickname).sum() == 0:
             continue
 
@@ -393,7 +493,7 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
         results_df[col.replace("_pval", "_FDR_significant")] = rejected
 
     # Save results
-    results_file = os.path.join(OUTPUT_DIR, f"best_{method_name.lower()}_stats_results.csv")
+    results_file = os.path.join(DATA_FILES_DIR, f"best_{method_name.lower()}_stats_results.csv")
     results_df.to_csv(results_file, index=False)
 
     print(f"   📊 Found {len(results_df)} genotypes in analysis")
@@ -543,8 +643,8 @@ def create_hits_heatmap(results_df, method_name, nickname_to_brainregion, color_
     plt.tight_layout()
 
     # Save plots
-    png_file = os.path.join(OUTPUT_DIR, f"best_{method_name}_high_consistency_heatmap.png")
-    pdf_file = os.path.join(OUTPUT_DIR, f"best_{method_name}_high_consistency_heatmap.pdf")
+    png_file = os.path.join(PLOTS_DIR, f"best_{method_name}_high_consistency_heatmap.png")
+    pdf_file = os.path.join(PLOTS_DIR, f"best_{method_name}_high_consistency_heatmap.pdf")
     plt.savefig(png_file, dpi=300, bbox_inches="tight")
     plt.savefig(pdf_file, bbox_inches="tight")
     print(f"   💾 Detailed heatmap saved: {png_file} and {pdf_file}")
@@ -566,7 +666,7 @@ def create_explained_variance_plot(explained_variance_ratio, method_name):
     for i in range(min(5, len(cum_var))):
         plt.annotate(f"{cum_var[i]:.1f}%", (i, cum_var[i]), textcoords="offset points", xytext=(0, 10), ha="center")
 
-    variance_file = os.path.join(OUTPUT_DIR, f"best_{method_name}_explained_variance.png")
+    variance_file = os.path.join(PLOTS_DIR, f"best_{method_name}_explained_variance.png")
     plt.savefig(variance_file, dpi=300, bbox_inches="tight")
     plt.show()
     print(f"   📈 Explained variance plot saved: {variance_file}")

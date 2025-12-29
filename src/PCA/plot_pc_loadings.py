@@ -13,16 +13,23 @@ import os
 import json
 
 # === CONFIGURATION ===
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CONSISTENCY_DIR = "consistency_analysis"
-CONFIGS_PATH = "multi_condition_pca_optimization/top_configurations.json"
+CONFIGS_PATH = os.path.join(SCRIPT_DIR, "multi_condition_pca_optimization/top_configurations.json")
 BEST_PCA_DIR = "best_pca_analysis"  # Directory where best PCA results are stored
 
 # Get output directory from command line argument
 if len(sys.argv) > 1:
     OUTPUT_DIR = sys.argv[1]
+    DATA_FILES_DIR = os.path.join(OUTPUT_DIR, "data_files")
+    PLOTS_DIR = os.path.join(OUTPUT_DIR, "plots")
     print(f"🎯 Using output directory: {OUTPUT_DIR}")
+    print(f"📁 Data files directory: {DATA_FILES_DIR}")
+    print(f"🎨 Plots directory: {PLOTS_DIR}")
 else:
     OUTPUT_DIR = BEST_PCA_DIR
+    DATA_FILES_DIR = OUTPUT_DIR
+    PLOTS_DIR = OUTPUT_DIR
     print(f"⚠️  No output directory specified, using best PCA directory: {OUTPUT_DIR}")
 
 
@@ -104,12 +111,23 @@ def create_best_loadings_heatmap():
     method_name = "Sparse PCA" if method_type == "SparsePCA" else "Regular PCA"
     method_suffix = method_type.lower()
 
-    loadings_file = os.path.join(OUTPUT_DIR, f"best_{method_suffix}_loadings.csv")
+    loadings_file = os.path.join(DATA_FILES_DIR, f"best_{method_suffix}_loadings.csv")
 
+    # Fallbacks: try OUTPUT_DIR root, then best_pca_analysis directory
     if not os.path.exists(loadings_file):
-        print(f"❌ Best loadings file not found: {loadings_file}")
-        print("Please run the best PCA analysis first.")
-        return None
+        alt1 = os.path.join(OUTPUT_DIR, f"best_{method_suffix}_loadings.csv")
+        alt2 = os.path.join(SCRIPT_DIR, BEST_PCA_DIR, f"best_{method_suffix}_loadings.csv")
+        if os.path.exists(alt1):
+            loadings_file = alt1
+        elif os.path.exists(alt2):
+            loadings_file = alt2
+        else:
+            print(f"❌ Best loadings file not found in:")
+            print(f"   {DATA_FILES_DIR}")
+            print(f"   {OUTPUT_DIR}")
+            print(f"   {alt2}")
+            print("Please run the best PCA analysis first.")
+            return None
 
     print(f"✅ Using {method_name} loadings from: {loadings_file}")
 
@@ -195,8 +213,8 @@ def create_best_loadings_heatmap():
     plt.tight_layout()
 
     # Save with descriptive filenames
-    png_path = os.path.join(OUTPUT_DIR, f"best_{method_suffix}_loadings_heatmap.png")
-    pdf_path = os.path.join(OUTPUT_DIR, f"best_{method_suffix}_loadings_heatmap.pdf")
+    png_path = os.path.join(PLOTS_DIR, f"best_{method_suffix}_loadings_heatmap.png")
+    pdf_path = os.path.join(PLOTS_DIR, f"best_{method_suffix}_loadings_heatmap.pdf")
     plt.savefig(png_path, dpi=300, bbox_inches="tight")
     plt.savefig(pdf_path, bbox_inches="tight")
     print(f"💾 Loadings heatmap saved: {png_path} and {pdf_path}")
@@ -229,7 +247,7 @@ def create_best_loadings_heatmap():
         print(f"   Sparsity: {sparsity:.3f} ({sparsity*100:.1f}%)")
 
     # Save detailed loadings summary
-    summary_file = os.path.join(OUTPUT_DIR, f"best_{method_suffix}_loadings_summary.txt")
+    summary_file = os.path.join(DATA_FILES_DIR, f"best_{method_suffix}_loadings_summary.txt")
     with open(summary_file, "w") as f:
         f.write("BEST PCA CONFIGURATION - LOADINGS ANALYSIS\n")
         f.write("=" * 60 + "\n\n")
@@ -269,8 +287,15 @@ def create_fallback_heatmap():
     print("⚠️  Falling back to auto-detection method...")
 
     # Auto-detect which method was used by checking available files
-    pca_file = os.path.join(OUTPUT_DIR, "static_pca_loadings.csv")
-    sparsepca_file = os.path.join(OUTPUT_DIR, "static_sparsepca_loadings.csv")
+    # Try data_files subdirectory first, then OUTPUT_DIR root
+    pca_file = os.path.join(DATA_FILES_DIR, "static_pca_loadings.csv")
+    sparsepca_file = os.path.join(DATA_FILES_DIR, "static_sparsepca_loadings.csv")
+
+    # Fallback to OUTPUT_DIR root if not in data_files
+    if not os.path.exists(pca_file):
+        pca_file = os.path.join(OUTPUT_DIR, "static_pca_loadings.csv")
+    if not os.path.exists(sparsepca_file):
+        sparsepca_file = os.path.join(OUTPUT_DIR, "static_sparsepca_loadings.csv")
 
     if Path(sparsepca_file).exists() and Path(pca_file).exists():
         # Both files exist, check which is more recent
@@ -325,8 +350,8 @@ def create_fallback_heatmap():
     # Save with fallback naming
     method_suffix = "sparsepca" if "sparse" in method_name.lower() else "pca"
     plt.tight_layout()
-    png_path = os.path.join(OUTPUT_DIR, f"fallback_{method_suffix}_loadings_heatmap.png")
-    pdf_path = os.path.join(OUTPUT_DIR, f"fallback_{method_suffix}_loadings_heatmap.pdf")
+    png_path = os.path.join(PLOTS_DIR, f"fallback_{method_suffix}_loadings_heatmap.png")
+    pdf_path = os.path.join(PLOTS_DIR, f"fallback_{method_suffix}_loadings_heatmap.pdf")
     plt.savefig(png_path, dpi=300, bbox_inches="tight")
     plt.savefig(pdf_path, bbox_inches="tight")
     print(f"Fallback loadings heatmap saved: {png_path} and {pdf_path}")

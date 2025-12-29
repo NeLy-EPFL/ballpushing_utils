@@ -17,8 +17,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
+from scipy import stats
 from tqdm import tqdm
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
@@ -167,15 +167,16 @@ def create_trajectory_plots_by_genotype(
     n_bins=12,
     output_dir=None,
 ):
+    """
+    Create F1-style trajectory plots: genotype determines color, magnet determines linestyle.
+    - Control (n): solid line
+    - Magnet (y): dotted line
+    - Color by genotype (DDC=brown, Empty=gray)
+    """
     genotypes = sorted(data[genotype_col].unique())
     data = data.copy()
     # Convert raw distances to mm for plotting
     data[value_col] = data[value_col] / PIXELS_PER_MM
-
-    # Downsample for plotting (every 290 frames)
-    print("  Downsampling data for plotting...")
-    data_ds = data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :]).reset_index(drop=True)
-    print(f"  Downsampled from {len(data)} to {len(data_ds)} points")
 
     # Figure: one subplot per genotype
     n_g = len(genotypes)
@@ -183,18 +184,11 @@ def create_trajectory_plots_by_genotype(
     if n_g == 1:
         axes = [axes]
 
-    # Determine global y-range in mm for consistent annotation space
-    # Use processed avg metric but convert to mm to match plotted units
-    y_series_px = processed["avg_distance_ball_0"].to_numpy()
-    y_series_mm = y_series_px / PIXELS_PER_MM
-    y_min = float(np.nanmin(y_series_mm)) if y_series_mm.size else 0.0
-    y_max = float(np.nanmax(y_series_mm)) if y_series_mm.size else 1.0
-    y_range = y_max - y_min if y_max > y_min else 1.0
-
     # Bin info
     time_min = data[time_col].min()
     time_max = data[time_col].max()
     bin_width = (time_max - time_min) / n_bins
+    bin_size = bin_width  # For binning calculations
 
     # Helper: genotype-based color mapping (gray for Empty*, brown for DDC)
     def _genotype_color(g: str) -> str:
@@ -205,49 +199,103 @@ def create_trajectory_plots_by_genotype(
             return "#7f7f7f"  # gray (Empty-Gal4 / EmptySplit)
         return "#7f7f7f"  # default to gray if unsure
 
+    # Linestyle mapping: solid for control (n), dotted for magnet (y)
+    linestyle_map = {"n": "-", "y": ":"}
+    linewidth_map = {"n": 2.5, "y": 2.0}
+
     for i, geno in enumerate(genotypes):
         ax = axes[i]
-        sub = data_ds[data_ds[genotype_col] == geno]
-        n_control = sub[sub[magnet_col] == "n"][subject_col].nunique()
-        n_test = sub[sub[magnet_col] == "y"][subject_col].nunique()
+        sub = data[data[genotype_col] == geno]
 
-        # Color by genotype; style by magnet (y dotted, n solid)
+        if sub.empty:
+            ax.text(0.5, 0.5, f"No data for {geno}", ha="center", va="center", transform=ax.transAxes)
+            continue
+
+        # Color by genotype
         geno_color = _genotype_color(geno)
 
-        # Plot control (n): solid thick line
-        sub_n = sub[sub[magnet_col] == "n"].copy()
-        if not sub_n.empty:
-            sub_n["label"] = f"{geno} – Magnet n (n={n_control})"
-            sns.lineplot(
-                data=sub_n,
-                x=time_col,
-                y=value_col,
-                color=geno_color,
-                linestyle="-",
-                linewidth=2.5,
-                ax=ax,
-                label=sub_n["label"].iloc[0],
+        # Plot both magnet conditions with F1-style binned mean + CI
+        for magnet_val in ["n", "y"]:
+            subset = sub[sub[magnet_col] == magnet_val]
+            if subset.empty or subset[value_col].isna().all():
+                continue
+
+            # Bin data and calculate statistics (F1-style)
+            subset_clean = subset.dropna(subset=[value_col])
+            if subset_clean.empty:
+                continue
+
+            # Create time bins
+            subset_clean = subset_clean.copy()
+            subset_clean["time_bin"] = np.floor(subset_clean[time_col] / bin_size) * bin_size
+
+            # Get median per fly per time bin
+            fly_medians = subset_clean.groupby([subject_col, "time_bin"])[value_col].median().reset_index()
+
+            # Calculate statistics across flies for each time bin
+            time_stats = fly_medians.groupby("time_bin")[value_col].agg(["mean", "std", "count", "sem"]).reset_index()
+
+            # Filter out bins with too few flies
+            min_flies_per_bin = max(3, int(subset[subject_col].nunique() * 0.3))
+            time_stats = time_stats[time_stats["count"] >= min_flies_per_bin].copy()
+
+            if time_stats.empty:
+                continue
+
+            # Remove last bin if suspicious drop
+            if len(time_stats) >= 2:
+                last_mean = time_stats.iloc[-1]["mean"]
+                second_last_mean = time_stats.iloc[-2]["mean"]
+                if last_mean < second_last_mean * 0.85:
+                    time_stats = time_stats.iloc[:-1].copy()
+
+            if time_stats.empty:
+                continue
+
+            # Calculate 95% confidence intervals
+            from scipy import stats as scipy_stats
+
+            confidence_level = 0.95
+            alpha = 1 - confidence_level
+            time_stats["ci"] = time_stats.apply(
+                lambda row: scipy_stats.t.ppf(1 - alpha / 2, row["count"] - 1) * row["sem"] if row["count"] > 1 else 0,
+                axis=1,
             )
 
-        # Plot magnet (y): dotted thinner line
-        sub_y = sub[sub[magnet_col] == "y"].copy()
-        if not sub_y.empty:
-            sub_y["label"] = f"{geno} – Magnet y (n={n_test})"
-            sns.lineplot(
-                data=sub_y,
-                x=time_col,
-                y=value_col,
+            # Create label
+            n_flies = subset[subject_col].nunique()
+            magnet_label = "Control" if magnet_val == "n" else "Magnet"
+            label = f"{geno} – {magnet_label} (n={n_flies})"
+
+            # Plot mean trajectory with genotype color and magnet linestyle
+            ax.plot(
+                time_stats["time_bin"],
+                time_stats["mean"],
                 color=geno_color,
-                linestyle=":",
-                linewidth=2.0,
-                ax=ax,
-                label=sub_y["label"].iloc[0],
+                linestyle=linestyle_map[magnet_val],
+                linewidth=linewidth_map[magnet_val],
+                alpha=0.8,
+                label=label,
             )
 
-        # x-axis limits to match notebook style
-        ax.set_xlim(3600, 7200)
-        ax.set_ylim(y_min, y_max + 0.20 * y_range)
-        y_max_extended = y_max + 0.20 * y_range
+            # Add confidence intervals
+            ax.fill_between(
+                time_stats["time_bin"],
+                time_stats["mean"] - time_stats["ci"],
+                time_stats["mean"] + time_stats["ci"],
+                color=geno_color,
+                alpha=0.15,
+            )
+
+        # Set y-limits with space for annotations
+        y_data = sub[value_col].dropna()
+        if not y_data.empty:
+            y_min = float(y_data.min())
+            y_max = float(y_data.max())
+            y_range = y_max - y_min if y_max > y_min else 1.0
+            ax.set_ylim(y_min - 0.05 * y_range, y_max + 0.20 * y_range)
+        else:
+            y_min, y_max, y_range = 0.0, 1.0, 1.0
 
         # Annotate significance per bin
         results = permutation_results_per_genotype.get(geno)
@@ -256,9 +304,13 @@ def create_trajectory_plots_by_genotype(
             for time_bin in range(n_bins):
                 bin_start = time_min + time_bin * bin_width
                 bin_end = bin_start + bin_width
-                ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
-                ax.axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
+
+                # Draw vertical dotted lines for bin edges
+                ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.3)
+
                 p_value = results["p_values"][time_bin]
+
+                # Significance stars
                 if p_value < 0.001:
                     significance = "***"
                 elif p_value < 0.01:
@@ -267,6 +319,7 @@ def create_trajectory_plots_by_genotype(
                     significance = "*"
                 else:
                     significance = ""
+
                 if significance and time_bin in significant_bins:
                     y_star = y_max + 0.05 * y_range
                     ax.text(
@@ -279,6 +332,8 @@ def create_trajectory_plots_by_genotype(
                         color="red",
                         fontweight="bold",
                     )
+
+                # P-value text
                 y_pval = y_max + 0.11 * y_range
                 p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
                 p_color = "red" if time_bin in significant_bins else "gray"
@@ -292,17 +347,27 @@ def create_trajectory_plots_by_genotype(
                     color=p_color,
                 )
 
-        ax.set_ylabel(f"{geno}: Ball distance (mm)", fontsize=12)
-        # Legend: show genotype color once; include line style meaning
-        handles, labels = ax.get_legend_handles_labels()
-        ax.legend(loc="lower right", fontsize=10, title=f"{geno} color")
+        # Formatting
+        ax.set_ylabel(f"{geno}: Ball distance (mm)", fontsize=12, fontname="Arial")
+        ax.set_title(f"{geno}", fontsize=13, fontweight="bold", fontname="Arial")
+        ax.legend(loc="lower right", fontsize=10, framealpha=0.9)
+        ax.grid(True, alpha=0.3)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
-    axes[-1].set_xlabel("Time", fontsize=12)
+    axes[-1].set_xlabel("Time (frames)", fontsize=12, fontname="Arial")
     plt.tight_layout()
 
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Set PDF font to Type 42 for editability
+        import matplotlib
+
+        matplotlib.rcParams["pdf.fonttype"] = 42
+        matplotlib.rcParams["ps.fonttype"] = 42
+
         pdf_path = output_dir / "trajectory_magnet_vs_control_by_genotype.pdf"
         png_path = output_dir / "trajectory_magnet_vs_control_by_genotype.png"
         plt.savefig(pdf_path, format="pdf", dpi=300, bbox_inches="tight")
@@ -352,7 +417,7 @@ def generate_trajectory_plots(n_bins=12, n_permutations=10000, output_dir=None, 
     )
 
     print("\nGenerating plots...")
-    out_dir = Path(output_dir) if output_dir else Path("/mnt/upramdya_data/MD/Magneblock_TNT/Plots/trajectories")
+    out_dir = Path(output_dir) if output_dir else Path("/mnt/upramdya_data/MD/Magneblock_TNT/Plots/Trajectories")
     out_dir.mkdir(parents=True, exist_ok=True)
     create_trajectory_plots_by_genotype(
         df,
@@ -405,7 +470,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/mnt/upramdya_data/MD/Magneblock_TNT/Plots/trajectories",
+        default="/mnt/upramdya_data/MD/Magneblock_TNT/Plots/Trajectories",
         help="Directory to save plots",
     )
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
