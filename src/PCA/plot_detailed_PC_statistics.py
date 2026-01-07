@@ -44,7 +44,7 @@ parser.add_argument("output_dir", nargs="?", default="best_pca_analysis", help="
 parser.add_argument(
     "--control-mode",
     type=str,
-    choices=["tailored", "emptysplit"],
+    choices=["tailored", "emptysplit", "tnt_pr"],
     default="tailored",
     help="Control selection mode: 'tailored' for split-based controls or 'emptysplit' for universal Empty-Split control (default: tailored)",
 )
@@ -77,9 +77,16 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 print(f"🎯 Output directory: {OUTPUT_DIR}")
 print(f"📁 Data files directory: {DATA_FILES_DIR}")
 print(f"🎨 Plots directory: {PLOTS_DIR}")
-print(
-    f"🎛️  Control mode: {'Tailored controls (split-based)' if CONTROL_MODE == 'tailored' else 'Empty-Split (universal control)'}"
-)
+if CONTROL_MODE == "tailored":
+    ctrl_desc = "Tailored controls (split-based)"
+elif CONTROL_MODE == "emptysplit":
+    ctrl_desc = "Empty-Split (universal control)"
+elif CONTROL_MODE == "tnt_pr":
+    ctrl_desc = "TNTxPR (compare all genotypes vs TNTxPR)"
+else:
+    ctrl_desc = CONTROL_MODE
+
+print(f"🎛️  Control mode: {ctrl_desc}")
 
 # Update CONSISTENCY_DIR to look in OUTPUT_DIR/data_files first (where PCA_Static.py saves files)
 # Priority: OUTPUT_DIR/data_files > default CONSISTENCY_DIR > OUTPUT_DIR
@@ -408,6 +415,8 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
         # Determine which control to use based on CONTROL_MODE
         if CONTROL_MODE == "emptysplit":
             force_control = "Empty-Split"
+        elif CONTROL_MODE == "tnt_pr":
+            force_control = "TNTxPR"
         else:
             force_control = None  # Use tailored control from split registry
 

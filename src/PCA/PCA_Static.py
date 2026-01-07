@@ -109,9 +109,9 @@ Examples:
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=["tailored", "emptysplit"],
+        choices=["tailored", "emptysplit", "tnt_pr"],
         default="tailored",
-        help="Control selection mode: 'tailored' for split-based controls (n=Empty-Gal4, y=Empty-Split, m=TNTxPR) or 'emptysplit' (n/y=Empty-Split, m=TNTxPR) (default: tailored)",
+        help="Control selection mode: 'tailored' for split-based controls, 'emptysplit' for Empty-Split, or 'tnt_pr' to compare all groups vs TNTxPR (default: tailored)",
     )
 
     # Dataset path
@@ -170,9 +170,16 @@ else:
 
 print(f"📊 Statistical testing mode: {stat_mode_desc}")
 print(f"   ⚡ Criterion: {stat_mode_detail}")
-print(
-    f"🎛️  Control mode: {'Tailored controls (n=Empty-Gal4, y=Empty-Split, m=TNTxPR)' if CONTROL_MODE == 'tailored' else 'Empty-Split mode (n/y=Empty-Split, m=TNTxPR)'}"
-)
+if CONTROL_MODE == "tailored":
+    control_desc = "Tailored controls (n=Empty-Gal4, y=Empty-Split, m=TNTxPR)"
+elif CONTROL_MODE == "emptysplit":
+    control_desc = "Empty-Split mode (n/y=Empty-Split, m=TNTxPR)"
+elif CONTROL_MODE == "tnt_pr":
+    control_desc = "TNTxPR universal control (compare all genotypes vs TNTxPR)"
+else:
+    control_desc = CONTROL_MODE
+
+print(f"🎛️  Control mode: {control_desc}")
 
 # Log dataset information for reproducibility
 print(f"\n📊 DATASET INFORMATION:")
@@ -496,6 +503,8 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
             # Determine which control to use based on CONTROL_MODE
             if CONTROL_MODE == "emptysplit":
                 force_control = "Empty-Split"
+            elif CONTROL_MODE == "tnt_pr":
+                force_control = "TNTxPR"
             else:
                 force_control = None  # Use tailored control from split registry
 
@@ -843,7 +852,12 @@ def main():
     print(f"\n💾 Saving detailed statistical results...")
 
     # Determine control mode suffix for filenames
-    control_suffix = "emptysplit" if CONTROL_MODE == "emptysplit" else "tailoredctrls"
+    if CONTROL_MODE == "emptysplit":
+        control_suffix = "emptysplit"
+    elif CONTROL_MODE == "tnt_pr":
+        control_suffix = "tnt_pr"
+    else:
+        control_suffix = "tailoredctrls"
 
     # Save detailed results for each configuration
     for config_data in config_details:

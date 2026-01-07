@@ -22,6 +22,7 @@ from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
 from scipy.spatial.distance import pdist, squareform
 import matplotlib.gridspec as gridspec
 from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list, set_link_color_palette
+from pathlib import Path
 from scipy.spatial.distance import pdist
 import textwrap
 
@@ -76,7 +77,7 @@ def _parse_args():
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=["tailored", "emptysplit"],
+        choices=["tailored", "emptysplit", "tnt_pr"],
         default="tailored",
         help="Control selection mode (default: tailored)",
     )
@@ -638,6 +639,8 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         # Determine which control to use based on CONTROL_MODE
         if CONTROL_MODE == "emptysplit":
             force_control = "Empty-Split"
+        elif CONTROL_MODE == "tnt_pr":
+            force_control = "TNTxPR"
         else:
             force_control = None  # Use tailored control from split registry
 
@@ -1340,6 +1343,18 @@ def plot_two_way_dendrogram_metrics(
         col_labels_ordered = list(M.columns)
         dg_col = None
         ax_top_dendro.axis("off")
+
+    # Save canonical metric order used by this PCA plotting routine so other scripts
+    # can import a stable ordering. Save to src/PCA/metrics_lists/canonical_metrics_order.txt
+    try:
+        canonical_path = Path(__file__).parent / "metrics_lists" / "canonical_metrics_order.txt"
+        canonical_path.parent.mkdir(parents=True, exist_ok=True)
+        with canonical_path.open("w") as fh:
+            for m in col_labels_ordered:
+                fh.write(f"{m}\n")
+        print(f"   💾 Saved canonical metric order to: {canonical_path}")
+    except Exception as e:
+        print(f"⚠️  Could not save canonical metric order: {e}")
 
     # 5) Metric labels: place below heatmap using tick positions derived from dendrogram
     metric_positions = []  # Initialize to ensure it's available later

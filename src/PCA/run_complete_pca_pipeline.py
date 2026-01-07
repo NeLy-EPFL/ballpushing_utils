@@ -28,161 +28,126 @@ from pathlib import Path
 STAT_MODE = "permutation"  # Default value (matches argparse default)
 
 
-def compare_control_modes(tailored_dir, emptysplit_dir):
+def compare_control_modes(mode_a_dir, mode_b_dir, mode_a_label="A", mode_b_label="B"):
     """
-    Compare results between tailored controls and Empty-Split control modes.
-    Identifies hits that are unique to each mode and hits common to both.
+    Compare results between two control-mode result directories.
+
+    mode_a_dir, mode_b_dir: directories containing `enhanced_consistency_scores.csv` files
+    mode_a_label, mode_b_label: labels used in output files and summaries
     """
     import pandas as pd
     import matplotlib.pyplot as plt
-    import seaborn as sns
     from pathlib import Path
 
     print("📊 Loading results from both control modes...")
 
-    # Create comparison output directory
-    comparison_dir = "comparison_tailored_vs_emptysplit"
+    comparison_dir = f"comparison_{mode_a_label}_vs_{mode_b_label}"
     os.makedirs(comparison_dir, exist_ok=True)
 
-    # Find the consistency scores files
-    tailored_stats = None
-    emptysplit_stats = None
+    a_stats = None
+    b_stats = None
 
-    for file in Path(tailored_dir).rglob("enhanced_consistency_scores.csv"):
-        tailored_stats = file
+    for file in Path(mode_a_dir).rglob("enhanced_consistency_scores.csv"):
+        a_stats = file
         break
 
-    for file in Path(emptysplit_dir).rglob("enhanced_consistency_scores.csv"):
-        emptysplit_stats = file
+    for file in Path(mode_b_dir).rglob("enhanced_consistency_scores.csv"):
+        b_stats = file
         break
 
-    if not tailored_stats or not emptysplit_stats:
+    if not a_stats or not b_stats:
         print("⚠️  Could not find enhanced_consistency_scores.csv files for comparison")
         print(f"  Looking in:")
-        print(f"    Tailored: {tailored_dir}")
-        print(f"    EmptySplit: {emptysplit_dir}")
+        print(f"    A: {mode_a_dir}")
+        print(f"    B: {mode_b_dir}")
         return
 
-    print(f"  • Tailored: {tailored_stats}")
-    print(f"  • Empty-Split: {emptysplit_stats}")
+    print(f"  • A ({mode_a_label}): {a_stats}")
+    print(f"  • B ({mode_b_label}): {b_stats}")
 
-    # Load data
-    df_tailored = pd.read_csv(tailored_stats)
-    df_emptysplit = pd.read_csv(emptysplit_stats)
+    df_a = pd.read_csv(a_stats)
+    df_b = pd.read_csv(b_stats)
 
-    # Identify significant hits (genotypes with >0 hits across configurations)
-    # A genotype is considered a hit if it was significant in at least one configuration
-    hits_tailored = set(df_tailored[df_tailored["Total_Hit_Count"] > 0]["Genotype"])
-    hits_emptysplit = set(df_emptysplit[df_emptysplit["Total_Hit_Count"] > 0]["Genotype"])
+    hits_a = set(df_a[df_a["Total_Hit_Count"] > 0]["Genotype"])
+    hits_b = set(df_b[df_b["Total_Hit_Count"] > 0]["Genotype"])
 
-    # Calculate overlaps
-    hits_both = hits_tailored & hits_emptysplit
-    hits_tailored_only = hits_tailored - hits_emptysplit
-    hits_emptysplit_only = hits_emptysplit - hits_tailored
+    hits_both = hits_a & hits_b
+    hits_a_only = hits_a - hits_b
+    hits_b_only = hits_b - hits_a
 
     print(f"\n📈 COMPARISON RESULTS:")
     print(f"{'='*60}")
-    print(f"Hits with tailored controls:        {len(hits_tailored):3d}")
-    print(f"Hits with Empty-Split control:      {len(hits_emptysplit):3d}")
+    print(f"Hits {mode_a_label}:        {len(hits_a):3d}")
+    print(f"Hits {mode_b_label}:        {len(hits_b):3d}")
     print(f"{'='*60}")
-    print(f"Hits in BOTH modes:                 {len(hits_both):3d}")
-    print(f"Hits ONLY with tailored controls:   {len(hits_tailored_only):3d}")
-    print(f"Hits ONLY with Empty-Split control: {len(hits_emptysplit_only):3d}")
+    print(f"Hits in BOTH:     {len(hits_both):3d}")
+    print(f"{mode_a_label} ONLY:       {len(hits_a_only):3d}")
+    print(f"{mode_b_label} ONLY:       {len(hits_b_only):3d}")
     print(f"{'='*60}")
 
-    # Create detailed comparison CSV
-    all_genotypes = hits_tailored | hits_emptysplit
+    all_genotypes = hits_a | hits_b
     comparison_data = []
 
     for genotype in sorted(all_genotypes):
-        in_tailored = genotype in hits_tailored
-        in_emptysplit = genotype in hits_emptysplit
+        in_a = genotype in hits_a
+        in_b = genotype in hits_b
 
-        # Get consistency scores
-        consistency_tailored = df_tailored[df_tailored["Genotype"] == genotype]["Overall_Consistency"].values
-        consistency_emptysplit = df_emptysplit[df_emptysplit["Genotype"] == genotype]["Overall_Consistency"].values
+        cons_a = df_a[df_a["Genotype"] == genotype]["Overall_Consistency"].values
+        cons_b = df_b[df_b["Genotype"] == genotype]["Overall_Consistency"].values
 
-        cons_t = consistency_tailored[0] if len(consistency_tailored) > 0 else 0.0
-        cons_e = consistency_emptysplit[0] if len(consistency_emptysplit) > 0 else 0.0
+        ca = cons_a[0] if len(cons_a) > 0 else 0.0
+        cb = cons_b[0] if len(cons_b) > 0 else 0.0
 
-        # Get hit counts
-        hitcount_t = df_tailored[df_tailored["Genotype"] == genotype]["Total_Hit_Count"].values
-        hitcount_e = df_emptysplit[df_emptysplit["Genotype"] == genotype]["Total_Hit_Count"].values
-
-        hits_t = hitcount_t[0] if len(hitcount_t) > 0 else 0
-        hits_e = hitcount_e[0] if len(hitcount_e) > 0 else 0
+        ha = df_a[df_a["Genotype"] == genotype]["Total_Hit_Count"].values
+        hb = df_b[df_b["Genotype"] == genotype]["Total_Hit_Count"].values
+        ha = ha[0] if len(ha) > 0 else 0
+        hb = hb[0] if len(hb) > 0 else 0
 
         category = "Both"
-        if in_tailored and not in_emptysplit:
-            category = "Tailored only"
-        elif in_emptysplit and not in_tailored:
-            category = "Empty-Split only"
+        if in_a and not in_b:
+            category = f"{mode_a_label} only"
+        elif in_b and not in_a:
+            category = f"{mode_b_label} only"
 
         comparison_data.append(
             {
                 "Genotype": genotype,
                 "Category": category,
-                "Hit_Tailored": in_tailored,
-                "Hit_EmptySplit": in_emptysplit,
-                "HitCount_Tailored": hits_t,
-                "HitCount_EmptySplit": hits_e,
-                "Consistency_Tailored": cons_t,
-                "Consistency_EmptySplit": cons_e,
-                "Consistency_Difference": abs(cons_t - cons_e),
+                f"Hit_{mode_a_label}": in_a,
+                f"Hit_{mode_b_label}": in_b,
+                f"HitCount_{mode_a_label}": ha,
+                f"HitCount_{mode_b_label}": hb,
+                f"Consistency_{mode_a_label}": ca,
+                f"Consistency_{mode_b_label}": cb,
+                "Consistency_Difference": abs(ca - cb),
             }
         )
 
     comparison_df = pd.DataFrame(comparison_data)
-    comparison_df = comparison_df.sort_values(["Category", "Consistency_Tailored"], ascending=[True, False])
+    comparison_df = comparison_df.sort_values(["Category", f"Consistency_{mode_a_label}"], ascending=[True, False])
 
-    # Save comparison CSV
     csv_path = os.path.join(comparison_dir, "control_mode_comparison.csv")
     comparison_df.to_csv(csv_path, index=False)
     print(f"\n💾 Detailed comparison saved to: {csv_path}")
 
-    # Create summary text file
     summary_path = os.path.join(comparison_dir, "comparison_summary.txt")
     with open(summary_path, "w") as f:
         f.write("CONTROL MODE COMPARISON SUMMARY\n")
         f.write("=" * 60 + "\n\n")
-        f.write(f"Tailored Controls:        {len(hits_tailored):3d} hits\n")
-        f.write(f"Empty-Split Control:      {len(hits_emptysplit):3d} hits\n\n")
-        f.write(f"Hits in BOTH modes:       {len(hits_both):3d}\n")
-        f.write(f"Tailored ONLY:            {len(hits_tailored_only):3d}\n")
-        f.write(f"Empty-Split ONLY:         {len(hits_emptysplit_only):3d}\n\n")
+        f.write(f"{mode_a_label}: {len(hits_a):3d} hits\n")
+        f.write(f"{mode_b_label}: {len(hits_b):3d} hits\n\n")
+        f.write(f"Hits in BOTH: {len(hits_both):3d}\n")
+        f.write(f"{mode_a_label} ONLY: {len(hits_a_only):3d}\n")
+        f.write(f"{mode_b_label} ONLY: {len(hits_b_only):3d}\n\n")
 
         f.write("\nHITS IN BOTH MODES (most robust):\n")
         f.write("-" * 60 + "\n")
         for genotype in sorted(hits_both):
-            cons_t = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_Tailored"].values[0]
-            cons_e = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_EmptySplit"].values[0]
-            hits_t = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_Tailored"].values[0]
-            hits_e = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_EmptySplit"].values[0]
-            f.write(
-                f"{genotype:30s}  consistency_t={cons_t:.2%} ({hits_t} hits)  consistency_e={cons_e:.2%} ({hits_e} hits)\n"
-            )
-
-        f.write("\n\nHITS ONLY WITH TAILORED CONTROLS:\n")
-        f.write("-" * 60 + "\n")
-        for genotype in sorted(hits_tailored_only):
-            cons_t = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_Tailored"].values[0]
-            cons_e = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_EmptySplit"].values[0]
-            hits_t = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_Tailored"].values[0]
-            hits_e = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_EmptySplit"].values[0]
-            f.write(
-                f"{genotype:30s}  consistency_t={cons_t:.2%} ({hits_t} hits)  consistency_e={cons_e:.2%} ({hits_e} hits)\n"
-            )
-
-        f.write("\n\nHITS ONLY WITH EMPTY-SPLIT CONTROL:\n")
-        f.write("-" * 60 + "\n")
-        for genotype in sorted(hits_emptysplit_only):
-            cons_t = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_Tailored"].values[0]
-            cons_e = comparison_df[comparison_df["Genotype"] == genotype]["Consistency_EmptySplit"].values[0]
-            hits_t = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_Tailored"].values[0]
-            hits_e = comparison_df[comparison_df["Genotype"] == genotype]["HitCount_EmptySplit"].values[0]
-            f.write(
-                f"{genotype:30s}  consistency_t={cons_t:.2%} ({hits_t} hits)  consistency_e={cons_e:.2%} ({hits_e} hits)\n"
-            )
+            ca = comparison_df[comparison_df["Genotype"] == genotype][f"Consistency_{mode_a_label}"].values[0]
+            cb = comparison_df[comparison_df["Genotype"] == genotype][f"Consistency_{mode_b_label}"].values[0]
+            ha = comparison_df[comparison_df["Genotype"] == genotype][f"HitCount_{mode_a_label}"].values[0]
+            hb = comparison_df[comparison_df["Genotype"] == genotype][f"HitCount_{mode_b_label}"].values[0]
+            f.write(f"{genotype:30s}  {mode_a_label}={ca:.2%} ({ha} hits)  {mode_b_label}={cb:.2%} ({hb} hits)\n")
 
     print(f"💾 Summary saved to: {summary_path}")
 
@@ -402,8 +367,10 @@ def organize_outputs(results_dir):
             "static_*pca_with_metadata_*.feather",
             "static_*pca_stats_*_tailoredctrls.csv",
             "static_*pca_stats_*_emptysplit.csv",
+            "static_*pca_stats_*_tnt_pr.csv",
             "static_*sparsepca*_allmethods*_tailored*.csv",
             "static_*sparsepca*_allmethods*_emptysplit*.csv",
+            "static_*sparsepca*_allmethods*_tnt_pr*.csv",
             "enhanced_consistency_scores.csv",
             "optimized_only_consistency_ranking.csv",
             "combined_consistency_ranking.csv",
@@ -422,6 +389,8 @@ def organize_outputs(results_dir):
             "mannwhitney_static_tailored_split_log.pdf",
             "mannwhitney_static_emptysplit*.png",
             "mannwhitney_static_emptysplit*.pdf",
+            "mannwhitney_static_tnt_pr*.png",
+            "mannwhitney_static_tnt_pr*.pdf",
             "enhanced_consistency_plots.png",
             "simple_consistency_scores*.png",
             "simple_consistency_scores*.pdf",
@@ -644,7 +613,7 @@ Examples:
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=["tailored", "emptysplit", "both"],
+        choices=["tailored", "emptysplit", "tnt_pr", "both"],
         default="both",
         help="Control selection mode (default: both for full rerun)",
     )
@@ -679,7 +648,7 @@ Examples:
 
     # Determine which control modes to run
     if args.control_mode == "both":
-        control_modes = ["tailored", "emptysplit"]
+        control_modes = ["tailored", "emptysplit", "tnt_pr"]
         run_comparison = True
     else:
         control_modes = [args.control_mode]
@@ -774,43 +743,46 @@ Examples:
 
         print(f"\n📂 Navigate to results: cd {results_dir}")
 
-    # Run comparison if both modes were executed
-    if run_comparison and len(all_results) == 2:
+    # Run pairwise comparisons if multiple modes were executed
+    if run_comparison and len(all_results) >= 2:
         print(f"\n\n{'='*80}")
-        print("🔍 GENERATING COMPARISON BETWEEN CONTROL MODES")
+        print("🔍 GENERATING PAIRWISE COMPARISONS BETWEEN CONTROL MODES")
         print(f"{'='*80}\n")
 
-        compare_control_modes(
-            all_results["tailored"]["results_dir"],
-            all_results["emptysplit"]["results_dir"],
-        )
+        from itertools import combinations
 
-        # Also run the visual comparison script with brain-region colors and robust highlights
-        try:
-            current_script_dir = os.path.dirname(os.path.abspath(__file__))
-            vis_script = os.path.join(current_script_dir, "compare_control_modes_visual.py")
-            vis_out_dir = "comparison_tailored_vs_emptysplit"
-            cmd = [
-                sys.executable,
-                vis_script,
-                "--tailored-dir",
-                all_results["tailored"]["results_dir"],
-                "--emptysplit-dir",
-                all_results["emptysplit"]["results_dir"],
-                "--output-dir",
-                vis_out_dir,
-                "--metric",
-                "combined",  # Use combined consistency (includes edge cases)
-            ]
-            subprocess.run(cmd, check=True, text=True)
-        except Exception as e:
-            print(f"⚠️  Could not run visual comparison script: {e}")
+        for a, b in combinations(all_results.keys(), 2):
+            dir_a = all_results[a]["results_dir"]
+            dir_b = all_results[b]["results_dir"]
+            print(f"\nComparing {a} vs {b}:")
+            compare_control_modes(dir_a, dir_b, mode_a_label=a, mode_b_label=b)
+
+        # Run the specialized visual comparison only for tailored vs emptysplit if available
+        if "tailored" in all_results and "emptysplit" in all_results:
+            try:
+                current_script_dir = os.path.dirname(os.path.abspath(__file__))
+                vis_script = os.path.join(current_script_dir, "compare_control_modes_visual.py")
+                vis_out_dir = "comparison_tailored_vs_emptysplit"
+                cmd = [
+                    sys.executable,
+                    vis_script,
+                    "--tailored-dir",
+                    all_results["tailored"]["results_dir"],
+                    "--emptysplit-dir",
+                    all_results["emptysplit"]["results_dir"],
+                    "--output-dir",
+                    vis_out_dir,
+                    "--metric",
+                    "combined",
+                ]
+                subprocess.run(cmd, check=True, text=True)
+            except Exception as e:
+                print(f"⚠️  Could not run visual comparison script: {e}")
 
         print("\n✅ Comparison analysis complete!")
-        print(f"\nResults available in:")
-        print(f"  • Tailored controls: {all_results['tailored']['results_dir']}")
-        print(f"  • Empty-Split control: {all_results['emptysplit']['results_dir']}")
-        print(f"  • Comparison: comparison_tailored_vs_emptysplit/")
+        print("\nResults available in:")
+        for k, v in all_results.items():
+            print(f"  • {k}: {v['results_dir']}")
 
 
 if __name__ == "__main__":

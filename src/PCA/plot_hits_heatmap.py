@@ -17,7 +17,7 @@ parser.add_argument("output_dir", nargs="?", default=".", help="Output directory
 parser.add_argument(
     "--control-mode",
     type=str,
-    choices=["tailored", "emptysplit"],
+    choices=["tailored", "emptysplit", "tnt_pr"],
     default="tailored",
     help="Control selection mode (default: tailored)",
 )
@@ -31,9 +31,16 @@ PLOTS_DIR = os.path.join(OUTPUT_DIR, "plots")
 print(f"🎯 Using output directory: {OUTPUT_DIR}")
 print(f"📁 Data files directory: {DATA_FILES_DIR}")
 print(f"🎨 Plots directory: {PLOTS_DIR}")
-print(
-    f"🎛️  Control mode: {'Tailored controls (split-based)' if CONTROL_MODE == 'tailored' else 'Empty-Split (universal control)'}"
-)
+if CONTROL_MODE == "tailored":
+    ctrl_desc = "Tailored controls (split-based)"
+elif CONTROL_MODE == "emptysplit":
+    ctrl_desc = "Empty-Split (universal control)"
+elif CONTROL_MODE == "tnt_pr":
+    ctrl_desc = "TNTxPR (compare all genotypes vs TNTxPR)"
+else:
+    ctrl_desc = CONTROL_MODE
+
+print(f"🎛️  Control mode: {ctrl_desc}")
 
 # Configuration: Choose which analysis types to include
 # Options: "both", "static", "temporal"
@@ -43,7 +50,14 @@ ANALYSIS_TYPE = "static"  # Change this to "both" or "temporal" as needed
 def detect_most_recent_pca_method():
     """Detect the most recent PCA method used based on file timestamps"""
     # Determine control suffix based on control mode
-    control_suffix = "tailored*" if CONTROL_MODE == "tailored" else "emptysplit*"
+    if CONTROL_MODE == "tailored":
+        control_suffix = "tailored*"
+    elif CONTROL_MODE == "emptysplit":
+        control_suffix = "emptysplit*"
+    elif CONTROL_MODE == "tnt_pr":
+        control_suffix = "tnt_pr*"
+    else:
+        control_suffix = "tailored*"
 
     # Try data_files subdirectory first
     pca_files = glob.glob(os.path.join(DATA_FILES_DIR, f"static_pca_stats_results_allmethods*{control_suffix}.csv"))
@@ -80,7 +94,14 @@ def detect_most_recent_pca_method():
 pca_method, method_files = detect_most_recent_pca_method()
 
 # Find CSVs for static and temporal based on detected method and control mode
-control_suffix = "tailored*" if CONTROL_MODE == "tailored" else "emptysplit*"
+if CONTROL_MODE == "tailored":
+    control_suffix = "tailored*"
+elif CONTROL_MODE == "emptysplit":
+    control_suffix = "emptysplit*"
+elif CONTROL_MODE == "tnt_pr":
+    control_suffix = "tnt_pr*"
+else:
+    control_suffix = "tailored*"
 if pca_method == "sparsepca":
     pattern = os.path.join(DATA_FILES_DIR, f"*_sparsepca_*allmethods*{control_suffix}.csv")
     # Fallback to OUTPUT_DIR root

@@ -478,7 +478,7 @@ def main():
     parser.add_argument(
         "--control-mode",
         type=str,
-        choices=["tailored", "emptysplit"],
+        choices=["tailored", "emptysplit", "tnt_pr"],
         default="tailored",
         help="Control selection mode (for labeling/documentation)",
     )
