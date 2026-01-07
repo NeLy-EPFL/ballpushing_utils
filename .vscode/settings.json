@@ -24,5 +24,6 @@
     ],
     "isort.args": [
         "--settings-path=pyproject.toml"
-    ]
+    ],
+    "CodeGPT.apiKey": "Perplexity"
 }

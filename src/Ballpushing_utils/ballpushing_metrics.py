@@ -862,6 +862,24 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("time_to_first_interaction"):
                     metrics_dict["time_to_first_interaction"] = time_to_first_interaction
 
+                # Ball proximity metrics
+                proximity_thresholds = [70, 140, 200]
+                if any(
+                    self.is_metric_enabled(f"ball_proximity_proportion_{thresh}px")
+                    for thresh in proximity_thresholds
+                ):
+                    proximity_results = safe_call(
+                        self.compute_ball_proximity_proportions,
+                        fly_idx,
+                        ball_idx,
+                        proximity_thresholds=proximity_thresholds,
+                        default={f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds},
+                    )
+                    for threshold in proximity_thresholds:
+                        metric_name = f"ball_proximity_proportion_{threshold}px"
+                        if self.is_metric_enabled(metric_name):
+                            metrics_dict[metric_name] = proximity_results.get(metric_name, np.nan)
+
                 self.metrics[key] = metrics_dict
 
     def get_metrics_by_identity(self, fly_idx, ball_identity):
@@ -3978,3 +3996,106 @@ class BallPushingMetrics:
             )
 
         return mean_distance
+
+    def compute_ball_proximity_proportions(
+        self, fly_idx, ball_idx, proximity_thresholds=[70, 140, 200], movement_threshold=100, n_avg=100
+    ):
+        """
+        Calculate the proportion of time the fly spends near the ball at multiple distance thresholds.
+
+        This metric is calculated by:
+        1. Filtering data to keep only points after fly first moves >movement_threshold from starting position
+        2. Calculating Euclidean distance between fly thorax and ball center for each frame
+        3. Computing proportion of time where distance < proximity_threshold for each threshold
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+        proximity_thresholds : list of int
+            Distance thresholds for proximity in pixels (default: [70, 140, 200]).
+        movement_threshold : int
+            Distance fly must move from start before counting (default: 100 pixels).
+        n_avg : int
+            Number of initial frames to average for starting position (default: 100).
+
+        Returns
+        -------
+        dict
+            Dictionary with keys 'ball_proximity_proportion_XXpx' for each threshold,
+            containing the proportion of time (0-1) spent within that distance.
+        """
+        if not isinstance(proximity_thresholds, list):
+            proximity_thresholds = [proximity_thresholds]
+
+        # Get fly tracking data
+        try:
+            fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+        except (IndexError, AttributeError) as e:
+            if self.fly.config.debugging:
+                print(f"Error accessing fly data for fly {fly_idx}: {e}")
+            return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # Get ball tracking data
+        try:
+            ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        except (IndexError, AttributeError) as e:
+            if self.fly.config.debugging:
+                print(f"Error accessing ball data for ball {ball_idx}: {e}")
+            return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # Calculate starting position from first n_avg frames
+        n_use = min(n_avg, len(fly_data))
+        if n_use == 0:
+            if self.fly.config.debugging:
+                print(f"No data available for fly {fly_idx}")
+            return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        x_start = fly_data["x_thorax"].iloc[:n_use].mean()
+
+        # Find first frame where fly moves beyond movement_threshold
+        distance_from_start = np.abs(fly_data["x_thorax"] - x_start)
+        threshold_mask = distance_from_start > movement_threshold
+
+        if not threshold_mask.any():
+            if self.fly.config.debugging:
+                print(f"Fly {fly_idx} never moved beyond threshold ({movement_threshold}px)")
+            return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # Get index of first frame past threshold
+        first_threshold_idx = threshold_mask.idxmax()
+
+        # Filter data from this point onward
+        fly_data_filtered = fly_data.loc[first_threshold_idx:]
+        ball_data_filtered = ball_data.loc[first_threshold_idx:]
+
+        if len(fly_data_filtered) == 0:
+            if self.fly.config.debugging:
+                print(f"No data after movement threshold for fly {fly_idx}")
+            return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # Get fly and ball positions
+        fly_x = fly_data_filtered["x_thorax"].values
+        fly_y = fly_data_filtered["y_thorax"].values
+        ball_x = ball_data_filtered["x_centre"].values
+        ball_y = ball_data_filtered["y_centre"].values
+
+        # Calculate distance to ball for all frames
+        distance_to_ball = np.sqrt((fly_x - ball_x) ** 2 + (fly_y - ball_y) ** 2)
+
+        # Calculate proportion near ball for each threshold
+        result_dict = {}
+        for threshold in proximity_thresholds:
+            near_ball = distance_to_ball < threshold
+            proportion_near = near_ball.sum() / len(near_ball) if len(near_ball) > 0 else 0
+            result_dict[f"ball_proximity_proportion_{threshold}px"] = proportion_near
+
+            if self.fly.config.debugging:
+                print(
+                    f"Fly {fly_idx}, Ball {ball_idx}: {threshold}px proximity = {proportion_near:.3f} "
+                    f"({near_ball.sum()}/{len(near_ball)} frames)"
+                )
+
+        return result_dict

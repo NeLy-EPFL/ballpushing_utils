@@ -78,13 +78,15 @@ class FlyTrackingData:
             # This happens after time_range filtering so reference is first frame of filtered data
             self.calculate_euclidean_distances()
 
-            # Check for spontaneous ball movement (if enabled) and invalidate fly if detected
+            # Check for spontaneous ball movement (if enabled) and optionally invalidate fly if detected
             if self.fly.config.check_spontaneous_ball_movement:
                 has_spontaneous_movement = self.check_spontaneous_ball_movement()
-                if has_spontaneous_movement:
+                if has_spontaneous_movement and self.fly.config.invalidate_on_spontaneous_movement:
                     print(f"❌ Invalidating {self.fly.metadata.name} due to significant spontaneous ball movement")
                     self.valid_data = False
                     return
+                elif has_spontaneous_movement:
+                    print(f"⚠️  {self.fly.metadata.name} has spontaneous ball movement but will be kept (invalidate_on_spontaneous_movement=False)")
 
             # Compute duration as the difference between last and first time
             # Use training ball if available, otherwise use first ball
@@ -1262,13 +1264,24 @@ class FlyTrackingData:
                     else:
                         consecutive_spontaneous = 0
 
+                # Only flag as significant if consecutive frames exceed window threshold
+                # This filters out single-frame tracking errors
+                if max_consecutive_spontaneous < self.fly.config.spontaneous_movement_window:
+                    if self.fly.config.debugging:
+                        print(
+                            f"   {self.fly.metadata.name} ({ball_name}): Spontaneous movement detected but only {max_consecutive_spontaneous} consecutive frames "
+                            f"(threshold: {self.fly.config.spontaneous_movement_window}). Likely tracking error, not flagging."
+                        )
+                    continue  # Skip this ball, not significant
+
                 # Issue warning with detailed information
                 warning_msg = (
-                    f"⚠️  WARNING: Spontaneous ball movement detected for {self.fly.metadata.name} ({ball_name})\n"
+                    f"⚠️  WARNING: Sustained spontaneous ball movement detected for {self.fly.metadata.name} ({ball_name})\n"
                     f"   {len(movement_indices)} frames with movement > {self.fly.config.spontaneous_movement_threshold}px outside interactions\n"
                     f"   Total spontaneous displacement: {total_spontaneous_displacement:.1f} pixels\n"
                     f"   Maximum single-frame displacement: {max_spontaneous_displacement:.1f} pixels\n"
                     f"   Maximum consecutive frames: {max_consecutive_spontaneous} frames ({max_consecutive_spontaneous/self.fly.experiment.fps:.1f}s)\n"
+                    f"   ✓ Exceeds minimum consecutive threshold of {self.fly.config.spontaneous_movement_window} frames\n"
                 )
 
                 # Add examples of when spontaneous movement occurred
