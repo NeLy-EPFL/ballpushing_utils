@@ -51,6 +51,59 @@ except Exception as e:
     color_dict = {}
 
 
+# Try to reuse metric display names and canonical metrics order from the PCA pipeline
+try:
+    from PCA.plot_detailed_metric_statistics import METRIC_DISPLAY_NAMES as PCA_METRIC_DISPLAY_NAMES
+    from PCA.plot_detailed_metric_statistics import METRICS_PATH as PCA_METRICS_PATH
+except Exception:
+    PCA_METRIC_DISPLAY_NAMES = {}
+    PCA_METRICS_PATH = None
+
+# Clip Cohen's d color scale to this absolute value (set to None to disable)
+CLIP_EFFECTS = 1.5
+
+
+def get_display_name(metric_name):
+    """Return informative display name for a metric (fallback to original)."""
+    return PCA_METRIC_DISPLAY_NAMES.get(metric_name, metric_name)
+
+
+def load_canonical_metric_order():
+    """Attempt to load canonical metric ordering used by PCA plots.
+
+    Searches a few likely locations and returns a list of metric keys in order.
+    Returns empty list if none found.
+    """
+    candidates = []
+    if PCA_METRICS_PATH:
+        candidates.append(Path(PCA_METRICS_PATH))
+
+    # Common paths relative to repository src/PCA/metrics_lists
+    base = Path(__file__).parent.parent / "PCA" / "metrics_lists"
+    candidates.extend(
+        [
+            base / "final_metrics_for_pca_alt.txt",
+            base / "final_metrics_for_pca.txt",
+            base / "final_metrics_for_pca_list.txt",
+        ]
+    )
+
+    # Also check for a canonical metrics file explicitly named 'canonical_metrics_order.txt'
+    candidates.insert(0, base / "canonical_metrics_order.txt")
+
+    for p in candidates:
+        try:
+            if p and p.exists():
+                with p.open("r") as fh:
+                    lines = [l.strip() for l in fh if l.strip()]
+                    if lines:
+                        return lines
+        except Exception:
+            continue
+
+    return []
+
+
 def parse_args():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -255,6 +308,17 @@ def build_significance_matrix(stats_df, control_genotype, raw_data, atr_conditio
             matrix.loc[genotype_label, metric] = cohens_d_value
 
     print(f"   Cohen's d range: [{matrix.values.min():.3f}, {matrix.values.max():.3f}]")
+    # Try to apply canonical metric ordering (if available) so downstream plots
+    # use the same metric order across scripts.
+    canonical = load_canonical_metric_order()
+    if canonical:
+        # Keep only canonical metrics that are present, preserve their order
+        ordered = [m for m in canonical if m in matrix.columns]
+        remaining = [m for m in matrix.columns if m not in ordered]
+        new_cols = ordered + remaining
+        matrix = matrix.loc[:, new_cols]
+        print(f"   Applied canonical metric order: {len(ordered)} metrics reordered")
+
     return matrix
 
 
@@ -275,6 +339,7 @@ def plot_two_way_dendrogram(
     nickname_to_region=None,
     color_dict_regions=None,
     fig_size=(20, 12),
+    raw_data=None,
 ):
     """
     Create two-way dendrogram heatmap:
@@ -306,7 +371,15 @@ def plot_two_way_dendrogram(
         row_order = list(range(matrix.shape[0]))
 
     # Column clustering (metrics) - use correlation distance
-    if matrix.shape[1] > 1:
+    # First, check for a canonical metric ordering file. If present, use it
+    # for column ordering and skip column dendrogram (canonical was produced
+    # by the PCA plotting routine based on correlation clustering).
+    canonical = load_canonical_metric_order()
+    if canonical:
+        # Determine column order indices from canonical list
+        col_order = [matrix.columns.get_loc(m) for m in canonical if m in matrix.columns]
+        col_linkage = None
+    elif matrix.shape[1] > 1:
         # Compute correlation matrix between metrics (columns)
         corr_matrix = matrix.corr()
         corr_matrix = corr_matrix.fillna(0.0)
@@ -410,6 +483,9 @@ def plot_two_way_dendrogram(
                     stars = ""
 
                 if stars:
+                    # Choose annotation color based on background intensity
+                    bg_val = matrix_ordered.values[i, j]
+                    text_color = "white" if abs(bg_val) >= 0.5 else "black"
                     ax_hm.text(
                         j,
                         i,
@@ -417,7 +493,7 @@ def plot_two_way_dendrogram(
                         ha="center",
                         va="center",
                         fontsize=10,
-                        color="black",
+                        color=text_color,
                         fontweight="bold",
                     )
 
@@ -451,8 +527,9 @@ def plot_two_way_dendrogram(
     # Heatmap columns are centered at 0, 1, 2, ..., n-1
     x_positions = np.arange(len(matrix_ordered.columns))
     metric_labels_list = list(matrix_ordered.columns)
+    display_labels = [get_display_name(l) for l in metric_labels_list]
 
-    for x_pos, label in zip(x_positions, metric_labels_list):
+    for x_pos, label in zip(x_positions, display_labels):
         ax_metric_labels.text(
             x_pos,
             0.2,  # Lower in the axis to be closer to heatmap
@@ -474,19 +551,38 @@ def plot_two_way_dendrogram(
         region = nickname_to_region.get(genotype, "Unknown") if nickname_to_region else "Unknown"
         color = color_dict_regions.get(region, "black") if color_dict_regions else "black"
 
+        # Add sample size annotation if raw_data provided
+        label_text = genotype
+        if raw_data is not None and "Genotype" in raw_data.columns:
+            try:
+                # Genotype labels are expected in the form "<left> vs <right>"
+                # e.g. "GtacrxOR67d vs SomeControl". Split robustly and count
+                # rows for each side in the provided (ATR-filtered) raw_data.
+                left, right = genotype.split(" vs ", 1)
+                left_n = int(raw_data[raw_data["Genotype"] == left].shape[0])
+                right_n = int(raw_data[raw_data["Genotype"] == right].shape[0])
+                label_text = f"{genotype}\n(n = {left_n} - {right_n})"
+            except Exception:
+                # If parsing/counting fails, silently skip sample-size annotation
+                pass
+
         ax_genotype_labels.text(
             0.95,
             y_pos,
-            genotype,
+            label_text,
             ha="right",
             va="center",
             fontsize=10,
             color=color,
         )
 
-    # Colorbar - set range based on actual Cohen's d values
+    # Colorbar - set range based on actual Cohen's d values (with optional clipping)
     max_abs_d = max(abs(matrix_ordered.values.min()), abs(matrix_ordered.values.max()))
     vmin, vmax = -max_abs_d, max_abs_d
+    if CLIP_EFFECTS is not None:
+        clip = CLIP_EFFECTS
+        if max_abs_d > clip:
+            vmin, vmax = -clip, clip
 
     norm = Normalize(vmin=vmin, vmax=vmax)
     pos = ax_cbar.get_position()
@@ -497,9 +593,12 @@ def plot_two_way_dendrogram(
     cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plt.get_cmap("RdBu_r")), cax=ax_cbar)
     cbar.set_label("Cohen's d\n(Blue: Lower, Red: Higher)", fontsize=8)
 
-    # Add Cohen's d interpretation
+    # Add Cohen's d interpretation (show clipped edges explicitly when clipping active)
     tick_positions = np.linspace(vmin, vmax, 5)
     tick_labels = [f"{pos:.2f}" for pos in tick_positions]
+    if CLIP_EFFECTS is not None and max_abs_d > CLIP_EFFECTS:
+        tick_labels[0] = f"< {vmin:.2f}"
+        tick_labels[-1] = f"> {vmax:.2f}"
     cbar.set_ticks(tick_positions)
     cbar.set_ticklabels(tick_labels)
     cbar.ax.tick_params(labelsize=7)
@@ -546,6 +645,7 @@ def plot_simple_heatmap(
     nickname_to_region=None,
     color_dict_regions=None,
     fig_size=(16, 12),
+    raw_data=None,
 ):
     """
     Create simple heatmap without dendrograms:
@@ -574,7 +674,14 @@ def plot_simple_heatmap(
         row_order = sorted(matrix.index)
 
     # Sort metrics by correlation
-    if matrix.shape[1] > 1:
+    # Prefer canonical metric order if available
+    canonical = load_canonical_metric_order()
+    if canonical and len([m for m in canonical if m in matrix.columns]) > 0:
+        col_order = [m for m in canonical if m in matrix.columns]
+        # append any metrics not in canonical list at the end
+        remaining = [m for m in matrix.columns if m not in col_order]
+        col_order = col_order + remaining
+    elif matrix.shape[1] > 1:
         corr_matrix = matrix.corr()
         corr_matrix = corr_matrix.fillna(0.0)
 
@@ -604,6 +711,10 @@ def plot_simple_heatmap(
     # Set vmin/vmax based on Cohen's d range
     max_abs_d = max(abs(matrix_ordered.values.min()), abs(matrix_ordered.values.max()))
     vmin, vmax = -max_abs_d, max_abs_d
+    if CLIP_EFFECTS is not None:
+        clip = CLIP_EFFECTS
+        if max_abs_d > clip:
+            vmin, vmax = -clip, clip
 
     # Heatmap
     sns.heatmap(
@@ -645,6 +756,12 @@ def plot_simple_heatmap(
                     stars = ""
 
                 if stars:
+                    # Choose annotation color based on background intensity
+                    try:
+                        bg_val = matrix_ordered.values[i, j]
+                    except Exception:
+                        bg_val = 0
+                    text_color = "white" if abs(bg_val) >= 0.5 else "black"
                     ax_main.text(
                         j + 0.5,
                         i + 0.5,
@@ -652,18 +769,40 @@ def plot_simple_heatmap(
                         ha="center",
                         va="center",
                         fontsize=10,
-                        color="black",
+                        color=text_color,
                         fontweight="bold",
                     )
 
-    # Labels
-    ax_main.set_xticklabels(ax_main.get_xticklabels(), rotation=45, ha="right", fontsize=9)
-    ax_main.set_yticklabels(ax_main.get_yticklabels(), rotation=0, fontsize=9)
+    # Labels - replace metric names with informative display names
+    ax_main.set_xticklabels(
+        [get_display_name(l.get_text()) for l in ax_main.get_xticklabels()], rotation=45, ha="right", fontsize=9
+    )
+
+    # Add sample sizes to y-tick labels if raw_data provided
+    y_labels = []
+    for tick in ax_main.get_yticklabels():
+        genotype = tick.get_text()
+        label_text = genotype
+
+        # Try to add sample size annotation
+        if raw_data is not None and "Genotype" in raw_data.columns:
+            try:
+                # Split genotype label (format: "left vs right")
+                left, right = genotype.split(" vs ", 1)
+                left_n = int(raw_data[raw_data["Genotype"] == left].shape[0])
+                right_n = int(raw_data[raw_data["Genotype"] == right].shape[0])
+                label_text = f"{genotype}\n(n = {left_n} - {right_n})"
+            except Exception:
+                pass
+
+        y_labels.append(label_text)
+
+    ax_main.set_yticklabels(y_labels, rotation=0, fontsize=9)
 
     # Color genotype labels by brain region
     if nickname_to_region and color_dict_regions:
         for tick in ax_main.get_yticklabels():
-            label_text = tick.get_text()
+            label_text = tick.get_text().split("\n")[0]  # Get genotype name (before newline)
             region = nickname_to_region.get(label_text, "Unknown")
             color = color_dict_regions.get(region, "black")
             tick.set_color(color)
@@ -675,6 +814,9 @@ def plot_simple_heatmap(
 
     tick_positions = np.linspace(vmin, vmax, 5)
     tick_labels = [f"{pos:.2f}" for pos in tick_positions]
+    if CLIP_EFFECTS is not None and max_abs_d > CLIP_EFFECTS:
+        tick_labels[0] = f"< {vmin:.2f}"
+        tick_labels[-1] = f"> {vmax:.2f}"
     cbar.set_ticks(tick_positions)
     cbar.set_ticklabels(tick_labels)
 
@@ -760,6 +902,13 @@ def main():
         print(f"{'='*60}")
 
         # Two-way dendrogram
+        # Filter raw_data to the ATR condition used for the matrix so sample
+        # size annotations match the effect-size calculations.
+        if atr_condition != "all" and raw_data is not None and "ATR" in raw_data.columns:
+            filtered_raw = raw_data[raw_data["ATR"] == atr_condition].copy()
+        else:
+            filtered_raw = raw_data.copy() if raw_data is not None else None
+
         plot_two_way_dendrogram(
             matrix,
             stats_df,
@@ -767,7 +916,11 @@ def main():
             args.control_genotype,
             nickname_to_region=nickname_to_brainregion,
             color_dict_regions=color_dict,
+            raw_data=filtered_raw,
         )
+
+        # canonical metric order is produced by the PCA plotting routine;
+        # nothing to save here.
 
         # Simple heatmap
         plot_simple_heatmap(
@@ -777,6 +930,7 @@ def main():
             args.control_genotype,
             nickname_to_region=nickname_to_brainregion,
             color_dict_regions=color_dict,
+            raw_data=filtered_raw,
         )
 
         print(f"\n✅ ATR={atr_condition} heatmaps complete")

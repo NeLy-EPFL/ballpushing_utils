@@ -42,6 +42,386 @@ import time
 import argparse
 
 
+def generate_within_factor_mannwhitney_plots(
+    data,
+    metrics,
+    grouping_cols=["Light", "Genotype"],
+    genotype_palette=None,
+    balltype_linestyles=None,
+    figsize=(15, 10),
+    output_dir="mann_whitney_plots",
+    fdr_method="fdr_bh",
+    alpha=0.05,
+    plot_suffix="",
+):
+    """
+    Generates jitterboxplots for each metric with Mann-Whitney U tests within factors.
+    Performs comparisons:
+    - Genotype effect: within same Light condition (and BallType if included)
+
+    Applies FDR correction separately for each comparison type.
+
+    Parameters:
+        data (pd.DataFrame): The dataset to plot.
+        metrics (list): List of metric names to plot.
+        grouping_cols (list): List of column names for grouping factors. Default is ["Light", "Genotype"].
+        genotype_palette (dict): Color palette mapping genotypes to colors. Default is None (auto-generate).
+        balltype_linestyles (dict): Line styles mapping ball types to styles. Default is None.
+        figsize (tuple, optional): Size of each figure. Default is (15, 10).
+        output_dir: Directory to save the plots. Default is "mann_whitney_plots".
+        fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
+        alpha (float): Significance level after FDR correction. Default is 0.05.
+        plot_suffix (str): Suffix to add to output filenames. Default is "".
+
+    Returns:
+        pd.DataFrame: Statistics table with Mann-Whitney U test results and FDR correction.
+    """
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set default genotype palette if not specified
+    if genotype_palette is None:
+        genotype_palette = {"TNTxEmptyGal4": "#7f7f7f", "TNTxIR8a": "#9467bd",}
+
+    # Set default balltype linestyles if not specified
+    if balltype_linestyles is None:
+        balltype_linestyles = {"ctrl": "-", "sand": ":"}
+
+    all_stats = []
+
+    for metric_idx, metric in enumerate(metrics):
+        metric_start_time = time.time()
+        print(f"Generating within-factor Mann-Whitney plot for metric {metric_idx+1}/{len(metrics)}: {metric}")
+
+        plot_data = data.dropna(subset=[metric] + grouping_cols)
+
+        # Create combined grouping column for easier analysis
+        if "BallType" in grouping_cols:
+            plot_data["Group"] = plot_data.apply(
+                lambda row: f"{row['Light']}_{row['Genotype']}_{row['BallType']}", axis=1
+            )
+        else:
+            plot_data["Group"] = plot_data.apply(lambda row: f"{row['Light']}_{row['Genotype']}", axis=1)
+
+        # Perform within-factor comparisons
+        comparisons = []
+
+        # Genotype comparisons within same Light (and BallType if present)
+        if "BallType" in grouping_cols:
+            for light in plot_data["Light"].unique():
+                for balltype in plot_data["BallType"].unique():
+                    genotypes = plot_data[
+                        (plot_data["Light"] == light) & (plot_data["BallType"] == balltype)
+                    ]["Genotype"].unique()
+                    if len(genotypes) >= 2:
+                        # Compare all pairs of genotypes
+                        for i, gen1 in enumerate(genotypes):
+                            for gen2 in genotypes[i + 1 :]:
+                                comparisons.append(
+                                    {
+                                        "comparison_type": "Genotype",
+                                        "Light": light,
+                                        "BallType": balltype,
+                                        "group1": f"{light}_{gen1}_{balltype}",
+                                        "group2": f"{light}_{gen2}_{balltype}",
+                                        "factor_value1": gen1,
+                                        "factor_value2": gen2,
+                                    }
+                                )
+        else:
+            for light in plot_data["Light"].unique():
+                genotypes = plot_data[plot_data["Light"] == light]["Genotype"].unique()
+                if len(genotypes) >= 2:
+                    for i, gen1 in enumerate(genotypes):
+                        for gen2 in genotypes[i + 1 :]:
+                            comparisons.append(
+                                {
+                                    "comparison_type": "Genotype",
+                                    "Light": light,
+                                    "group1": f"{light}_{gen1}",
+                                    "group2": f"{light}_{gen2}",
+                                    "factor_value1": gen1,
+                                    "factor_value2": gen2,
+                                }
+                            )
+
+        # Perform statistical tests
+        test_results = []
+        pvals = []
+
+        for comp in comparisons:
+            vals1 = plot_data[plot_data["Group"] == comp["group1"]][metric].dropna()
+            vals2 = plot_data[plot_data["Group"] == comp["group2"]][metric].dropna()
+
+            if len(vals1) < 3 or len(vals2) < 3:
+                continue
+
+            try:
+                stat, pval = mannwhitneyu(vals1, vals2, alternative="two-sided")
+                median1 = vals1.median()
+                median2 = vals2.median()
+                direction = "increased" if median1 > median2 else "decreased"
+                effect_size = abs(median1 - median2)
+            except Exception as e:
+                print(f"  Warning: Mann-Whitney U test failed for {comp['group1']} vs {comp['group2']}: {e}")
+                continue
+
+            pvals.append(pval)
+            result = {
+                "Metric": metric,
+                "comparison_type": comp["comparison_type"],
+                "group1": comp["group1"],
+                "group2": comp["group2"],
+                "factor_value1": comp["factor_value1"],
+                "factor_value2": comp["factor_value2"],
+                "pval_raw": pval,
+                "direction": direction,
+                "effect_size": effect_size,
+                "test_statistic": stat,
+                "median1": median1,
+                "median2": median2,
+                "n1": len(vals1),
+                "n2": len(vals2),
+            }
+
+            # Add context columns
+            for key in ["Light", "Genotype", "BallType"]:
+                if key in comp:
+                    result[key] = comp[key]
+
+            test_results.append(result)
+
+        if not pvals:
+            print(f"  No valid comparisons for metric {metric}")
+            continue
+
+        # Apply FDR correction
+        type_pvals = [r["pval_raw"] for r in test_results]
+        rejected, pvals_corrected, _, _ = multipletests(type_pvals, alpha=alpha, method=fdr_method)
+
+        for i, result in enumerate(test_results):
+            result["pval_fdr"] = pvals_corrected[i]
+            result["significant_fdr"] = rejected[i]
+
+            if pvals_corrected[i] < 0.001:
+                result["sig_level"] = "***"
+            elif pvals_corrected[i] < 0.01:
+                result["sig_level"] = "**"
+            elif pvals_corrected[i] < 0.05:
+                result["sig_level"] = "*"
+            else:
+                result["sig_level"] = "ns"
+
+            if not rejected[i]:
+                result["direction"] = "none"
+
+        all_stats.extend(test_results)
+
+        # Create visualization with side-by-side Light condition subplots
+        light_conditions = sorted(plot_data["Light"].unique())
+        n_subplots = len(light_conditions)
+
+        fig, axes = plt.subplots(1, n_subplots, figsize=(7 * n_subplots, 6), sharey=True, squeeze=False)
+        axes = axes.flatten()
+
+        fig.suptitle(f"{metric} - Genotype Effect Within Light Conditions{plot_suffix}", fontsize=16, fontweight="bold", y=1.02)
+
+        for subplot_idx, light_val in enumerate(light_conditions):
+            ax = axes[subplot_idx]
+
+            # Filter by light condition
+            subset_data = plot_data[plot_data["Light"] == light_val]
+
+            if len(subset_data) == 0:
+                ax.text(0.5, 0.5, "No data", ha='center', va='center', transform=ax.transAxes)
+                ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14)
+                continue
+
+            # Get unique groups for this light condition
+            has_balltype = "BallType" in grouping_cols
+            if has_balltype:
+                # Group by Genotype and BallType
+                genotypes = sorted(subset_data["Genotype"].unique())
+                balltypes = sorted(subset_data["BallType"].unique())
+
+                plot_groups = []
+                for genotype in genotypes:
+                    for balltype in balltypes:
+                        group_name = f"{light_val}_{genotype}_{balltype}"
+                        if group_name in subset_data["Group"].values:
+                            plot_groups.append(group_name)
+            else:
+                # Group by Genotype only
+                genotypes = sorted(subset_data["Genotype"].unique())
+                plot_groups = [f"{light_val}_{genotype}" for genotype in genotypes
+                              if f"{light_val}_{genotype}" in subset_data["Group"].values]
+
+            positions = list(range(len(plot_groups)))
+
+            # Plot each group
+            for pos, group in zip(positions, plot_groups):
+                group_data = subset_data[subset_data["Group"] == group][metric]
+
+                if len(group_data) == 0:
+                    continue
+
+                # Parse group name to get genotype and balltype
+                parts = group.split("_")
+                if has_balltype:
+                    genotype = parts[1] if len(parts) > 1 else "Unknown"
+                    balltype = parts[2] if len(parts) > 2 else "ctrl"
+                else:
+                    genotype = parts[1] if len(parts) > 1 else "Unknown"
+                    balltype = "ctrl"
+
+                # Determine scatter color based on genotype
+                if "IR8a" in genotype:
+                    scatter_color = '#9467bd'  # Purple for IR8a
+                else:
+                    scatter_color = '#7f7f7f'  # Gray for EmptyGal4
+
+                linestyle = balltype_linestyles.get(balltype, "-")
+
+                # Boxplot with no fill, black outline (horizontal orientation)
+                bp = ax.boxplot(
+                    [group_data],
+                    positions=[pos],
+                    widths=0.6,
+                    patch_artist=True,
+                    showfliers=False,
+                    vert=False,
+                )
+
+                for patch in bp["boxes"]:
+                    patch.set_facecolor("none")
+                    patch.set_edgecolor('black')
+                    patch.set_linewidth(1.5)
+                    patch.set_linestyle(linestyle)
+
+                for element in ["whiskers", "caps"]:
+                    for item in bp[element]:
+                        item.set_color('black')
+                        item.set_linewidth(1.5)
+                        item.set_linestyle(linestyle)
+
+                for item in bp["medians"]:
+                    item.set_color('black')
+                    item.set_linewidth(2)
+
+                # Scatter plot on top with genotype-based color (horizontal orientation)
+                np.random.seed(42 + pos)
+                jitter = np.random.normal(0, 0.08, size=len(group_data))
+                ax.scatter(
+                    group_data,
+                    [pos] * len(group_data) + jitter,
+                    alpha=0.5,
+                    s=50,
+                    color=scatter_color,
+                    edgecolors='black',
+                    linewidths=0.5,
+                )
+
+            # Set labels and formatting (horizontal orientation)
+            ax.set_yticks(positions)
+            group_labels = []
+            for group in plot_groups:
+                parts = group.split("_")
+                if has_balltype:
+                    label = f"{parts[1]}\n{parts[2]}" if len(parts) > 2 else group
+                else:
+                    label = parts[1] if len(parts) > 1 else group
+                group_labels.append(label)
+
+            ax.set_yticklabels(group_labels, rotation=0, ha="right", fontsize=10)
+
+            if subplot_idx == 0:
+                ax.set_xlabel(metric, fontsize=12, fontweight="bold")
+
+            ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14, pad=10)
+            ax.grid(axis="x", alpha=0.3, linestyle="--", linewidth=0.5)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+
+            # Add significance annotations for comparisons within this light condition (horizontal orientation)
+            x_max = subset_data[metric].max()
+            x_min = subset_data[metric].min()
+            x_range = x_max - x_min if x_max != x_min else 1
+
+            # Filter significant comparisons for this light condition
+            sig_comparisons = [r for r in test_results
+                             if r["significant_fdr"] and r.get("Light") == light_val]
+
+            annotation_x = x_max + x_range * 0.05
+            x_increment = x_range * 0.08
+
+            for comp_idx, comp_row in enumerate(sig_comparisons):
+                try:
+                    pos1 = plot_groups.index(comp_row["group1"])
+                    pos2 = plot_groups.index(comp_row["group2"])
+
+                    # Draw significance bar (horizontal orientation)
+                    bar_x = annotation_x + (comp_idx * x_increment)
+                    ax.plot([bar_x, bar_x], [pos1, pos2], 'k-', linewidth=1.5)
+                    ax.plot([bar_x - x_range * 0.02, bar_x], [pos1, pos1], 'k-', linewidth=1.5)
+                    ax.plot([bar_x - x_range * 0.02, bar_x], [pos2, pos2], 'k-', linewidth=1.5)
+                    ax.text(bar_x + x_range * 0.01, (pos1 + pos2) / 2, comp_row["sig_level"],
+                           ha='left', va='center', fontsize=12, fontweight='bold')
+                except (ValueError, KeyError):
+                    continue
+
+        # Add external legend
+        from matplotlib.lines import Line2D
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#9467bd',
+                   markersize=10, markeredgecolor='black', markeredgewidth=0.5, label='TNTxIR8a'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#7f7f7f',
+                   markersize=10, markeredgecolor='black', markeredgewidth=0.5, label='TNTxEmptyGal4'),
+        ]
+
+        if has_balltype:
+            legend_elements.append(Line2D([0], [0], linestyle='-', color='black', linewidth=1.5, label='ctrl (solid)'))
+            legend_elements.append(Line2D([0], [0], linestyle=':', color='black', linewidth=1.5, label='sand (dotted)'))
+
+        fig.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1.0, 0.5),
+                  ncol=1, frameon=True, fontsize=11)
+
+        plt.tight_layout(rect=[0, 0.05, 1, 0.98])
+
+        # Save plot
+        suffix_str = plot_suffix.replace(" ", "_").replace("(", "").replace(")", "").lower()
+        output_file = output_dir / f"{metric}_within_factor{suffix_str}.pdf"
+        plt.savefig(output_file, dpi=300, bbox_inches="tight")
+        plt.close()
+
+        print(f"  Plot saved: {output_file}")
+
+        # Print summary
+        n_significant = sum(1 for r in test_results if r["significant_fdr"])
+        print(f"  FDR significant: {n_significant}/{len(test_results)} comparisons (α={alpha})")
+
+        metric_end_time = time.time()
+        print(f"  ⏱️  Metric {metric} completed in {metric_end_time - metric_start_time:.2f} seconds")
+
+    # Create summary statistics DataFrame
+    stats_df = pd.DataFrame(all_stats)
+
+    if not stats_df.empty:
+        suffix_str = plot_suffix.replace(" ", "_").replace("(", "").replace(")", "").lower()
+        stats_file = output_dir / f"within_factor_statistics{suffix_str}.csv"
+        stats_df.to_csv(stats_file, index=False)
+        print(f"\nStatistics saved to: {stats_file}")
+
+        # Print overall summary
+        total_tests = len(stats_df)
+        total_significant = stats_df["significant_fdr"].sum()
+        print(f"\nOverall Summary:")
+        print(f"Total comparisons: {total_tests}")
+        print(f"FDR significant (q<{alpha}): {total_significant} ({100*total_significant/total_tests:.1f}%)")
+
+    return stats_df
+
+
 def generate_dark_olfaction_mannwhitney_plots(
     data,
     metrics,
@@ -1212,8 +1592,8 @@ def main(overwrite=True, test_mode=False):
 
     # Set genotype color palette
     genotype_palette = {
-        "TNTxEmptyGal4": "blue",
-        "TNTxIR8a": "orange",
+        "TNTxEmptyGal4": "#7f7f7f",
+        "TNTxIR8a": "#9467bd",
     }
 
     # 1. Process continuous metrics with Mann-Whitney U tests
@@ -1273,6 +1653,76 @@ def main(overwrite=True, test_mode=False):
             print(
                 f"✅ FDR-corrected Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
             )
+
+    # 1b. Process continuous metrics with POOLED BALLTYPES (focus on genotype effect)
+    if continuous_metrics:
+        print(f"\n{'='*60}")
+        print(f"--- ANALYSIS 2: POOLED BALLTYPES (Genotype Effect Focus) ---")
+        print(f"{'='*60}")
+
+        # Pool across BallTypes by combining data
+        pooled_data = dataset[["Light", "Genotype"] + continuous_metrics].copy()
+
+        print(f"Pooled BallTypes dataset shape: {pooled_data.shape}")
+
+        pooled_output_dir = output_dir / "pooled_balltypes"
+        pooled_output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Generating within-factor comparisons for pooled BallTypes...")
+
+        start_time = time.time()
+
+        pooled_stats_df = generate_within_factor_mannwhitney_plots(
+            pooled_data,
+            metrics=continuous_metrics,
+            grouping_cols=["Light", "Genotype"],
+            genotype_palette=genotype_palette,
+            output_dir=str(pooled_output_dir),
+            fdr_method="fdr_bh",
+            alpha=0.05,
+            plot_suffix=" (Pooled BallTypes)",
+        )
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(
+            f"✅ Pooled BallTypes analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
+        )
+
+    # 1c. Process continuous metrics with CTRL BALLTYPE ONLY (focus on standard condition)
+    if continuous_metrics:
+        print(f"\n{'='*60}")
+        print(f"--- ANALYSIS 3: CTRL BALLTYPE ONLY (Standard Ball Focus) ---")
+        print(f"{'='*60}")
+
+        # Filter to only ctrl BallType
+        ctrl_data = dataset[dataset["BallType"] == "ctrl"][["Light", "Genotype"] + continuous_metrics].copy()
+
+        print(f"Ctrl BallType only dataset shape: {ctrl_data.shape}")
+
+        ctrl_output_dir = output_dir / "ctrl_balltype_only"
+        ctrl_output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Generating within-factor comparisons for ctrl BallType only...")
+
+        start_time = time.time()
+
+        ctrl_stats_df = generate_within_factor_mannwhitney_plots(
+            ctrl_data,
+            metrics=continuous_metrics,
+            grouping_cols=["Light", "Genotype"],
+            genotype_palette=genotype_palette,
+            output_dir=str(ctrl_output_dir),
+            fdr_method="fdr_bh",
+            alpha=0.05,
+            plot_suffix=" (Ctrl BallType Only)",
+        )
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(
+            f"✅ Ctrl BallType only analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
+        )
 
     # 2. Process binary metrics with Fisher's exact tests
     if binary_metrics:

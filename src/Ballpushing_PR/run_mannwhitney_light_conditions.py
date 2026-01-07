@@ -39,7 +39,7 @@ def generate_light_condition_mannwhitney_plots(
     data,
     metrics,
     y="Light",
-    control_condition="off",
+    control_condition="on",  # Light ON (control)
     hue=None,
     palette="Set2",
     figsize=(15, 10),
@@ -70,26 +70,27 @@ def generate_light_condition_mannwhitney_plots(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create fixed color mapping for light conditions - this ensures consistent colors across all plots
+    # Get actual light conditions from data
     all_light_conditions = sorted(data[y].unique())
-    light_condition_colors = {
-        "off": "#d62728",  # Red for control (off)
-        "on": "#2ca02c",  # Green for light on
+    print(f"Light conditions found in data: {all_light_conditions}")
+
+    # Map data values to display labels (capitalized)
+    value_to_label = {
+        "on": "ON",
+        "off": "OFF",
     }
 
-    # If there are other conditions, assign them colors from a palette
-    if len(all_light_conditions) > 2:
-        extra_colors = sns.color_palette("Set1", n_colors=len(all_light_conditions))
-        for i, condition in enumerate(all_light_conditions):
-            if condition not in light_condition_colors:
-                # Convert color tuple to hex string
-                color_tuple = extra_colors[i]
-                hex_color = "#{:02x}{:02x}{:02x}".format(
-                    int(color_tuple[0] * 255), int(color_tuple[1] * 255), int(color_tuple[2] * 255)
-                )
-                light_condition_colors[condition] = hex_color
+    # Fixed ordering: control (on) first, then test (off)
+    fixed_order = ["on", "off"]
+    print(f"Fixed ordering for light conditions: {fixed_order}")
 
-    print(f"Fixed color mapping for light conditions: {light_condition_colors}")
+    # Style mapping: on (control) = solid, off (test) = dashed
+    light_condition_styles = {
+        "on": "solid",  # Control: solid black lines
+        "off": "dashed",  # Test: dashed black lines
+    }
+
+    print(f"Style mapping: {light_condition_styles}")
 
     all_stats = []
 
@@ -140,22 +141,19 @@ def generate_light_condition_mannwhitney_plots(
             use_parametric = False
             parametric_reason.append(f"minimum sample size {min_sample_size} < 30")
 
-        # Determine if we need multiple comparison correction
+        # No multiple comparison correction needed for 2 conditions
         n_comparisons = len(light_conditions)
-        need_correction = n_comparisons > 1
+        need_correction = False  # Only 2 conditions (on vs off)
 
         test_type = "t-test" if use_parametric else "Mann-Whitney U"
-        correction_note = "with FDR correction" if need_correction else "no correction needed"
+        correction_note = "no correction needed (only 2 conditions)"
 
         if use_parametric:
             print(f"  Using parametric tests ({test_type}) - sample sizes ≥30, continuous data")
         else:
             print(f"  Using non-parametric tests ({test_type}) - {', '.join(parametric_reason)}")
 
-        if need_correction:
-            print(f"  Multiple comparisons detected ({n_comparisons}), applying FDR correction")
-        else:
-            print(f"  Single comparison, no multiple testing correction needed")
+        print(f"  Single comparison (on vs off), no multiple testing correction needed")
 
         # Perform statistical tests for all light conditions vs control
         pvals = []
@@ -233,7 +231,7 @@ def generate_light_condition_mannwhitney_plots(
             print(f"No valid comparisons for metric {metric}")
             continue
 
-        # Apply FDR correction only if multiple comparisons
+        # No FDR correction needed for 2 conditions
         if need_correction:
             rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=alpha, method=fdr_method)
             correction_applied = True
@@ -289,33 +287,19 @@ def generate_light_condition_mannwhitney_plots(
 
         all_results = test_results + [control_result]
 
-        # Create sorting key: significance groups (increased > none > decreased), then by median
-        def sort_key(result):
-            # Primary sort: significance and direction
-            if result["sig_level"] == "control":
-                priority = 2  # Controls in middle
-            elif result["significant"] and result["direction"] == "increased":
-                priority = 1  # Significant increases at top
-            elif result["significant"] and result["direction"] == "decreased":
-                priority = 3  # Significant decreases at bottom
-            else:
-                priority = 2  # Non-significant in middle
-
-            # Secondary sort: by median (descending for increased/none, ascending for decreased)
-            if priority == 3:  # For decreased group, sort by median ascending (most decrease first)
-                median_sort = result["test_median"]
-            else:  # For increased and none groups, sort by median descending (highest first)
-                median_sort = -result["test_median"]
-
-            return (priority, median_sort)
-
-        # Sort light conditions using the custom sorting key
-        sorted_results = sorted(all_results, key=sort_key)
-        sorted_light_conditions = [r["LightCondition"] for r in sorted_results]
+        # Use fixed ordering instead of significance-based sorting
+        # This ensures consistent ordering across all plots for side-by-side comparison
+        sorted_light_conditions = [lc for lc in fixed_order if lc in [r["LightCondition"] for r in all_results]]
 
         # Update plot data with sorted categories
         plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_light_conditions, ordered=True)
         plot_data = plot_data.sort_values(by=[y])
+
+        # Create display labels for plotting (ON/OFF instead of 1/0)
+        plot_data[y + "_display"] = plot_data[y].map(value_to_label)
+        # Ensure categorical ordering is preserved in labels
+        label_order = [value_to_label.get(lc, str(lc)) for lc in sorted_light_conditions]
+        plot_data[y + "_display"] = pd.Categorical(plot_data[y + "_display"], categories=label_order, ordered=True)
 
         # Store stats for output
         for result in test_results:  # Exclude control from final stats
@@ -332,8 +316,8 @@ def generate_light_condition_mannwhitney_plots(
         # Create the plot with adjusted size
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        # Set up colors for light conditions using our fixed mapping
-        colors = [light_condition_colors[lc] for lc in sorted_light_conditions]
+        # All scatter points are black
+        colors = ["black" for lc in sorted_light_conditions]
 
         # Add colored backgrounds only for significant results
         y_positions = range(len(sorted_light_conditions))
@@ -359,8 +343,34 @@ def generate_light_condition_mannwhitney_plots(
             # Add background rectangle
             ax.axhspan(i - 0.4, i + 0.4, color=bg_color, alpha=alpha_bg, zorder=0)
 
-        # Draw boxplots with unfilled styling (like TNT version)
+        # Draw boxplots with black styling: solid for 'on', dashed for 'off'
         for light_condition in sorted_light_conditions:
+            condition_data = plot_data[plot_data[y] == light_condition][metric].dropna()
+            if len(condition_data) == 0:
+                continue
+
+            position = sorted_light_conditions.index(light_condition)
+
+            # Determine line style based on condition
+            linestyle = light_condition_styles.get(light_condition, "solid")
+            linewidth = 2.5
+
+            # Create boxplot with black lines
+            bp = ax.boxplot(
+                [condition_data],
+                positions=[position],
+                widths=0.6,
+                patch_artist=False,
+                showfliers=False,
+                vert=False,
+                boxprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
+                whiskerprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
+                capprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
+                medianprops=dict(color="black", linewidth=linewidth+0.5, linestyle=linestyle),
+            )
+
+        # Skip the old boxplot drawing code
+        if False:
             condition_data = plot_data[plot_data[y] == light_condition]
             if condition_data.empty:
                 continue
@@ -396,70 +406,77 @@ def generate_light_condition_mannwhitney_plots(
                     capprops=dict(color="black", linewidth=1),
                 )
 
-        # Overlay stripplot for jitter with light condition colors (like TNT version)
+        # Overlay stripplot for jitter with black color (using capitalized display labels)
         sns.stripplot(
             data=plot_data,
             x=metric,
-            y=y,
+            y=y + "_display",
             dodge=False,
-            alpha=0.7,
+            alpha=0.5,
             jitter=True,
-            palette=colors,
-            size=6,  # Larger dots for better visibility
+            color="black",
+            size=8,
             ax=ax,
         )
 
-        # Add significance annotations
-        yticklabels = [label.get_text() for label in ax.get_yticklabels()]
-        x_range = ax.get_xlim()[1] - ax.get_xlim()[0]
+        # Explicitly set y-tick labels to show ON/OFF instead of numeric positions
+        display_labels_ordered = [value_to_label.get(lc, str(lc)) for lc in sorted_light_conditions]
+        ax.set_yticks(range(len(sorted_light_conditions)))
+        ax.set_yticklabels(display_labels_ordered)
 
+        # Set xlim BEFORE adding annotations to ensure proper positioning
+        x_max = plot_data[metric].quantile(0.99)
+        x_min = plot_data[metric].min()
+        # Add space for annotations on the right
+        data_range = x_max - x_min
+        ax.set_xlim(left=x_min - 0.05 * data_range, right=x_max + 0.15 * data_range)
+
+        # Now add significance annotations with fixed positioning
         for i, light_condition in enumerate(sorted_light_conditions):
             result = next((r for r in all_results if r["LightCondition"] == light_condition), None)
             if not result:
                 continue
 
-            # Add significance annotation (like TNT version)
+            # Add significance annotation at a fixed position relative to data range
             if result["sig_level"] not in ["control", "ns"]:
                 yticklocs = ax.get_yticks()
+                # Position stars at 95th percentile of data range for visibility
+                x_pos = x_max + 0.05 * data_range
                 ax.text(
-                    x=ax.get_xlim()[1] + 0.01 * x_range,
+                    x=x_pos,
                     y=float(yticklocs[i]),
                     s=result["sig_level"],
                     color="red",
-                    fontsize=14,
+                    fontsize=20,
                     fontweight="bold",
                     va="center",
                     ha="left",
                     clip_on=False,
                 )
 
-        # Set xlim to accommodate annotations
-        x_max = plot_data[metric].quantile(0.99)
-        ax.set_xlim(left=None, right=x_max * 1.2)  # Extra space for annotations
-
-        # Formatting (like TNT version)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=10)
-        plt.xlabel(metric, fontsize=14)
-        plt.ylabel("Light Condition", fontsize=14)
-        plt.title(f"Mann-Whitney U Test: {metric} by Light Condition (FDR corrected)", fontsize=16)
+        # Formatting with increased font sizes
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
+        plt.xlabel(metric, fontsize=22)
+        plt.ylabel("Light Condition", fontsize=22)
+        plt.title(f"Mann-Whitney U Test: {metric} by Light Condition", fontsize=24)
         ax.grid(axis="x", alpha=0.3)
 
-        # Create custom legend (like TNT version)
+        # Create custom legend with line styles
         from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
 
         legend_elements = [
-            Patch(facecolor="none", edgecolor="red", linestyle="--", linewidth=2, label="Control Group"),
-            Patch(facecolor="none", edgecolor="black", linewidth=1, label="Test Groups"),
+            Line2D([0], [0], color="black", linewidth=2.5, linestyle="solid", label="Light ON (Control)"),
+            Line2D([0], [0], color="black", linewidth=2.5, linestyle="dashed", label="Light OFF (Test)"),
             Patch(facecolor="lightgreen", alpha=0.15, label="Significantly Increased"),
-            Patch(facecolor="lightblue", alpha=0.1, label="Control"),
             Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
         ]
 
         ax.legend(
             legend_elements,
             [str(elem.get_label()) for elem in legend_elements],
-            fontsize=10,
+            fontsize=16,
             bbox_to_anchor=(1.05, 1),
             loc="upper left",
         )
@@ -468,17 +485,15 @@ def generate_light_condition_mannwhitney_plots(
         plt.tight_layout()
 
         # Save plot
-        output_file = output_dir / f"{metric}_light_condition_mannwhitney_fdr.pdf"
+        output_file = output_dir / f"{metric}_light_condition_mannwhitney.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close()
 
         print(f"  Plot saved: {output_file}")
 
-        # Print FDR correction summary
-        n_significant_raw = sum(1 for r in test_results if r["pval_raw"] < 0.05)
-        n_significant_fdr = sum(1 for r in test_results if r["significant"])
-        print(f"  Raw significant: {n_significant_raw}/{len(test_results)}")
-        print(f"  FDR significant: {n_significant_fdr}/{len(test_results)} (α={alpha})")
+        # Print statistical summary
+        n_significant = sum(1 for r in test_results if r["significant"])
+        print(f"  Significant: {n_significant}/{len(test_results)} (α={alpha})")
 
         # Print timing for this metric
         metric_end_time = time.time()
@@ -490,24 +505,22 @@ def generate_light_condition_mannwhitney_plots(
 
     if not stats_df.empty:
         # Save statistics
-        stats_file = output_dir / "light_condition_mannwhitney_fdr_statistics.csv"
+        stats_file = output_dir / "light_condition_mannwhitney_statistics.csv"
         stats_df.to_csv(stats_file, index=False)
         print(f"\nStatistics saved to: {stats_file}")
 
         # Generate text report
-        report_file = output_dir / "light_condition_mannwhitney_fdr_report.md"
+        report_file = output_dir / "light_condition_mannwhitney_report.md"
         generate_text_report(stats_df, data, control_condition, report_file)
         print(f"Text report saved to: {report_file}")
 
         # Print overall summary
         total_tests = len(stats_df)
-        total_significant_raw = (stats_df["pval_raw"] < 0.05).sum()
-        total_significant_fdr = stats_df["significant"].sum()
+        total_significant = stats_df["significant"].sum()
 
         print(f"\nOverall Summary:")
         print(f"Total comparisons: {total_tests}")
-        print(f"Raw significant (p<0.05): {total_significant_raw} ({100*total_significant_raw/total_tests:.1f}%)")
-        print(f"FDR significant (q<{alpha}): {total_significant_fdr} ({100*total_significant_fdr/total_tests:.1f}%)")
+        print(f"Significant (p<{alpha}): {total_significant} ({100*total_significant/total_tests:.1f}%)")
 
     return stats_df
 
@@ -529,9 +542,10 @@ def generate_text_report(stats_df, data, control_condition, report_file):
     """
     report_lines = []
     report_lines.append("# Light Condition Mann-Whitney U Test Report")
-    report_lines.append("## FDR-Corrected Statistical Analysis Results")
+    report_lines.append("## Statistical Analysis Results")
     report_lines.append("")
-    report_lines.append(f"**Control group:** {control_condition}")
+    report_lines.append(f"**Control group:** Light ON ('{control_condition}')")
+    report_lines.append(f"**Test group:** Light OFF ('off')")
     report_lines.append("")
 
     # Group by metric
@@ -916,7 +930,7 @@ def main(overwrite=True, test_mode=False):
 
     # Define output directories
     base_output_dir = Path(
-        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/Summary_metrics/250815_Light_Conditions_Mannwhitney"
+        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/Summary_metrics/260104_Light_Conditions_Mannwhitney"
     )
 
     # Ensure the base output directory exists

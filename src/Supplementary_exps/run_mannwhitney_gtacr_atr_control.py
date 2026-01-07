@@ -4,7 +4,7 @@ Script to generate Mann-Whitney U test jitterboxplots for Gtacr OR67d ATR contro
 
 This script compares GtacrxOR67d WITH ATR (ATR='yes', the control/focal group) to:
 1. GtacrxOR67d WITHOUT ATR (ATR='no')
-2. PRxOR67d WITH ATR (ATR='yes')
+2. GtacrxEmptyGal4 WITH ATR (ATR='yes')
 
 The control group is GtacrxOR67d WITH ATR (ATR='yes').
 
@@ -53,7 +53,6 @@ def generate_genotype_mannwhitney_plots(
     y="Genotype_ATR",
     control_group=None,
     hue=None,
-    palette="Set2",
     figsize=(15, 10),
     output_dir="mann_whitney_plots",
     fdr_method="fdr_bh",
@@ -69,7 +68,6 @@ def generate_genotype_mannwhitney_plots(
         y (str): The name of the column for the y-axis (genotype+ATR groups). Default is "Genotype_ATR".
         control_group (str): Name of the control group. If None, uses alphabetically first group.
         hue (str, optional): The name of the column for color grouping. Default is None.
-        palette: Color palette for the plots (str or dict). Default is "Set2".
         figsize (tuple, optional): Size of each figure. Default is (15, 10).
         output_dir: Directory to save the plots. Default is "mann_whitney_plots".
         fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
@@ -205,71 +203,114 @@ def generate_genotype_mannwhitney_plots(
         # Create visualization
         fig, ax = plt.subplots(figsize=figsize)
 
-        # Sort groups by significance and median
-        group_order = []
-        increased_groups = []
-        neutral_groups = []
-        decreased_groups = []
+        # Fixed order: GtacrxOR67d (ATR=no), GtacrxOR67d (ATR=yes), GtacrxEmptyGal4 (ATR=yes)
+        group_order = ["GtacrxOR67d (ATR=no)", "GtacrxOR67d (ATR=yes)", "GtacrxEmptyGal4 (ATR=yes)"]
 
-        for result in stats_results:
-            test_group = result["Test"]
-            if result["direction"] == "increased":
-                increased_groups.append((test_group, result["test_median"]))
-            elif result["direction"] == "decreased":
-                decreased_groups.append((test_group, result["test_median"]))
-            else:
-                neutral_groups.append((test_group, result["test_median"]))
-
-        # Sort by median within each category
-        increased_groups.sort(key=lambda x: x[1], reverse=True)
-        neutral_groups.sort(key=lambda x: x[1], reverse=True)
-        decreased_groups.sort(key=lambda x: x[1], reverse=True)
-
-        # Build final order: control first, then increased, neutral, decreased
-        group_order = [control_group]
-        group_order.extend([g[0] for g in increased_groups])
-        group_order.extend([g[0] for g in neutral_groups])
-        group_order.extend([g[0] for g in decreased_groups])
+        # Filter to only include groups that exist in the data
+        group_order = [g for g in group_order if g in groups]
 
         # Reorder plot data
         plot_data[y] = pd.Categorical(plot_data[y], categories=group_order, ordered=True)
         plot_data = plot_data.sort_values(y)
 
-        # Create color-coded backgrounds
-        n_groups = len(group_order)
+        # Plot boxplot with no fill, black lines (dashed for ATR=no, solid for ATR=yes)
+        # Horizontal orientation
+        # Extract ATR status from group names to determine line style
+        box_styles = []
+        for group in group_order:
+            if "ATR=no" in group:
+                box_styles.append('--')  # Dashed for ATR=no
+            else:
+                box_styles.append('-')   # Solid for ATR=yes (or NaN, treated as yes)
+
+        bp = ax.boxplot(
+            [plot_data[plot_data[y] == group][metric].values for group in group_order],
+            positions=range(len(group_order)),
+            widths=0.6,
+            patch_artist=True,
+            showfliers=False,
+            vert=False,  # Horizontal orientation
+            boxprops=dict(linewidth=1.5),
+            whiskerprops=dict(linewidth=1.5),
+            capprops=dict(linewidth=1.5),
+            medianprops=dict(linewidth=2, color='black')
+        )
+
+        # Style boxes: no fill, black edges, dashed/solid based on ATR
+        for patch, linestyle in zip(bp['boxes'], box_styles):
+            patch.set_facecolor('none')
+            patch.set_edgecolor('black')
+            patch.set_linewidth(1.5)
+            patch.set_linestyle(linestyle)
+
+        # Style whiskers and caps with matching line styles
+        for i, linestyle in enumerate(box_styles):
+            bp['whiskers'][i*2].set_linestyle(linestyle)
+            bp['whiskers'][i*2+1].set_linestyle(linestyle)
+            bp['caps'][i*2].set_linestyle(linestyle)
+            bp['caps'][i*2+1].set_linestyle(linestyle)
+
+        # Add scatter points: purple for OR67d genotypes, gray otherwise
+        for i, group in enumerate(group_order):
+            group_data = plot_data[plot_data[y] == group][metric].values
+            if len(group_data) > 0:
+                # Determine color based on genotype
+                if "OR67d" in group:
+                    color = '#9467bd'  # Purple
+                else:
+                    color = '#7f7f7f'  # Gray
+
+                # Add jitter
+                np.random.seed(42)
+                jitter = np.random.normal(0, 0.08, size=len(group_data))
+                ax.scatter(group_data, i + jitter, alpha=0.5, s=50, color=color,
+                          edgecolors='black', linewidths=0.5, zorder=3)
+
+        # Add color-coded backgrounds based on significance (horizontal orientation)
+        # Create a lookup for significance
+        sig_lookup = {}
+        for result in stats_results:
+            test_group = result["Test"]
+            if result["significant"]:
+                if result["direction"] == "increased":
+                    sig_lookup[test_group] = "increased"
+                else:
+                    sig_lookup[test_group] = "decreased"
+            else:
+                sig_lookup[test_group] = "neutral"
+
+        # Get x-axis limits for rectangles
+        x_min, x_max = ax.get_xlim()
+
         for i, group in enumerate(group_order):
             if group == control_group:
                 color = "lightgray"
-            else:
-                result = next((r for r in stats_results if r["Test"] == group), None)
-                if result and result["direction"] == "increased":
-                    color = "lightcoral"
-                elif result and result["direction"] == "decreased":
-                    color = "lightblue"
+            elif group in sig_lookup:
+                if sig_lookup[group] == "increased":
+                    color = "lightgreen"  # Green for increased
+                elif sig_lookup[group] == "decreased":
+                    color = "lightcoral"  # Red for decreased
                 else:
                     color = "lightyellow"
+            else:
+                color = "lightyellow"
 
+            # Rectangle spans horizontally for horizontal boxplots
             rect = Rectangle(
-                (i - 0.4, ax.get_ylim()[0]),
+                (x_min, i - 0.4),
+                x_max - x_min,
                 0.8,
-                ax.get_ylim()[1] - ax.get_ylim()[0],
                 facecolor=color,
                 alpha=0.3,
                 zorder=0,
             )
             ax.add_patch(rect)
 
-        # Plot boxplot and jitter
-        sns.boxplot(
-            data=plot_data, x=y, y=metric, ax=ax, palette=palette, order=group_order, showfliers=False, linewidth=1.5
-        )
-        sns.stripplot(data=plot_data, x=y, y=metric, ax=ax, color="black", alpha=0.5, size=3, order=group_order)
-
-        # Add significance annotations with p-values
-        y_max = plot_data[metric].max()
-        y_range = plot_data[metric].max() - plot_data[metric].min()
-        annotation_height = y_max + 0.05 * y_range
-        pvalue_height = y_max + 0.12 * y_range
+        # Add significance annotations with p-values (horizontal orientation)
+        x_max = plot_data[metric].max()
+        x_range = plot_data[metric].max() - plot_data[metric].min()
+        annotation_x = x_max + 0.05 * x_range
+        pvalue_x = x_max + 0.12 * x_range
 
         for i, group in enumerate(group_order):
             if group == control_group:
@@ -287,39 +328,44 @@ def generate_genotype_mannwhitney_plots(
                 else:
                     sig_marker = "ns"
 
-                # Add significance stars
-                ax.text(i, annotation_height, sig_marker, ha="center", va="bottom", fontsize=12, fontweight="bold")
-                
+                # Add significance marker
+                ax.text(annotation_x, i, sig_marker, ha='left', va='center',
+                       fontsize=12, fontweight='bold')
+
                 # Add p-value text
-                if p_val < 0.001:
-                    p_text = f"p<0.001"
-                else:
-                    p_text = f"p={p_val:.3f}"
-                ax.text(i, pvalue_height, p_text, ha="center", va="bottom", fontsize=8, style="italic")
+                p_text = f"p={p_val:.3f}" if p_val >= 0.001 else f"p<0.001"
+                ax.text(pvalue_x, i, p_text, ha='left', va='center',
+                       fontsize=9, style='italic')
 
         # Formatting
-        ax.set_xlabel("Group (Genotype + ATR)", fontsize=12, fontweight="bold")
-        ax.set_ylabel(metric, fontsize=12, fontweight="bold")
+        ax.set_ylabel("Group (Genotype + ATR)", fontsize=12, fontweight="bold")
+        ax.set_xlabel(metric, fontsize=12, fontweight="bold")
         ax.set_title(
             f"Mann-Whitney U Test: {metric}\n(Control: {control_group}, FDR-corrected)", fontsize=14, fontweight="bold"
         )
-        ax.tick_params(axis="x", rotation=45)
-        plt.xticks(rotation=45, ha="right")
+        ax.set_yticks(range(len(group_order)))
+        ax.set_yticklabels(group_order)
 
         # Add legend
+        from matplotlib.lines import Line2D
         legend_elements = [
             Patch(facecolor="lightgray", alpha=0.3, label="Control"),
-            Patch(facecolor="lightcoral", alpha=0.3, label="Significantly increased"),
+            Patch(facecolor="lightgreen", alpha=0.3, label="Significantly increased"),
             Patch(facecolor="lightyellow", alpha=0.3, label="Not significant"),
-            Patch(facecolor="lightblue", alpha=0.3, label="Significantly decreased"),
+            Patch(facecolor="lightcoral", alpha=0.3, label="Significantly decreased"),
+            Line2D([0], [0], color='black', linewidth=1.5, linestyle='-', label='ATR=yes'),
+            Line2D([0], [0], color='black', linewidth=1.5, linestyle='--', label='ATR=no'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#9467bd', markersize=8, label='OR67d genotype'),
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#7f7f7f', markersize=8, label='Other genotype'),
         ]
-        ax.legend(handles=legend_elements, loc="upper right", fontsize=10)
+        ax.legend(handles=legend_elements, loc='center left', bbox_to_anchor=(1, 0.5), fontsize=10)
 
         plt.tight_layout()
 
         # Save plot
         output_file = output_dir / f"{metric}_mannwhitney.png"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
+        plt.savefig(output_dir / f"{metric}_mannwhitney.pdf", bbox_inches="tight")
         plt.close()
 
         metric_elapsed = time.time() - metric_start_time
@@ -556,10 +602,10 @@ def main(overwrite=True, test_mode=False):
     # Filter to only include the groups we want:
     # - GtacrxOR67d (ATR=yes) - CONTROL (the focal group WITH ATR)
     # - GtacrxOR67d (ATR=no) - Test group (same genotype WITHOUT ATR)
-    # - PRxOR67d (ATR=yes) - Test group (different genotype WITH ATR)
+    # - GtacrxEmptyGal4 (ATR=yes) - Test group (genetic control WITH ATR)
 
     control_group_name = "GtacrxOR67d (ATR=yes)"
-    test_groups = ["GtacrxOR67d (ATR=no)", "PRxOR67d (ATR=yes)"]
+    test_groups = ["GtacrxOR67d (ATR=no)", "GtacrxEmptyGal4 (ATR=yes)"]
 
     groups_to_include = [control_group_name] + test_groups
 
@@ -815,7 +861,6 @@ def main(overwrite=True, test_mode=False):
                 y="Genotype_ATR",
                 control_group=control_group_name,
                 hue="Genotype_ATR",
-                palette="Set2",
                 output_dir=str(base_output_dir),
                 fdr_method="fdr_bh",
                 alpha=0.05,

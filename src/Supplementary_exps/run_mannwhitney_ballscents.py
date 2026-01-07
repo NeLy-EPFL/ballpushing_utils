@@ -40,11 +40,98 @@ import time
 import argparse
 
 
+def normalize_ball_scent_labels(df, group_col="BallScent"):
+    """Normalize/alias BallScent values to canonical factorial labels.
+
+    Maps existing values to one of: Ctrl, CtrlScent, Washed, Scented, New, NewScent
+    using substring and fuzzy matching when needed.
+    """
+    if group_col not in df.columns:
+        return df
+
+    design_keys = ["Ctrl", "CtrlScent", "Washed", "Scented", "New", "NewScent"]
+    available = pd.Series(df[group_col].dropna().unique()).astype(str).tolist()
+    from difflib import get_close_matches
+
+    mapping = {}
+    for val in available:
+        if val in design_keys:
+            mapping[val] = val
+            continue
+        vs = str(val).strip().lower()
+        found = None
+        for k in design_keys:
+            ks = k.lower()
+            if vs == ks or ks in vs or vs in ks:
+                found = k
+                break
+        if not found:
+            candidates = get_close_matches(vs, [k.lower() for k in design_keys], n=1, cutoff=0.6)
+            if candidates:
+                for k in design_keys:
+                    if k.lower() == candidates[0]:
+                        found = k
+                        break
+
+        mapping[val] = found if found is not None else val
+
+    # For any entries that were not mapped, try simple substring heuristics
+    for val in list(mapping.keys()):
+        if mapping[val] == val:
+            vs = str(val).strip().lower()
+            if "new" in vs and "scent" in vs:
+                mapping[val] = "NewScent"
+            elif "new" in vs:
+                mapping[val] = "New"
+            elif "wash" in vs or "washed" in vs:
+                if "scent" in vs:
+                    mapping[val] = "Scented"
+                else:
+                    mapping[val] = "Washed"
+            elif "ctrl" in vs and "scent" in vs:
+                mapping[val] = "CtrlScent"
+            elif "scent" in vs:
+                # Prefer mapping to Scented/NewScent when 'scent' appears alone
+                if "new" in vs:
+                    mapping[val] = "NewScent"
+                elif "wash" in vs or "washed" in vs or vs == "scented":
+                    mapping[val] = "Scented"
+                else:
+                    mapping[val] = "CtrlScent" if "ctrl" in vs else "Scented"
+            elif "pre" in vs or "exposed" in vs:
+                mapping[val] = "CtrlScent"
+            else:
+                mapping[val] = val
+
+    remapped = {k: v for k, v in mapping.items() if k != v}
+    print(f"Normalizing {group_col} labels (total variants: {len(mapping)}):")
+    for k, v in mapping.items():
+        print(f"  {k} -> {v}")
+
+    df = df.copy()
+    df[group_col] = df[group_col].map(lambda x: mapping.get(str(x), x))
+    # Preserve canonical mapping in a separate column for downstream matching
+    canonical_col = f"{group_col}_canonical"
+    df[canonical_col] = df[group_col]
+    # Map canonical keys to descriptive factorial labels for plots/reports
+    display_map = {
+        "Ctrl": "Ctrl",
+        "CtrlScent": "Pre-exposed",
+        "Washed": "Washed",
+        "Scented": "Washed + Pre-exposed",
+        "New": "New",
+        "NewScent": "New + Pre-exposed",
+    }
+
+    df[group_col] = df[group_col].map(lambda x: display_map.get(x, x))
+    return df
+
+
 def generate_BallScent_mannwhitney_plots(
     data,
     metrics,
     y="BallScent",
-    control_BallScent="Scented",
+    control_BallScent="New",  # New ball as control
     hue=None,
     palette="Set2",
     figsize=(15, 10),
@@ -54,26 +141,47 @@ def generate_BallScent_mannwhitney_plots(
 ):
     """
     Generates jitterboxplots for each metric with Mann-Whitney U tests between each ball type and control.
-    Applies FDR correction across all comparisons for each metric.
+    No FDR correction applied (simple pairwise comparisons).
 
     Parameters:
         data (pd.DataFrame): The dataset to plot.
         metrics (list): List of metric names to plot.
         y (str): The name of the column for the y-axis (ball types). Default is "BallScent".
-        control_BallScent (str): Name of the control ball type. Default is "Scented".
+        control_BallScent (str): Name of the control ball type. Default is "New".
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
         figsize (tuple, optional): Size of each figure. Default is (15, 10).
         output_dir: Directory to save the plots. Default is "mann_whitney_plots".
-        fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
-        alpha (float): Significance level after FDR correction. Default is 0.05.
+        fdr_method (str): Kept for compatibility, not used.
+        alpha (float): Significance level for individual tests. Default is 0.05.
 
     Returns:
-        pd.DataFrame: Statistics table with Mann-Whitney U test results and FDR correction.
+        pd.DataFrame: Statistics table with Mann-Whitney U test results.
     """
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Filter out Ctrl condition (different experimental setup)
+    data = data[data[y] != "Ctrl"].copy()
+    print(f"Filtered out 'Ctrl' condition. Remaining conditions: {sorted(data[y].unique())}")
+
+    # Filter out CtrlScent condition (different experimental setup)
+    data = data[data[y] != "CtrlScent"].copy()
+    print(f"Filtered out 'CtrlScent' condition. Remaining conditions: {sorted(data[y].unique())}")
+
+    # Fixed ordering for ball scents (control first, then others alphabetically)
+    # New (control), New + Pre-exposed, Pre-exposed, Washed, Washed + Pre-exposed
+    fixed_order = ["New", "New + Pre-exposed", "Washed", "Washed + Pre-exposed"]
+    # Filter to only conditions present in data
+    fixed_order = [cond for cond in fixed_order if cond in data[y].unique()]
+    print(f"Fixed ordering for ball scents: {fixed_order}")
+
+    # Create color palette for scatter points
+    n_conditions = len(fixed_order)
+    scatter_palette = sns.color_palette("Set2", n_colors=n_conditions)
+    ball_scent_colors = {cond: scatter_palette[i] for i, cond in enumerate(fixed_order)}
+    print(f"Color mapping for scatter points: {list(ball_scent_colors.keys())}")
 
     all_stats = []
 
@@ -81,7 +189,7 @@ def generate_BallScent_mannwhitney_plots(
         metric_start_time = time.time()
         print(f"Generating Mann-Whitney jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
-        plot_data = data.dropna(subset=[metric, y])
+        plot_data = data.dropna(subset=[metric, y]).copy()
 
         # Get all ball types except control
         ball_types = [bt for bt in plot_data[y].unique() if bt != control_BallScent]
@@ -97,6 +205,11 @@ def generate_BallScent_mannwhitney_plots(
             continue
 
         control_median = control_vals.median()  # Calculate control median once
+
+        # No multiple comparison correction needed for pairwise comparisons
+        n_comparisons = len(ball_types)
+        need_correction = False  # Simple pairwise comparisons (New vs each other)
+        print(f"  Performing {n_comparisons} pairwise comparisons (no FDR correction needed)")
 
         # Perform Mann-Whitney U tests for all ball types vs control
         pvals = []
@@ -143,15 +256,23 @@ def generate_BallScent_mannwhitney_plots(
             print(f"No valid comparisons for metric {metric}")
             continue
 
-        # Apply FDR correction
-        rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=alpha, method=fdr_method)
+        # No FDR correction needed for pairwise comparisons
+        if need_correction:
+            rejected, pvals_corrected, alpha_sidak, alpha_bonf = multipletests(pvals, alpha=alpha, method=fdr_method)
+            correction_applied = True
+        else:
+            # No correction needed for pairwise comparisons
+            pvals_corrected = pvals  # Use raw p-values
+            rejected = [p < alpha for p in pvals]  # Simple alpha threshold
+            correction_applied = False
 
-        # Update test results with FDR correction
+        # Update test results with corrected p-values (or raw if no correction)
         for i, result in enumerate(test_results):
-            result["pval_fdr"] = pvals_corrected[i]
-            result["significant_fdr"] = rejected[i]
+            result["pval_corrected"] = pvals_corrected[i]
+            result["significant"] = rejected[i]
+            result["correction_applied"] = correction_applied
 
-            # Determine significance level based on FDR-corrected p-values
+            # Determine significance level based on corrected p-values (or raw if no correction)
             if pvals_corrected[i] < 0.001:
                 result["sig_level"] = "***"
             elif pvals_corrected[i] < 0.01:
@@ -161,7 +282,7 @@ def generate_BallScent_mannwhitney_plots(
             else:
                 result["sig_level"] = "ns"
 
-            # Override direction if not significant after FDR
+            # Override direction if not significant
             if not rejected[i]:
                 result["direction"] = "none"
 
@@ -171,8 +292,8 @@ def generate_BallScent_mannwhitney_plots(
             "Metric": metric,
             "Control": control_BallScent,
             "pval_raw": 1.0,
-            "pval_fdr": 1.0,
-            "significant_fdr": False,
+            "pval_corrected": 1.0,
+            "significant": False,
             "sig_level": "control",
             "direction": "control",
             "effect_size": 0.0,
@@ -181,33 +302,14 @@ def generate_BallScent_mannwhitney_plots(
             "control_median": control_median,
             "test_n": len(control_vals),
             "control_n": len(control_vals),
+            "correction_applied": correction_applied,
         }
 
         all_results = test_results + [control_result]
 
-        # Create sorting key: significance groups (increased > none > decreased), then by median
-        def sort_key(result):
-            # Primary sort: significance and direction
-            if result["sig_level"] == "control":
-                priority = 2  # Controls in middle
-            elif result["significant_fdr"] and result["direction"] == "increased":
-                priority = 1  # Significant increases at top
-            elif result["significant_fdr"] and result["direction"] == "decreased":
-                priority = 3  # Significant decreases at bottom
-            else:
-                priority = 2  # Non-significant in middle
-
-            # Secondary sort: by median (descending for increased/none, ascending for decreased)
-            if priority == 3:  # For decreased group, sort by median ascending (most decrease first)
-                median_sort = result["test_median"]
-            else:  # For increased and none groups, sort by median descending (highest first)
-                median_sort = -result["test_median"]
-
-            return (priority, median_sort)
-
-        # Sort ball types using the custom sorting key
-        sorted_results = sorted(all_results, key=sort_key)
-        sorted_ball_types = [r["BallScent"] for r in sorted_results]
+        # Use fixed ordering instead of significance-based sorting
+        # This ensures consistent ordering across all plots for side-by-side comparison
+        sorted_ball_types = [bt for bt in fixed_order if bt in [r["BallScent"] for r in all_results]]
 
         # Update plot data with sorted categories
         plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_ball_types, ordered=True)
@@ -228,13 +330,8 @@ def generate_BallScent_mannwhitney_plots(
         # Create the plot with adjusted size
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        # Set up colors for ball types
-        if isinstance(palette, dict):
-            colors = [palette.get(bt, "gray") for bt in sorted_ball_types]
-        elif isinstance(palette, str):
-            colors = sns.color_palette(palette, n_colors=len(sorted_ball_types))
-        else:
-            colors = palette  # Assume it's already a list of colors
+        # Set up colors for scatter points
+        colors = [ball_scent_colors[bt] for bt in sorted_ball_types]  # Assume it's already a list of colors
 
         # Add colored backgrounds only for significant results
         y_positions = range(len(sorted_ball_types))
@@ -247,10 +344,10 @@ def generate_BallScent_mannwhitney_plots(
             if result["sig_level"] == "control":
                 bg_color = "lightblue"
                 alpha_bg = 0.1
-            elif result["significant_fdr"] and result["direction"] == "increased":
+            elif result["significant"] and result["direction"] == "increased":
                 bg_color = "lightgreen"
                 alpha_bg = 0.15
-            elif result["significant_fdr"] and result["direction"] == "decreased":
+            elif result["significant"] and result["direction"] == "decreased":
                 bg_color = "lightcoral"
                 alpha_bg = 0.15
             else:
@@ -297,70 +394,82 @@ def generate_BallScent_mannwhitney_plots(
                     capprops=dict(color="black", linewidth=1),
                 )
 
-        # Overlay stripplot for jitter with ball type colors (like TNT version)
+        # Overlay stripplot for jitter with colored points
         sns.stripplot(
             data=plot_data,
             x=metric,
             y=y,
             dodge=False,
-            alpha=0.7,
+            alpha=0.6,
             jitter=True,
             palette=colors,
-            size=6,  # Larger dots for better visibility
+            size=8,
             ax=ax,
         )
 
-        # Add significance annotations
-        yticklabels = [label.get_text() for label in ax.get_yticklabels()]
-        x_range = ax.get_xlim()[1] - ax.get_xlim()[0]
+        # Set xlim BEFORE adding annotations to ensure proper positioning
+        x_max = plot_data[metric].quantile(0.99)
+        x_min = plot_data[metric].min()
+        # Add space for annotations on the right
+        data_range = x_max - x_min
+        ax.set_xlim(left=x_min - 0.05 * data_range, right=x_max + 0.15 * data_range)
 
+        # Now add significance annotations with fixed positioning
         for i, ball_type in enumerate(sorted_ball_types):
             result = next((r for r in all_results if r["BallScent"] == ball_type), None)
             if not result:
                 continue
 
-            # Add significance annotation (like TNT version)
+            # Add significance annotation at a fixed position relative to data range
             if result["sig_level"] not in ["control", "ns"]:
                 yticklocs = ax.get_yticks()
+                # Position stars at 95th percentile of data range for visibility
+                x_pos = x_max + 0.05 * data_range
                 ax.text(
-                    x=ax.get_xlim()[1] + 0.01 * x_range,
+                    x=x_pos,
                     y=float(yticklocs[i]),
                     s=result["sig_level"],
                     color="red",
-                    fontsize=14,
+                    fontsize=20,
                     fontweight="bold",
                     va="center",
                     ha="left",
                     clip_on=False,
                 )
 
-        # Set xlim to accommodate annotations
-        x_max = plot_data[metric].quantile(0.99)
-        ax.set_xlim(left=None, right=x_max * 1.2)  # Extra space for annotations
-
-        # Formatting (like TNT version)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=10)
-        plt.xlabel(metric, fontsize=14)
-        plt.ylabel("Ball Type", fontsize=14)
-        plt.title(f"Mann-Whitney U Test: {metric} by Ball Type (FDR corrected)", fontsize=16)
+        # Formatting with increased font sizes
+        plt.xticks(fontsize=18)
+        plt.yticks(fontsize=18)
+        plt.xlabel(metric, fontsize=22)
+        plt.ylabel("Ball Scent", fontsize=22)
+        plt.title(f"Mann-Whitney U Test: {metric} by Ball Scent", fontsize=24)
         ax.grid(axis="x", alpha=0.3)
 
-        # Create custom legend (like TNT version)
+        # Create custom legend with colored patches for each condition
         from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
 
-        legend_elements = [
-            Patch(facecolor="none", edgecolor="red", linestyle="--", linewidth=2, label="Control Group"),
-            Patch(facecolor="none", edgecolor="black", linewidth=1, label="Test Groups"),
-            Patch(facecolor="lightgreen", alpha=0.15, label="Significantly Increased"),
-            Patch(facecolor="lightblue", alpha=0.1, label="Control"),
-            Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
-        ]
+        legend_elements = []
+        # Add a black boxplot line to show the style
+        legend_elements.append(
+            Line2D([0], [0], color="black", linewidth=2.5, linestyle="solid", label="Boxplot (all conditions)")
+        )
+        # Add colored patches for each condition
+        for cond in sorted_ball_types:
+            color = ball_scent_colors[cond]
+            label = f"{cond}" + (" (Control)" if cond == control_BallScent else "")
+            legend_elements.append(
+                Patch(facecolor=color, alpha=0.6, label=label)
+            )
+        legend_elements.extend([
+            Patch(facecolor="lightgreen", alpha=0.15, edgecolor="black", label="Significantly Increased"),
+            Patch(facecolor="lightcoral", alpha=0.15, edgecolor="black", label="Significantly Decreased"),
+        ])
 
         ax.legend(
             legend_elements,
             [str(elem.get_label()) for elem in legend_elements],
-            fontsize=10,
+            fontsize=14,
             bbox_to_anchor=(1.05, 1),
             loc="upper left",
         )
@@ -369,17 +478,15 @@ def generate_BallScent_mannwhitney_plots(
         plt.tight_layout()
 
         # Save plot
-        output_file = output_dir / f"{metric}_BallScent_mannwhitney_fdr.pdf"
+        output_file = output_dir / f"{metric}_BallScent_mannwhitney.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close()
 
         print(f"  Plot saved: {output_file}")
 
-        # Print FDR correction summary
-        n_significant_raw = sum(1 for r in test_results if r["pval_raw"] < 0.05)
-        n_significant_fdr = sum(1 for r in test_results if r["significant_fdr"])
-        print(f"  Raw significant: {n_significant_raw}/{len(test_results)}")
-        print(f"  FDR significant: {n_significant_fdr}/{len(test_results)} (α={alpha})")
+        # Print statistical summary
+        n_significant = sum(1 for r in test_results if r["significant"])
+        print(f"  Significant: {n_significant}/{len(test_results)} (α={alpha})")
 
         # Print timing for this metric
         metric_end_time = time.time()
@@ -391,24 +498,35 @@ def generate_BallScent_mannwhitney_plots(
 
     if not stats_df.empty:
         # Save statistics
-        stats_file = output_dir / "BallScent_mannwhitney_fdr_statistics.csv"
+        stats_file = output_dir / "BallScent_mannwhitney_statistics.csv"
         stats_df.to_csv(stats_file, index=False)
         print(f"\nStatistics saved to: {stats_file}")
 
         # Generate text report
-        report_file = output_dir / "BallScent_mannwhitney_fdr_report.md"
+        report_file = output_dir / "BallScent_mannwhitney_report.md"
         generate_text_report(stats_df, data, control_BallScent, report_file)
         print(f"Text report saved to: {report_file}")
 
         # Print overall summary
         total_tests = len(stats_df)
         total_significant_raw = (stats_df["pval_raw"] < 0.05).sum()
-        total_significant_fdr = stats_df["significant_fdr"].sum()
+        total_significant = stats_df["significant"].sum()
 
         print(f"\nOverall Summary:")
         print(f"Total comparisons: {total_tests}")
         print(f"Raw significant (p<0.05): {total_significant_raw} ({100*total_significant_raw/total_tests:.1f}%)")
-        print(f"FDR significant (q<{alpha}): {total_significant_fdr} ({100*total_significant_fdr/total_tests:.1f}%)")
+        print(f"Significant (p<{alpha}): {total_significant} ({100*total_significant/total_tests:.1f}%)")
+
+    # Persist the compiled statistics to the canonical summaries folder so
+    # downstream plotting scripts can find it at a known location.
+    try:
+        summaries_dir = Path("/mnt/upramdya_data/MD/Ball_scents/Plots/summaries/Genotype_Mannwhitney")
+        summaries_dir.mkdir(parents=True, exist_ok=True)
+        stats_out = summaries_dir / "genotype_mannwhitney_statistics.csv"
+        stats_df.to_csv(stats_out, index=False)
+        print(f"Saved Mann-Whitney statistics to: {stats_out}")
+    except Exception as e:
+        print(f"Warning: could not save stats CSV to canonical location: {e}")
 
     return stats_df
 
@@ -430,7 +548,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
     """
     report_lines = []
     report_lines.append("# Ball Types Mann-Whitney U Test Report")
-    report_lines.append("## FDR-Corrected Statistical Analysis Results")
+    report_lines.append("## Statistical Analysis Results (Pairwise Comparisons)")
     report_lines.append("")
     report_lines.append(f"**Control group:** {control_BallScent}")
     report_lines.append("")
@@ -468,7 +586,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
 
         for _, row in metric_stats.iterrows():
             ball_type = row["BallScent"]
-            p_fdr = row["pval_fdr"]
+            p_corrected = row["pval_corrected"]
             sig_level = row["sig_level"]
             test_median = row["test_median"]
             effect_size = row["effect_size"]
@@ -482,7 +600,14 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
 
             description = f'"{ball_type}" (median = {test_median:.3f}, n={test_n})'
 
-            if row["significant_fdr"]:
+            # Get pval_corrected for all cases
+            pval_corrected = row["pval_corrected"]
+
+            if row["significant"]:
+                sig_level = row["sig_level"]
+                direction = row["direction"]
+                effect_size = row["effect_size"]
+
                 if row["direction"] == "increased":
                     significant_increased.append(
                         {
@@ -490,7 +615,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
                             "description": description,
                             "effect_size": effect_size,
                             "percent_change": percent_change,
-                            "p_fdr": p_fdr,
+                            "p_corrected": pval_corrected,
                             "sig_level": sig_level,
                         }
                     )
@@ -501,7 +626,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
                             "description": description,
                             "effect_size": effect_size,
                             "percent_change": percent_change,
-                            "p_fdr": p_fdr,
+                            "p_corrected": pval_corrected,
                             "sig_level": sig_level,
                         }
                     )
@@ -512,7 +637,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
                         "description": description,
                         "effect_size": effect_size,
                         "percent_change": percent_change,
-                        "p_fdr": p_fdr,
+                        "p_corrected": pval_corrected,
                     }
                 )
 
@@ -523,7 +648,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
             report_lines.append("**Significantly higher values than control:**")
             for item in significant_increased:
                 report_lines.append(
-                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']})"
+                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_corrected']:.4f}{item['sig_level']})"
                 )
             report_lines.append("")
 
@@ -533,7 +658,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
             report_lines.append("**Significantly lower values than control:**")
             for item in significant_decreased:
                 report_lines.append(
-                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']})"
+                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_corrected']:.4f}{item['sig_level']})"
                 )
             report_lines.append("")
 
@@ -543,7 +668,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
             report_lines.append("**No significant difference from control:**")
             for item in non_significant:
                 report_lines.append(
-                    f"- {item['description']} showed {item['percent_change']:+.1f}% change (p={item['p_fdr']:.4f}, ns)"
+                    f"- {item['description']} showed {item['percent_change']:+.1f}% change (p={item['p_corrected']:.4f}, ns)"
                 )
             report_lines.append("")
 
@@ -555,9 +680,9 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
     report_lines.append("")
 
     total_comparisons = len(stats_df)
-    total_significant = stats_df["significant_fdr"].sum()
-    total_increased = len(stats_df[(stats_df["significant_fdr"]) & (stats_df["direction"] == "increased")])
-    total_decreased = len(stats_df[(stats_df["significant_fdr"]) & (stats_df["direction"] == "decreased")])
+    total_significant = stats_df["significant"].sum()
+    total_increased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "increased")])
+    total_decreased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "decreased")])
 
     report_lines.append(f"- **Total comparisons:** {total_comparisons}")
     report_lines.append(
@@ -571,7 +696,7 @@ def generate_text_report(stats_df, data, control_BallScent, report_file):
     report_lines.append("")
 
     # Add metrics summary
-    metrics_with_significant = stats_df[stats_df["significant_fdr"]]["Metric"].nunique()
+    metrics_with_significant = stats_df[stats_df["significant"]]["Metric"].nunique()
     total_metrics = stats_df["Metric"].nunique()
 
     report_lines.append(
@@ -771,6 +896,9 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         print(f"🧪 TEST MODE: Dataset reduced to {len(dataset)} rows")
         print(f"🧪 TEST MODE: Ball types in sample: {sorted(dataset['BallScent'].unique())}")
 
+    # Normalize BallScent labels to canonical factorial names
+    dataset = normalize_ball_scent_labels(dataset, group_col="BallScent")
+
     return dataset
 
 
@@ -906,8 +1034,8 @@ def analyze_binary_metrics(data, binary_metrics, y="BallScent", output_dir=None,
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine control group (Scented)
-    control_BallScent = "Scented"
+    # Determine control group (New)
+    control_BallScent = "New"
     if control_BallScent not in data[y].unique():
         print(f"Warning: Control ball type '{control_BallScent}' not found in data")
         # Use the most common ball type as control
@@ -1019,11 +1147,9 @@ def analyze_binary_metrics(data, binary_metrics, y="BallScent", output_dir=None,
                 result["sig_level"] = sig_level
                 results.append(result)
 
-            # Print FDR correction summary
-            n_significant_raw = sum(1 for p in pvals if p < 0.05)
-            n_significant_fdr = sum(rejected)
-            print(f"  Raw significant: {n_significant_raw}/{len(pvals)}")
-            print(f"  FDR significant: {n_significant_fdr}/{len(pvals)}")
+            # Print summary
+            n_significant = sum(rejected)
+            print(f"  Significant: {n_significant}/{len(pvals)}")
         else:
             print(f"  No valid comparisons for {metric}")
 
@@ -1467,40 +1593,31 @@ def main(overwrite=True, test_mode=False):
 
             start_time = time.time()
 
-            # Determine control ball type
-            control_BallScent = "Scented"
-            available_BallScents = continuous_data["BallScent"].unique()
-            if control_BallScent not in available_BallScents:
-                print(f"Warning: Control ball type '{control_BallScent}' not found in data")
-                # Use the most common ball type as control
-                control_BallScent = str(continuous_data["BallScent"].value_counts().index[0])
-                print(f"Using most common ball type as control: {control_BallScent}")
-            else:
-                control_BallScent = str(control_BallScent)  # Ensure it's a string
+            # Determine control ball type - use "New" as control
+            control_BallScent = "New"
 
             print(
-                f"🚀 Starting FDR-corrected Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics..."
+                f"🚀 Starting Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics..."
             )
             print(f"📊 Control group: {control_BallScent}")
             print(f"📊 Test groups: {[bt for bt in continuous_data['BallScent'].unique() if bt != control_BallScent]}")
 
-            # Use the new FDR-corrected function
+            # Use the Mann-Whitney function (no FDR correction for pairwise comparisons)
             stats_df = generate_BallScent_mannwhitney_plots(
                 continuous_data,
                 metrics=metrics_to_process,
                 y="BallScent",
                 control_BallScent=control_BallScent,
                 hue="BallScent",
-                palette="Set1",  # Use string palette instead of dict for compatibility
+                palette="Set2",  # Use Set2 palette for scatter points
                 output_dir=str(output_dir),
-                fdr_method="fdr_bh",  # Benjamini-Hochberg FDR correction
-                alpha=0.05,  # FDR-corrected significance level
+                alpha=0.05,  # Significance level for individual tests
             )
 
             end_time = time.time()
             elapsed_time = end_time - start_time
             print(
-                f"✅ FDR-corrected Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
+                f"✅ Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
             )
 
     # 2. Process binary metrics with Fisher's exact tests
