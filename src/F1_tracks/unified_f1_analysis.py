@@ -1356,8 +1356,22 @@ class F1AnalysisFramework:
 
         return rejected, corrected_p
 
+    # TODO: Cleanup this part
+
     def calculate_ball_proximity_time(self, df, proximity_thresholds=[70, 140, 200], movement_threshold=100, n_avg=100):
         """
+        DEPRECATED: This method is no longer needed and should not be used.
+
+        Ball proximity time is now calculated during dataset generation as part of
+        ballpushing_metrics.compute_ball_proximity_proportions(). The metrics are available
+        in summary datasets as 'ball_proximity_proportion_XXpx' columns.
+
+        To enable these metrics in your dataset:
+        1. Add them to 'enabled_metrics' in your config, OR
+        2. Regenerate your dataset (they will be computed automatically)
+
+        This method is kept for backward compatibility only.
+
         Calculate the proportion of time each fly spends near the ball at multiple distance thresholds.
 
         This metric is calculated from fly position data by:
@@ -1374,6 +1388,9 @@ class F1AnalysisFramework:
         Returns:
             DataFrame with fly, condition, and ball_proximity_proportion_XXpx columns for each threshold
         """
+        print("\n⚠️  WARNING: calculate_ball_proximity_time() is DEPRECATED")
+        print("   Ball proximity is now computed during dataset generation.")
+        print("   Please use summary datasets with these metrics enabled instead.\n")
         if not isinstance(proximity_thresholds, list):
             proximity_thresholds = [proximity_thresholds]
 
@@ -1495,7 +1512,9 @@ class F1AnalysisFramework:
         Args:
             df: DataFrame to add metrics to
             mode: Analysis mode
-            include_proximity: If True, try to calculate ball proximity (requires position data)
+            include_proximity: DEPRECATED - ball proximity is now calculated during dataset generation
+                              as part of ballpushing_metrics. The metrics should already be present
+                              in summary datasets as 'ball_proximity_proportion_XXpx' columns.
 
         Returns:
             DataFrame with added metrics
@@ -1519,17 +1538,21 @@ class F1AnalysisFramework:
                 print("  ⚠️  'time_to_first_interaction' not found in dataset")
                 print("     This metric should be calculated during data preprocessing")
 
-        # Calculate ball proximity if requested and data supports it
-        if include_proximity:
-            proximity_data = self.calculate_ball_proximity_time(df_enriched, proximity_thresholds=[70, 140, 200])
+        # Ball proximity metrics should already be in the summary dataset
+        # Check if they exist and warn if not
+        proximity_metrics = [
+            "ball_proximity_proportion_70px",
+            "ball_proximity_proportion_140px",
+            "ball_proximity_proportion_200px",
+        ]
+        missing_proximity = [m for m in proximity_metrics if m not in df_enriched.columns]
 
-            if proximity_data is not None:
-                # Merge proximity data back to main dataframe
-                # This is per-fly metric, so merge on fly identifier
-                proximity_cols = [col for col in proximity_data.columns if col.startswith("ball_proximity_proportion_")]
-                merge_cols = ["fly"] + proximity_cols
-                df_enriched = df_enriched.merge(proximity_data[merge_cols], on="fly", how="left")
-                print(f"  ✓ Added {len(proximity_cols)} ball proximity metrics: {proximity_cols}")
+        if missing_proximity and include_proximity:
+            print(f"  ⚠️  Ball proximity metrics not found in dataset: {missing_proximity}")
+            print("     These should be calculated during dataset generation by enabling them in ballpushing_metrics.")
+            print("     Add them to 'enabled_metrics' in your config or regenerate the dataset.")
+        elif not missing_proximity:
+            print(f"  ✓ Ball proximity metrics present: {proximity_metrics}")
 
         return df_enriched
 
