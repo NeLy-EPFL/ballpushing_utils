@@ -865,8 +865,7 @@ class BallPushingMetrics:
                 # Ball proximity metrics
                 proximity_thresholds = [70, 140, 200]
                 if any(
-                    self.is_metric_enabled(f"ball_proximity_proportion_{thresh}px")
-                    for thresh in proximity_thresholds
+                    self.is_metric_enabled(f"ball_proximity_proportion_{thresh}px") for thresh in proximity_thresholds
                 ):
                     proximity_results = safe_call(
                         self.compute_ball_proximity_proportions,
@@ -1404,6 +1403,8 @@ class BallPushingMetrics:
     def get_max_distance(self, fly_idx, ball_idx):
         """
         Get the maximum distance moved by the ball for a given fly and ball.
+        Uses median-smoothed event boundaries for consistency with other metrics
+        and to reduce impact of tracking errors.
 
         Parameters
         ----------
@@ -1419,16 +1420,30 @@ class BallPushingMetrics:
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
-        # Calculate the median initial position
+        # Get the median initial position
         initial_x, initial_y, _, _ = self._calculate_median_coordinates(ball_data, start_idx=0, window=10)
 
-        # Calculate the Euclidean distance from the initial position
-        distances = Processing.calculate_euclidian_distance(
-            ball_data["x_centre"], ball_data["y_centre"], initial_x, initial_y
-        )
+        # Find the event with maximum distance by checking all events
+        # Use median coordinates at event boundaries for robustness
+        max_distance = 0.0
 
-        # Return the maximum distance
-        return distances.max()
+        for event in self.tracking_data.interaction_events[fly_idx][ball_idx]:
+            start_idx, end_idx = event[0], event[1]
+
+            # Calculate the median position at the end of this event
+            _, _, end_x, end_y = self._calculate_median_coordinates(
+                ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
+            )
+
+            # Skip if median calculation failed
+            if end_x is None or end_y is None:
+                continue
+
+            # Calculate distance from initial position
+            distance = Processing.calculate_euclidian_distance(end_x, end_y, initial_x, initial_y)
+            max_distance = max(max_distance, distance)
+
+        return max_distance
 
     def get_final_event(self, fly_idx, ball_idx, threshold=None, init=False):
         """

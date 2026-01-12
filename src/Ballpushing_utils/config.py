@@ -88,8 +88,9 @@ class Config:
 
     # General configuration attributes
 
-    experiment_type: str = "F1" # "MagnetBlock"  # "TNT"
-    time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
+    experiment_type: str = "F1"  # "MagnetBlock"  # "TNT"
+    # time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
+    time_range: Optional[tuple] = (None, 5400)
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
@@ -147,9 +148,13 @@ class Config:
 
     # Ball movement validation configuration
     check_spontaneous_ball_movement: bool = True  # Whether to check for ball movement outside interactions
-    invalidate_on_spontaneous_movement: bool = False  # Whether to invalidate flies when spontaneous movement is detected (set to False to just log warnings)
+    invalidate_on_spontaneous_movement: bool = (
+        False  # Whether to invalidate flies when spontaneous movement is detected (set to False to just log warnings)
+    )
     spontaneous_movement_threshold: float = 10.0  # Threshold in pixels for spontaneous ball movement detection
-    spontaneous_movement_window: int = 30  # Minimum number of consecutive frames required to flag sustained spontaneous movement
+    spontaneous_movement_window: int = (
+        30  # Minimum number of consecutive frames required to flag sustained spontaneous movement
+    )
 
     # Skeleton tracking configuration attributes
 
