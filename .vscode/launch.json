@@ -17,6 +17,70 @@
             }
         },
         {
+            "name": "Python: Test Distance Metrics",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_distance_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--path",
+                "/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/distance_metrics"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Test Distance Metrics (Custom Path)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_distance_metrics.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--path",
+                "${input:flyPath}",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/distance_metrics"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Test Distance Metrics F1",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_distance_metrics_f1.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--path",
+                "/mnt/upramdya_data/MD/F1_Tracks/Videos/250904_F1_New_Videos_Checked/arena5/Right",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/distance_metrics_f1"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Python: Test Distance Metrics F1 (Custom Path)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/integration/test_distance_metrics_f1.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--path",
+                "${input:flyPath}",
+                "--output-dir",
+                "${workspaceFolder}/tests/integration/outputs/distance_metrics_f1"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
             "name": "Python: Interaction Based Metrics Fly",
             "type": "debugpy",
             "request": "launch",
