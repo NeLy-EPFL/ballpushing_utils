@@ -576,9 +576,6 @@ class Dataset:
         Returns:
             pandas.DataFrame: A DataFrame containing the fly's summary metrics and associated metadata.
         """
-        # Initialize an empty DataFrame
-        dataset = pd.DataFrame()
-
         # If no specific metrics are provided, include all available metrics
         if not metrics:
             # Instead of just the first dict's keys, collect all keys from all event_summaries
@@ -587,34 +584,35 @@ class Dataset:
                 all_keys.update(metric_dict.keys())
             metrics = list(all_keys)
 
+        # Build data dictionary to avoid DataFrame fragmentation
+        data_dict = {}
+
         # For each pair of fly and ball, get the metrics from the Fly metrics
         for key, metric_dict in fly.event_summaries.items():
-
+            data_dict[key] = {}
             for metric in metrics:
                 if metric in metric_dict:
                     value = metric_dict[metric]
                     # Ensure the value is in the expected format
                     if isinstance(value, list) or isinstance(value, dict):
                         value = str(value)  # Convert lists and dicts to strings
-                    dataset.at[key, metric] = value
+                    data_dict[key][metric] = value
 
+        # Create DataFrame from dictionary all at once
+        dataset = pd.DataFrame.from_dict(data_dict, orient="index")
+
+        # Add F1-specific columns
         if fly.f1_metrics:
             dataset["direction_match"] = fly.f1_metrics["direction_match"]
-
-            # Assign summaries condition based on F1 condition
-
             dataset["F1_condition"] = fly.metadata.F1_condition
 
+            # Assign ball_condition based on F1 condition
             if dataset["F1_condition"].iloc[0] == "control":
-                for key in fly.event_summaries.keys():
-                    if key == "fly_0_ball_0":
-                        dataset.at[key, "ball_condition"] = "test"
+                dataset["ball_condition"] = dataset.index.map(lambda key: "test" if key == "fly_0_ball_0" else None)
             else:
-                for key in fly.event_summaries.keys():
-                    if key == "fly_0_ball_0":
-                        dataset.at[key, "ball_condition"] = "training"
-                    elif key == "fly_0_ball_1":
-                        dataset.at[key, "ball_condition"] = "test"
+                dataset["ball_condition"] = dataset.index.map(
+                    lambda key: "training" if key == "fly_0_ball_0" else ("test" if key == "fly_0_ball_1" else None)
+                )
 
         # Add metadata to the dataset
         dataset = self._add_metadata(dataset, fly)

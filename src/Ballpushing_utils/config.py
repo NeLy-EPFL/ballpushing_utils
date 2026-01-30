@@ -89,8 +89,8 @@ class Config:
     # General configuration attributes
 
     experiment_type: str = "F1"  # "MagnetBlock"  # "TNT"
-    # time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
-    time_range: Optional[tuple] = (None, 5400)
+    time_range: Optional[tuple] = (3600, None) if experiment_type == "MagnetBlock" else None
+    # time_range: Optional[tuple] = (None, 5400)
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
