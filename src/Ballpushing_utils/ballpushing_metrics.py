@@ -283,7 +283,10 @@ class BallPushingMetrics:
                     "chamber_time": lambda: safe_call(self.get_chamber_time, fly_idx),
                     "chamber_ratio": lambda: safe_call(self.chamber_ratio, fly_idx),
                     "distance_moved": lambda: safe_call(self.get_distance_moved, fly_idx, ball_idx),
+                    "raw_distance_moved": lambda: safe_call(self.get_raw_distance_moved, fly_idx, ball_idx),
                     "distance_ratio": lambda: safe_call(self.get_distance_ratio, fly_idx, ball_idx),
+                    "max_distance": lambda: safe_call(self.get_max_distance, fly_idx, ball_idx),
+                    "raw_max_distance": lambda: safe_call(self.get_raw_max_distance, fly_idx, ball_idx),
                     "has_major": lambda: safe_call(self.get_has_major, fly_idx, ball_idx, default=0),
                     "has_significant": lambda: safe_call(self.get_has_significant, fly_idx, ball_idx, default=0),
                     "insight_effect": lambda: (
@@ -626,6 +629,8 @@ class BallPushingMetrics:
                         metrics_dict["max_event_time"] = np.nan
                 if self.is_metric_enabled("max_distance"):
                     metrics_dict["max_distance"] = metrics["max_distance"]()
+                if self.is_metric_enabled("raw_max_distance"):
+                    metrics_dict["raw_max_distance"] = metrics["raw_max_distance"]()
                 if self.is_metric_enabled("final_event"):
                     metrics_dict["final_event"] = final_event_idx
                 if self.is_metric_enabled("final_event_time"):
@@ -709,6 +714,10 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("distance_moved"):
                     metrics_dict["distance_moved"] = safe_call(
                         self.get_distance_moved, fly_idx, ball_idx, subset=filtered_events
+                    )
+                if self.is_metric_enabled("raw_distance_moved"):
+                    metrics_dict["raw_distance_moved"] = safe_call(
+                        self.get_raw_distance_moved, fly_idx, ball_idx, subset=filtered_events
                     )
                 if self.is_metric_enabled("distance_ratio"):
                     metrics_dict["distance_ratio"] = safe_call(
@@ -1419,15 +1428,23 @@ class BallPushingMetrics:
             Maximum distance moved by the ball.
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
 
-        # Get the median initial position
-        initial_x, initial_y, _, _ = self._calculate_median_coordinates(ball_data, start_idx=0, window=10)
+        # Return 0 if no events
+        if len(events) == 0:
+            return 0.0
+
+        # Get the median initial position from the FIRST EVENT
+        # This is critical for F1 experiments where ball identity assignment
+        # means frame 0 might not correspond to this specific ball
+        first_event = events[0]
+        initial_x, initial_y, _, _ = self._calculate_median_coordinates(ball_data, start_idx=first_event[0], window=10)
 
         # Find the event with maximum distance by checking all events
         # Use median coordinates at event boundaries for robustness
         max_distance = 0.0
 
-        for event in self.tracking_data.interaction_events[fly_idx][ball_idx]:
+        for event in events:
             start_idx, end_idx = event[0], event[1]
 
             # Calculate the median position at the end of this event
@@ -1728,8 +1745,8 @@ class BallPushingMetrics:
     def get_distance_moved(self, fly_idx, ball_idx, subset=None):
         """
         Calculate the total distance moved by the ball for a given fly and ball,
-        using the median position of the first and last 10 frames of each event
-        to reduce the impact of tracking aberrations.
+        by summing the cumulative frame-to-frame displacement during all interaction events.
+        This captures the full trajectory of the ball, including back-and-forth movements.
 
         Args:
             fly_idx (int): Index of the fly.
@@ -1737,7 +1754,7 @@ class BallPushingMetrics:
             subset (list, optional): List of events to consider. Defaults to all interaction events.
 
         Returns:
-            float: Total distance moved by the ball.
+            float: Total cumulative distance moved by the ball across all events.
         """
         ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
 
@@ -1749,19 +1766,18 @@ class BallPushingMetrics:
         for event in subset:
             start_idx, end_idx = event[0], event[1]
 
-            # Ensure the event duration is long enough to calculate medians
-            if end_idx - start_idx < 10:
-                continue
+            # Extract ball positions during this event
+            event_x = ball_data["x_centre"].iloc[start_idx : end_idx + 1].values
+            event_y = ball_data["y_centre"].iloc[start_idx : end_idx + 1].values
 
-            # Use the helper method to calculate median coordinates
-            start_x, start_y, end_x, end_y = self._calculate_median_coordinates(
-                ball_data, start_idx=start_idx, end_idx=end_idx, window=10, keypoint="centre"
-            )
+            # Calculate frame-to-frame distances during this event
+            dx = np.diff(event_x)
+            dy = np.diff(event_y)
+            frame_distances = np.sqrt(dx**2 + dy**2)
 
-            # Calculate the Euclidean distance between the start and end positions
-            distance = Processing.calculate_euclidian_distance(start_x, start_y, end_x, end_y)
-
-            total_distance += distance
+            # Sum all frame-to-frame distances for this event
+            event_distance = np.sum(frame_distances)
+            total_distance += event_distance
 
         return total_distance
 
@@ -1792,6 +1808,94 @@ class BallPushingMetrics:
             distance_ratio = np.nan  # Handle cases where total distance is zero
 
         return distance_ratio
+
+    def get_raw_distance_moved(self, fly_idx, ball_idx, subset=None):
+        """
+        Calculate the total distance moved by the ball for a given fly and ball,
+        by summing the cumulative frame-to-frame displacement during all interaction events.
+        This uses raw (unsmoothed) ball tracking data for higher accuracy.
+
+        Args:
+            fly_idx (int): Index of the fly.
+            ball_idx (int): Index of the ball.
+            subset (list, optional): List of events to consider. Defaults to all interaction events.
+
+        Returns:
+            float: Total cumulative distance moved by the ball across all events.
+        """
+        ball_data = self.tracking_data.raw_balltrack.objects[ball_idx].dataset
+
+        if subset is None:
+            subset = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        total_distance = 0
+
+        for event in subset:
+            start_idx, end_idx = event[0], event[1]
+
+            # Extract ball positions during this event
+            event_x = ball_data["x_centre"].iloc[start_idx : end_idx + 1].values
+            event_y = ball_data["y_centre"].iloc[start_idx : end_idx + 1].values
+
+            # Calculate frame-to-frame distances during this event
+            dx = np.diff(event_x)
+            dy = np.diff(event_y)
+            frame_distances = np.sqrt(dx**2 + dy**2)
+
+            # Sum all frame-to-frame distances for this event
+            event_distance = np.sum(frame_distances)
+            total_distance += event_distance
+
+        return total_distance
+
+    def get_raw_max_distance(self, fly_idx, ball_idx):
+        """
+        Get the maximum distance moved by the ball for a given fly and ball.
+        Uses raw (unsmoothed) ball tracking data for higher accuracy.
+
+        Parameters
+        ----------
+        fly_idx : int
+            Index of the fly.
+        ball_idx : int
+            Index of the ball.
+
+        Returns
+        -------
+        float
+            Maximum distance moved by the ball.
+        """
+        ball_data = self.tracking_data.raw_balltrack.objects[ball_idx].dataset
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        # Return 0 if no events
+        if len(events) == 0:
+            return 0.0
+
+        # Get the initial position from the first event's first frame
+        first_event = events[0]
+        initial_x = ball_data["x_centre"].iloc[first_event[0]]
+        initial_y = ball_data["y_centre"].iloc[first_event[0]]
+
+        # Find the event with maximum distance by checking all events
+        max_distance = 0.0
+
+        for event in events:
+            start_idx, end_idx = event[0], event[1]
+
+            # Get position at the end of this event
+            end_x = ball_data["x_centre"].iloc[end_idx]
+            end_y = ball_data["y_centre"].iloc[end_idx]
+
+            # Skip if data is NaN
+            if pd.isna(end_x) or pd.isna(end_y):
+                continue
+
+            # Calculate distance from initial position
+            distance = Processing.calculate_euclidian_distance(end_x, end_y, initial_x, initial_y)
+            max_distance = max(max_distance, distance)
+
+        return max_distance
 
     @lru_cache(maxsize=128)
     def get_major_event(self, fly_idx, ball_idx, distance=None):
@@ -4023,6 +4127,9 @@ class BallPushingMetrics:
         2. Calculating Euclidean distance between fly thorax and ball center for each frame
         3. Computing proportion of time where distance < proximity_threshold for each threshold
 
+        For F1 experiments, this metric is only calculated for the test ball (not the training ball)
+        and only for times after f1_exit_time.
+
         Parameters
         ----------
         fly_idx : int
@@ -4045,21 +4152,43 @@ class BallPushingMetrics:
         if not isinstance(proximity_thresholds, list):
             proximity_thresholds = [proximity_thresholds]
 
-        # Get fly tracking data
+        # For F1 experiments, only compute proximity to the test ball, not the training ball
+        if self.fly.config.experiment_type == "F1":
+            ball_identity = self.tracking_data.get_ball_identity(ball_idx)
+            if ball_identity == "training":
+                # Skip training ball - we only want test ball proximity
+                if self.fly.config.debugging:
+                    print(f"Skipping training ball for fly {fly_idx} - ball proximity only computed for test ball")
+                return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # Get fly tracking data (use raw unsmoothed data for accuracy)
         try:
-            fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
+            if hasattr(self.tracking_data, "raw_flytrack") and self.tracking_data.raw_flytrack is not None:
+                fly_data = self.tracking_data.raw_flytrack.objects[fly_idx].dataset
+            else:
+                fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
         except (IndexError, AttributeError) as e:
             if self.fly.config.debugging:
                 print(f"Error accessing fly data for fly {fly_idx}: {e}")
             return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
 
-        # Get ball tracking data
+        # Get ball tracking data (use raw unsmoothed data for accuracy)
         try:
-            ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+            ball_data = self.tracking_data.raw_balltrack.objects[ball_idx].dataset
         except (IndexError, AttributeError) as e:
             if self.fly.config.debugging:
                 print(f"Error accessing ball data for ball {ball_idx}: {e}")
             return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
+
+        # For F1 experiments, only compute proximity after fly exits (if f1_exit_time is available)
+        if self.fly.config.experiment_type == "F1" and self.tracking_data.f1_exit_time is not None:
+            fly_data = fly_data[fly_data["time"] >= self.tracking_data.f1_exit_time].copy()
+            ball_data = ball_data[ball_data["time"] >= self.tracking_data.f1_exit_time].copy()
+
+            if len(fly_data) == 0 or len(ball_data) == 0:
+                if self.fly.config.debugging:
+                    print(f"No data after f1_exit_time for fly {fly_idx}")
+                return {f"ball_proximity_proportion_{thresh}px": np.nan for thresh in proximity_thresholds}
 
         # Calculate starting position from first n_avg frames
         n_use = min(n_avg, len(fly_data))

@@ -11,6 +11,7 @@ class FlyTrackingData:
     def __init__(self, fly, time_range=None, log_missing=False, keep_idle=False):
         self.fly = fly
         self.flytrack = None
+        self.raw_flytrack = None  # Raw (unsmoothed) flytrack
         self.balltrack = None
         self.raw_balltrack = None  # Raw (unsmoothed) balltrack
         self.skeletontrack = None
@@ -22,8 +23,17 @@ class FlyTrackingData:
         try:
             # Load tracking files
             self.balltrack = self.load_tracking_file("*ball*.h5", "ball")
-            self.raw_balltrack = self.load_tracking_file("*ball*.h5", "ball")
+            self.raw_balltrack = self.load_tracking_file(
+                "*ball*.h5",
+                "ball",
+                smoothing=False,
+            )
             self.flytrack = self.load_tracking_file("*fly*.h5", "fly")
+            self.raw_flytrack = self.load_tracking_file(
+                "*fly*.h5",
+                "fly",
+                smoothing=False,
+            )
             self.skeletontrack = self.load_tracking_file(
                 "*full_body*.h5",
                 "fly",
@@ -86,7 +96,9 @@ class FlyTrackingData:
                     self.valid_data = False
                     return
                 elif has_spontaneous_movement:
-                    print(f"⚠️  {self.fly.metadata.name} has spontaneous ball movement but will be kept (invalidate_on_spontaneous_movement=False)")
+                    print(
+                        f"⚠️  {self.fly.metadata.name} has spontaneous ball movement but will be kept (invalidate_on_spontaneous_movement=False)"
+                    )
 
             # Compute duration as the difference between last and first time
             # Use training ball if available, otherwise use first ball

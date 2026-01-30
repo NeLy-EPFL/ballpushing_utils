@@ -89,10 +89,10 @@ CONFIG = {
         "metrics": [
             # "F1_checkpoints",
             "F1_coordinates",  # For F1 experiments only
-            #"fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps) - Deprecated since ballpushing metrics include proximity times
+            # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps) - Deprecated since ballpushing metrics include proximity times
             # "standardized_contacts",
             "summary",  # Re-enabled for testing the optimization
-            #"coordinates",  # For regular experiments
+            # "coordinates",  # For regular experiments
             # "fly_positions",
         ],  # Metrics to process (add/remove as needed)
         "memory_threshold_mb": 4096,  # Memory threshold in MB for conditional cache clearing
@@ -735,6 +735,110 @@ def verify_and_complete_datasets(verify_path, yaml_path=None, mode="experiment")
             )
 
 
+def process_complement_mode(yaml_path, complement_path, metrics):
+    """
+    Process complement mode: identify missing feather files and process only those.
+
+    Parameters
+    ----------
+    yaml_path : str or Path
+        Path to the YAML file containing fly directories or experiment folders.
+    complement_path : str or Path
+        Path to the existing dataset directory.
+    metrics : list
+        List of metrics to process.
+
+    Returns
+    -------
+    tuple
+        (processing_items, output_data, is_experiment_mode)
+        - processing_items: items to process based on detected mode
+        - output_data: path to the complement data directory
+        - is_experiment_mode: boolean indicating if YAML contains experiment folders
+    """
+    complement_path = Path(complement_path)
+    logging.info(f"Running in complement mode")
+    logging.info(f"  YAML file: {yaml_path}")
+    logging.info(f"  Complement path: {complement_path}")
+
+    if not complement_path.exists():
+        raise ValueError(f"Complement path does not exist: {complement_path}")
+
+    # Load directories from YAML (could be experiment folders or fly directories)
+    yaml_dirs = load_yaml_config(yaml_path)
+    if not yaml_dirs:
+        raise ValueError("No valid directories found in YAML file.")
+
+    logging.info(f"Loaded {len(yaml_dirs)} directories from YAML")
+
+    # Determine if we have experiment folders or fly directories
+    is_experiment_mode = any((path / "Metadata.json").exists() for path in yaml_dirs)
+
+    if is_experiment_mode:
+        # Process as experiment folders
+        # Identify missing files for each experiment
+        experiments_to_process = []
+        for exp_path in yaml_dirs:
+            if (exp_path / "Metadata.json").exists():
+                exp_name = exp_path.name
+                missing_metrics = []
+
+                # Check which metrics are missing for this experiment
+                for metric in metrics:
+                    feather_path = complement_path / metric / f"{exp_name}_{metric}.feather"
+                    if not feather_path.exists():
+                        missing_metrics.append(metric)
+
+                if missing_metrics:
+                    experiments_to_process.append(exp_path)
+                    logging.info(f"  {exp_name}: missing {', '.join(missing_metrics)}")
+
+        if not experiments_to_process:
+            logging.info(f"All experiment files already exist in complement path. No processing needed.")
+            return [], complement_path, True
+
+        logging.info(f"Found missing files in {len(experiments_to_process)} experiments")
+        return experiments_to_process, complement_path, True
+    else:
+        # Process as fly directories
+        fly_dirs = yaml_dirs
+
+        # Identify missing feather files
+        flies_to_process = []
+        missing_count = 0
+
+        for fly_dir in fly_dirs:
+            # Extract names: experiment_arena_corridor
+            # fly_dir structure: /path/to/experiment/arena/corridor
+            experiment_name = fly_dir.parent.parent.name
+            arena_name = fly_dir.parent.name
+            corridor_name = fly_dir.name
+            fly_name = f"{experiment_name}_{arena_name}_{corridor_name}"
+
+            missing_metrics = []
+
+            # Check each metric for missing files
+            for metric in metrics:
+                feather_path = complement_path / metric / f"{fly_name}_{metric}.feather"
+                if not feather_path.exists():
+                    missing_metrics.append(metric)
+                    missing_count += 1
+
+            # Add to processing list if any metrics are missing
+            if missing_metrics:
+                flies_to_process.append(fly_dir)
+                logging.info(f"  {fly_name}: missing {', '.join(missing_metrics)}")
+
+        if not flies_to_process:
+            logging.info(f"All files already exist in complement path. No processing needed.")
+            return [], complement_path, False
+
+        logging.info(f"Found {missing_count} missing feather files across {len(flies_to_process)} flies")
+        logging.info(f"Will process {len(flies_to_process)} fly directories")
+
+        return flies_to_process, complement_path, False
+
+
 def create_pooled_dataset(metric_dir, metric_name, individual_files, force=False):
     """
     Create a pooled dataset from individual files.
@@ -841,6 +945,12 @@ if __name__ == "__main__":
         default=None,
     )
     parser.add_argument(
+        "--complement",
+        type=str,
+        help="Complement mode: path to existing dataset directory; when used with --yaml, only builds missing feather files and redoes pooling",
+        default=None,
+    )
+    parser.add_argument(
         "--threads",
         type=int,
         default=4,
@@ -889,6 +999,34 @@ if __name__ == "__main__":
     else:
         logging.info(f"  - Will use conditional cache clearing based on memory usage")
 
+    # Handle complement mode
+    skip_folder_discovery = False
+    if args.complement:
+        if not args.yaml:
+            raise ValueError("--complement requires --yaml to be specified")
+        logging.info("Running in complement mode")
+        processing_items, output_data, is_experiment_mode = process_complement_mode(
+            args.yaml, args.complement, CONFIG["PROCESSING"]["metrics"]
+        )
+        if not processing_items:
+            logging.info("No missing files to process. Exiting.")
+            end_time = time.time()
+            runtime = end_time - start_time
+            logging.info(f"Complement mode completed in {runtime:.2f} seconds")
+            exit(0)
+        # Set mode based on detected YAML content
+        if is_experiment_mode:
+            logging.info("Detected experiment folders in YAML, using experiment mode")
+            args.mode = "experiment"
+        else:
+            logging.info("Detected fly directories in YAML, using flies mode")
+            args.mode = "flies"
+        # Create metric subdirectories
+        for metric in CONFIG["PROCESSING"]["metrics"]:
+            (output_data / metric).mkdir(exist_ok=True)
+        # Skip the normal folder discovery and go straight to processing
+        skip_folder_discovery = True
+
     # Handle verification mode
     if args.verify:
         logging.info("Running in verification mode")
@@ -898,35 +1036,37 @@ if __name__ == "__main__":
         logging.info(f"Verification completed in {runtime:.2f} seconds")
         exit(0)
 
-    if CONFIG["PATHS"]["output_summary_dir"]:
-        # Use the output directory if provided
-        output_summary = Path(CONFIG["PATHS"]["output_summary_dir"])
-        logging.info(f"Using optional output directory: {output_summary}")
-    else:
-        # Determine the output_summary_dir based on the provided arguments
-        today_date = datetime.now().strftime("%y%m%d_%H")
-        dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
-
-        if args.yaml:
-            yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
-            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
-        elif CONFIG["PROCESSING"]["experiment_filter"]:
-            experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
-            CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
+    # Determine output directories (skip if in complement mode since we already have them)
+    if not skip_folder_discovery:
+        if CONFIG["PATHS"]["output_summary_dir"]:
+            # Use the output directory if provided
+            output_summary = Path(CONFIG["PATHS"]["output_summary_dir"])
+            logging.info(f"Using optional output directory: {output_summary}")
         else:
-            raise ValueError(
-                "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
-                "Processing the entire dataset is not allowed."
-            )
+            # Determine the output_summary_dir based on the provided arguments
+            today_date = datetime.now().strftime("%y%m%d_%H")
+            dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
 
-    # Automatically set output_data_dir based on output_summary_dir
-    CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
+            if args.yaml:
+                yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
+                CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{yaml_stem}"
+            elif CONFIG["PROCESSING"]["experiment_filter"]:
+                experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
+                CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
+            else:
+                raise ValueError(
+                    "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
+                    "Processing the entire dataset is not allowed."
+                )
 
-    # Build derived paths from configuration
-    output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
-    output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
-    output_summary.mkdir(parents=True, exist_ok=True)
-    output_data.mkdir(parents=True, exist_ok=True)
+        # Automatically set output_data_dir based on output_summary_dir
+        CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
+
+        # Build derived paths from configuration
+        output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
+        output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
+        output_summary.mkdir(parents=True, exist_ok=True)
+        output_data.mkdir(parents=True, exist_ok=True)
 
     # Save the configuration used for this dataset generation
     config_save_path = output_data / CONFIG["PATHS"]["config_path"]
@@ -949,10 +1089,11 @@ if __name__ == "__main__":
     except Exception as e:
         logging.error(f"Failed to save configuration to {config_save_path}: {str(e)}")
 
-    # Get list of folders to process based on mode
-    processing_items = []
+    # Get list of folders to process based on mode (skip if in complement mode)
+    if not skip_folder_discovery:
+        processing_items = []
 
-    if args.mode == "experiment":
+    if not skip_folder_discovery and args.mode == "experiment":
         # Original experiment mode logic
         Exp_folders = []
         if args.yaml:
@@ -975,7 +1116,7 @@ if __name__ == "__main__":
         logging.info(f"Experiment folders to analyze: {[f.name for f in Exp_folders]}")
         processing_items = Exp_folders
 
-    elif args.mode == "flies":
+    elif not skip_folder_discovery and args.mode == "flies":
         # New flies mode logic
         if not args.yaml:
             raise ValueError("--yaml argument is required when using --mode flies")
@@ -998,15 +1139,20 @@ if __name__ == "__main__":
 
         processing_items = fly_dirs
 
-    # Create metric subdirectories
-    for metric in CONFIG["PROCESSING"]["metrics"]:
-        (output_data / metric).mkdir(exist_ok=True)
+    if not skip_folder_discovery:
+        # Create metric subdirectories (already done in complement mode)
+        for metric in CONFIG["PROCESSING"]["metrics"]:
+            (output_data / metric).mkdir(exist_ok=True)
 
     # Main processing loop
-    checkpoint_file = output_summary / "processing_checkpoint.json"
+    # In complement mode, we don't use checkpoints since we process only missing files
+    if skip_folder_discovery:
+        checkpoint_file = None
+    else:
+        checkpoint_file = output_summary / "processing_checkpoint.json"
 
     # Load checkpoint if exists
-    if checkpoint_file.exists():
+    if checkpoint_file is not None and checkpoint_file.exists():
         with open(checkpoint_file, "r") as f:
             processed_items = set(json.load(f))
         logging.info(f"Resuming from checkpoint, {len(processed_items)} items already processed")
@@ -1038,10 +1184,11 @@ if __name__ == "__main__":
             flies_to_process, CONFIG["PROCESSING"]["metrics"], output_data, batch_size=args.batch_size
         )
 
-        # Update checkpoint with all processed flies
-        processed_items.update(successfully_processed)
-        with open(checkpoint_file, "w") as f:
-            json.dump(list(processed_items), f)
+        # Update checkpoint with all processed flies (skip in complement mode)
+        if checkpoint_file is not None:
+            processed_items.update(successfully_processed)
+            with open(checkpoint_file, "w") as f:
+                json.dump(list(processed_items), f)
 
         log_memory_usage("After batch processing flies")
 
@@ -1081,16 +1228,17 @@ if __name__ == "__main__":
 
                 processed_items.add(item_name)
 
-                # Save checkpoint after each successful processing
-                with open(checkpoint_file, "w") as f:
-                    json.dump(list(processed_items), f)
+                # Save checkpoint after each successful processing (skip in complement mode)
+                if checkpoint_file is not None:
+                    with open(checkpoint_file, "w") as f:
+                        json.dump(list(processed_items), f)
 
             except Exception as e:
                 logging.error(f"Error processing {log_label}: {str(e)}")
 
             log_memory_usage(f"After processing {log_label}")
 
-    if checkpoint_file.exists():
+    if checkpoint_file is not None and checkpoint_file.exists():
         checkpoint_file.unlink()
         logging.info(f"Removed checkpoint file: {checkpoint_file}")
 
@@ -1101,6 +1249,14 @@ if __name__ == "__main__":
     # ==================================================================
     for metric in CONFIG["PROCESSING"]["metrics"]:
         pooled_path = output_data / metric / f"pooled_{metric}.feather"
+
+        # In complement mode, always redo pooling since we added new files
+        if args.complement and pooled_path.exists():
+            try:
+                logging.info(f"Removing existing pooled dataset for re-pooling: {pooled_path.name}")
+                pooled_path.unlink()
+            except Exception as e:
+                logging.error(f"Error removing pooled dataset {pooled_path.name}: {str(e)}")
 
         if not pooled_path.exists():
             try:

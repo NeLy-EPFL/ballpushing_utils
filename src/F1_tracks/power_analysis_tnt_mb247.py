@@ -1,34 +1,95 @@
 #!/usr/bin/env python3
 """
-Power analysis for TNT MB247 distance_moved metric with multiple comparisons.
+Power analysis for F1 TNT genotype comparison with multiple comparisons.
 
 This script performs statistical power analysis to determine how many additional
-samples are needed to detect a significant effect (if one exists) for the
-distance_moved metric in the TNT MB247 experiment.
+samples are needed to detect a significant pretraining effect (if one exists)
+for each genotype in the dataset.
 
-The script handles multiple comparisons:
-1. Within each genotype: Compare pretrained (y) vs non-pretrained (n)
-2. Within each pretraining condition: Compare genotypes (TNTxMB247 vs controls)
+The script analyzes:
+- Within each genotype: Compare pretrained (y) vs naive (n)
 
-Multiple testing correction (Bonferroni) is applied to adjust the significance level.
+This matches the comparison strategy used in f1_tnt_genotype_comparison.py.
+Multiple testing correction (Bonferroni or FDR) is applied to adjust the significance level.
 
 Usage:
-    python power_analysis_tnt_mb247.py [--alpha 0.05] [--desired-power 0.8] [--correction bonferroni]
+    python power_analysis_tnt_mb247.py [--alpha 0.05] [--desired-power 0.8] [--correction fdr]
+    python power_analysis_tnt_mb247.py --metric ball_proximity_proportion_200px
 """
 
 import argparse
+import re
 import sys
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import statsmodels.formula.api as smf
 from scipy import stats
 from scipy.stats import mannwhitneyu, kruskal
+from statsmodels.regression.mixed_linear_model import MixedLM
+from f1_pca_analysis import PCA_METRICS
+
+# Suppress convergence warnings from statsmodels during power simulations
+warnings.filterwarnings("ignore", category=UserWarning, module="statsmodels")
+warnings.filterwarnings("ignore", message=".*Hessian matrix.*")
+warnings.filterwarnings("ignore", message=".*ConvergenceWarning.*")
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
+
+# ============================================================================
+# GENOTYPE SELECTION - Should match f1_tnt_genotype_comparison.py
+# ============================================================================
+SELECTED_GENOTYPES = [
+    # === CONTROLS ===
+    "TNTxEmptyGal4",
+    "TNTxEmptySplit",
+    #'TNTxPR',
+    # === EXPERIMENTAL GENOTYPES (paired with internal controls) ===
+    "TNTxDDC",
+    "TNTxTH",
+    #'PRxTH',
+    "TNTxTRH",
+    "TNTxMB247",
+    #'PRxMB247',
+    "TNTxLC10-2",
+    "TNTxLC16-1",
+    #'PRxLC16-1',
+]
+
+
+def parse_fly_name(fly_name):
+    """
+    Extract arena number and side from fly name.
+
+    Format: 260114_TNT_F1_Videos_Checked_arena1_Left
+
+    Parameters
+    ----------
+    fly_name : str
+        Name of the fly
+
+    Returns
+    -------
+    tuple
+        (arena_number, arena_side)
+    """
+    parts = str(fly_name).split("_")
+    arena_num = None
+    side = None
+
+    for part in parts:
+        if "arena" in part.lower():
+            # Extract arena number (e.g., "arena1" -> "1")
+            arena_num = part.lower().replace("arena", "")
+        if part in ["Left", "Right"]:
+            side = part
+
+    return arena_num, side
 
 
 def calculate_effect_size_cohens_d(group1, group2):
@@ -116,32 +177,36 @@ def bootstrap_effect_size(group1, group2, n_bootstrap=10000):
     return mean_d, ci_lower, ci_upper
 
 
-def power_analysis_mann_whitney(group1, group2, alpha=0.05, desired_power=0.8, n_simulations=1000):
+def power_analysis_lmm(group1_data, group2_data, alpha=0.05, desired_power=0.8, n_simulations=500):
     """
-    Perform power analysis for Mann-Whitney U test using simulation.
+    Perform power analysis for LMM with random effects using simulation.
 
     This simulates increasing sample sizes and calculates the power to detect
-    the observed effect size.
+    the observed effect using Linear Mixed-Effects Models with random effects
+    for fly, date, arena, etc.
 
     Parameters
     ----------
-    group1, group2 : array-like
-        Current data for the two groups
+    group1_data : pd.DataFrame
+        Data for group 1 (naive), must have: metric, fly, pretraining, date, arena
+    group2_data : pd.DataFrame
+        Data for group 2 (pretrained), must have: metric, fly, pretraining, date, arena
     alpha : float
         Significance level (default: 0.05)
     desired_power : float
         Target statistical power (default: 0.8)
     n_simulations : int
-        Number of simulations per sample size (default: 1000)
+        Number of simulations per sample size (default: 500, reduced for LMM computational cost)
 
     Returns
     -------
     dict
         Dictionary with power analysis results
     """
-    # Calculate current statistics
-    current_n1 = len(group1)
-    current_n2 = len(group2)
+    # Get current statistics
+    current_n1 = len(group1_data)
+    current_n2 = len(group2_data)
+    metric_col = group1_data.columns[0]  # First column is the metric
 
     # Test range of sample sizes (from current to 5x current)
     max_multiplier = 5
@@ -152,25 +217,78 @@ def power_analysis_mann_whitney(group1, group2, alpha=0.05, desired_power=0.8, n
 
     powers = []
 
-    print(f"\n🔬 Running power analysis simulations...")
+    print(f"\n🔬 Running LMM-based power analysis simulations...")
     print(f"   Current sample sizes: Group1={current_n1}, Group2={current_n2}")
     print(f"   Testing sample sizes from {min(sample_sizes)} to {max(sample_sizes)}")
+    print(f"   Using {n_simulations} simulations per sample size (LMM with random effects)")
 
     for n in sample_sizes:
         n_significant = 0
 
         # Simulate n_simulations experiments with sample size n
-        for _ in range(n_simulations):
-            # Sample with replacement to create datasets of size n
-            sim_group1 = np.random.choice(group1, size=n, replace=True)
-            sim_group2 = np.random.choice(group2, size=n, replace=True)
-
-            # Perform Mann-Whitney U test
+        for sim_idx in range(n_simulations):
             try:
-                _, p_value = mannwhitneyu(sim_group1, sim_group2, alternative="two-sided")
+                # Sample with replacement to create datasets of size n
+                idx1 = np.random.choice(group1_data.index, size=n, replace=True)
+                idx2 = np.random.choice(group2_data.index, size=n, replace=True)
+
+                sim_group1 = group1_data.loc[idx1].copy()
+                sim_group2 = group2_data.loc[idx2].copy()
+
+                # Combine into one dataset with pretraining indicator
+                sim_data = pd.concat([sim_group1, sim_group2], ignore_index=True)
+
+                # Ensure required columns exist
+                if "fly" not in sim_data.columns:
+                    sim_data["fly"] = [f"fly_{i}" for i in range(len(sim_data))]
+                if "date" not in sim_data.columns and "Date" not in sim_data.columns:
+                    sim_data["date"] = "unknown"
+                if "arena" not in sim_data.columns:
+                    sim_data["arena"] = "unknown"
+
+                # Parse fly name to extract arena info if present
+                if sim_data["fly"].notna().any():
+                    arena_info = sim_data["fly"].apply(lambda x: pd.Series(parse_fly_name(x)))
+                    sim_data[["arena_number", "arena_side"]] = arena_info
+                else:
+                    sim_data["arena_number"] = None
+                    sim_data["arena_side"] = None
+
+                # Fit LMM
+                formula = f"{metric_col} ~ pretraining_numeric"
+                groups = sim_data["fly"]
+
+                if len(groups.unique()) > 1:
+                    try:
+                        # Try primary optimizer (lbfgs)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            model = MixedLM.from_formula(formula, data=sim_data, groups=groups, re_formula="1").fit(
+                                method="lbfgs", disp=False
+                            )
+                        p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                    except:
+                        try:
+                            # Try alternative optimizer (powell) if lbfgs fails
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore")
+                                model = MixedLM.from_formula(formula, data=sim_data, groups=groups, re_formula="1").fit(
+                                    method="powell", disp=False
+                                )
+                            p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                        except:
+                            # Fall back to OLS if both LMM optimizers fail
+                            model = smf.ols(formula, data=sim_data).fit()
+                            p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                else:
+                    # Not enough flies for random effects, use OLS
+                    model = smf.ols(formula, data=sim_data).fit()
+                    p_value = model.pvalues.get("pretraining_numeric", 1.0)
+
                 if p_value < alpha:
                     n_significant += 1
-            except:
+            except Exception as e:
+                # Skip this simulation if it fails
                 pass
 
         power = n_significant / n_simulations
@@ -195,6 +313,269 @@ def power_analysis_mann_whitney(group1, group2, alpha=0.05, desired_power=0.8, n
         "target_n": target_n,
         "desired_power": desired_power,
         "alpha": alpha,
+    }
+
+
+def power_analysis_bootstrap_controls(
+    control_naive_data, control_pretrained_data, alpha=0.05, desired_power=0.8, n_bootstrap=1000
+):
+    """
+    Perform power analysis using bootstrap sampling from control data.
+
+    This approach:
+    1. Uses actual control flies (pooled TNTxEmpty* genotypes)
+    2. Bootstraps random samples of size n from naive and pretrained controls
+    3. Tests power to detect the actual pretraining effect in controls
+    4. More empirically grounded than assuming a pre-specified effect size
+
+    Parameters
+    ----------
+    control_naive_data : pd.Series or array
+        Metric values for control flies without pretraining
+    control_pretrained_data : pd.Series or array
+        Metric values for control flies with pretraining
+    alpha : float
+        Significance level (default: 0.05)
+    desired_power : float
+        Target statistical power (default: 0.8)
+    n_bootstrap : int
+        Number of bootstrap iterations per sample size (default: 1000)
+
+    Returns
+    -------
+    dict
+        Dictionary with power analysis results
+    """
+    # Convert to arrays
+    naive_vals = np.array(control_naive_data).flatten()
+    pretrained_vals = np.array(control_pretrained_data).flatten()
+
+    # Calculate observed effect size in controls
+    observed_d = calculate_effect_size_cohens_d(naive_vals, pretrained_vals)
+
+    print(f"\n   Control groups effect size (observed): Cohen's d = {observed_d:.3f}")
+    print(
+        f"   Control naive n = {len(naive_vals)}, mean = {np.mean(naive_vals):.2f} ± {np.std(naive_vals, ddof=1):.2f}"
+    )
+    print(
+        f"   Control pretrained n = {len(pretrained_vals)}, mean = {np.mean(pretrained_vals):.2f} ± {np.std(pretrained_vals, ddof=1):.2f}"
+    )
+
+    # Test range of sample sizes
+    min_n = min(5, len(naive_vals) // 2)
+    max_n = len(naive_vals)
+    sample_sizes = list(range(min_n, max_n + 1, max(1, (max_n - min_n) // 10)))
+    if not sample_sizes or sample_sizes[-1] < max_n:
+        sample_sizes.append(max_n)
+
+    powers = []
+
+    print(f"\n   Bootstrap power analysis ({n_bootstrap} resamples per sample size)...")
+    print(f"   Testing sample sizes from {min(sample_sizes)} to {max(sample_sizes)}")
+
+    for n in sample_sizes:
+        n_significant = 0
+
+        # Bootstrap n_bootstrap iterations
+        for _ in range(n_bootstrap):
+            # Sample n flies from naive and pretrained controls
+            sample_naive = np.random.choice(naive_vals, size=n, replace=True)
+            sample_pretrained = np.random.choice(pretrained_vals, size=n, replace=True)
+
+            # Simple t-test
+            try:
+                from scipy.stats import ttest_ind
+
+                _, p_value = ttest_ind(sample_naive, sample_pretrained)
+                if p_value < alpha:
+                    n_significant += 1
+            except:
+                pass
+
+        power = n_significant / n_bootstrap
+        powers.append(power)
+
+        if power >= desired_power and len([p for p in powers if p >= desired_power]) == 1:
+            print(f"   ✓ Desired power ({desired_power:.0%}) first achieved at n={n}")
+
+    # Find target sample size
+    target_n = None
+    for n, power in zip(sample_sizes, powers):
+        if power >= desired_power:
+            target_n = n
+            break
+
+    return {
+        "sample_sizes": sample_sizes,
+        "powers": powers,
+        "observed_effect_size": observed_d,
+        "control_naive_n": len(naive_vals),
+        "control_pretrained_n": len(pretrained_vals),
+        "target_n": target_n,
+        "desired_power": desired_power,
+        "alpha": alpha,
+    }
+
+
+def power_analysis_lmm_with_effect(
+    group1_data, group2_data, effect_size_cohens_d=0.5, alpha=0.05, desired_power=0.8, n_simulations=500
+):
+    """
+    Perform power analysis for LMM assuming a specified effect size.
+
+    This approach:
+    1. Takes actual data from both groups (but ignores observed differences)
+    2. Simulates group 2 with a SPECIFIED effect size relative to group 1
+    3. Tests power to detect that pre-specified effect size
+
+    This avoids p-hacking by not tailoring the effect size to post-hoc observations.
+
+    Parameters
+    ----------
+    group1_data : pd.DataFrame
+        Data for group 1 (baseline/control)
+    group2_data : pd.DataFrame
+        Data for group 2 (will add specified effect size in simulations)
+    effect_size_cohens_d : float
+        Target Cohen's d effect size to detect (default: 0.5 = "medium")
+    alpha : float
+        Significance level (default: 0.05)
+    desired_power : float
+        Target statistical power (default: 0.8)
+    n_simulations : int
+        Number of simulations per sample size (default: 500)
+
+    Returns
+    -------
+    dict
+        Dictionary with power analysis results
+    """
+    current_n1 = len(group1_data)
+    current_n2 = len(group2_data)
+
+    # Find the metric column (first numeric column)
+    metric_col = None
+    for col in group1_data.columns:
+        if pd.api.types.is_numeric_dtype(group1_data[col]):
+            metric_col = col
+            break
+
+    if metric_col is None:
+        raise ValueError("No numeric column found in data for metric")
+
+    # Calculate pooled SD to convert Cohen's d to absolute effect
+    all_values = pd.concat([group1_data[metric_col], group2_data[metric_col]])
+    pooled_sd = np.std(all_values, ddof=1)
+    absolute_effect = effect_size_cohens_d * pooled_sd
+
+    # Test range of sample sizes (from current to 5x current)
+    max_multiplier = 5
+    sample_sizes = list(range(current_n1, current_n1 * max_multiplier, max(1, current_n1 // 10)))
+    if not sample_sizes:
+        sample_sizes = [current_n1]
+
+    powers = []
+
+    print(f"\n   Pooled SD: {pooled_sd:.4f}")
+    print(f"   Target effect size (Cohen's d): {effect_size_cohens_d}")
+    print(f"   Absolute effect to detect: {absolute_effect:.4f}")
+    print(f"\n   Testing sample sizes from {min(sample_sizes)} to {max(sample_sizes)}")
+
+    for n in sample_sizes:
+        n_significant = 0
+
+        # Simulate n_simulations experiments with sample size n
+        for sim_idx in range(n_simulations):
+            try:
+                # Sample with replacement to create datasets of size n
+                idx1 = np.random.choice(group1_data.index, size=n, replace=True)
+                idx2 = np.random.choice(group2_data.index, size=n, replace=True)
+
+                sim_group1 = group1_data.loc[idx1].copy()
+                sim_group2 = group2_data.loc[idx2].copy()
+
+                # Add the specified effect size to group 2
+                sim_group2[metric_col] = sim_group2[metric_col] + absolute_effect
+
+                # Combine into one dataset with pretraining indicator
+                sim_data = pd.concat([sim_group1, sim_group2], ignore_index=True)
+
+                # Ensure required columns exist
+                if "fly" not in sim_data.columns:
+                    sim_data["fly"] = [f"fly_{i}" for i in range(len(sim_data))]
+                if "date" not in sim_data.columns and "Date" not in sim_data.columns:
+                    sim_data["date"] = "unknown"
+                if "arena" not in sim_data.columns:
+                    sim_data["arena"] = "unknown"
+
+                # Parse fly name to extract arena info if present
+                if sim_data["fly"].notna().any():
+                    arena_info = sim_data["fly"].apply(lambda x: pd.Series(parse_fly_name(x)))
+                    sim_data[["arena_number", "arena_side"]] = arena_info
+                else:
+                    sim_data["arena_number"] = None
+                    sim_data["arena_side"] = None
+
+                # Fit LMM
+                formula = f"{metric_col} ~ pretraining_numeric"
+                groups = sim_data["fly"]
+
+                if len(groups.unique()) > 1:
+                    try:
+                        # Try primary optimizer (lbfgs)
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            model = MixedLM.from_formula(formula, data=sim_data, groups=groups, re_formula="1").fit(
+                                method="lbfgs", disp=False
+                            )
+                        p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                    except:
+                        try:
+                            # Try alternative optimizer (powell) if lbfgs fails
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore")
+                                model = MixedLM.from_formula(formula, data=sim_data, groups=groups, re_formula="1").fit(
+                                    method="powell", disp=False
+                                )
+                            p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                        except:
+                            # Fall back to OLS if both LMM optimizers fail
+                            model = smf.ols(formula, data=sim_data).fit()
+                            p_value = model.pvalues.get("pretraining_numeric", 1.0)
+                else:
+                    # Not enough flies for random effects, use OLS
+                    model = smf.ols(formula, data=sim_data).fit()
+                    p_value = model.pvalues.get("pretraining_numeric", 1.0)
+
+                if p_value < alpha:
+                    n_significant += 1
+            except Exception as e:
+                # Skip this simulation if it fails
+                pass
+
+        power = n_significant / n_simulations
+        powers.append(power)
+
+        # Print progress for key milestones
+        if power >= desired_power and len([p for p in powers if p >= desired_power]) == 1:
+            print(f"   ✓ Desired power ({desired_power:.0%}) first achieved at n={n}")
+
+    # Find sample size needed for desired power
+    target_n = None
+    for n, power in zip(sample_sizes, powers):
+        if power >= desired_power:
+            target_n = n
+            break
+
+    return {
+        "sample_sizes": sample_sizes,
+        "powers": powers,
+        "current_n1": current_n1,
+        "current_n2": current_n2,
+        "target_n": target_n,
+        "desired_power": desired_power,
+        "alpha": alpha,
+        "effect_size": effect_size_cohens_d,
     }
 
 
@@ -232,7 +613,7 @@ def plot_power_analysis(power_results, effect_size, output_dir):
     ax1.set_xlabel("Sample Size per Group", fontsize=12, fontweight="bold")
     ax1.set_ylabel("Statistical Power", fontsize=12, fontweight="bold")
     ax1.set_title(
-        f"Power Analysis for Mann-Whitney U Test\nEffect Size (Cohen's d) = {effect_size:.3f} ({interpret_cohens_d(effect_size)})",
+        f"Power Analysis for LMM (Linear Model)\nEffect Size (Cohen's d) = {effect_size:.3f} ({interpret_cohens_d(effect_size)})",
         fontsize=14,
         fontweight="bold",
     )
@@ -701,7 +1082,7 @@ def generate_multi_comparison_report(
     report_lines = []
 
     report_lines.append("=" * 100)
-    report_lines.append("POWER ANALYSIS REPORT: TNT MB247 - Distance Moved (Multiple Comparisons)")
+    report_lines.append(f"POWER ANALYSIS REPORT: F1 TNT - {metric} (Within-Genotype Comparisons)")
     report_lines.append("=" * 100)
     report_lines.append("")
 
@@ -716,18 +1097,13 @@ def generate_multi_comparison_report(
     report_lines.append(f"Desired statistical power: {desired_power} ({desired_power*100:.0f}%)")
     report_lines.append("")
 
-    # Comparison types
-    within_genotype = [r for r in all_results if r["type"] == "within_genotype"]
-    between_genotype = [r for r in all_results if r["type"] == "between_genotype"]
-
-    report_lines.append("## COMPARISON TYPES")
+    # All comparisons are within-genotype
+    report_lines.append("## COMPARISONS ANALYZED")
     report_lines.append("-" * 100)
-    report_lines.append(f"Within-genotype comparisons (n vs y): {len(within_genotype)}")
-    for r in within_genotype:
-        report_lines.append(f"  - {r['comparison']}")
+    report_lines.append("All comparisons are within-genotype (Pretrained vs Naive)")
+    report_lines.append(f"Total comparisons: {len(all_results)}")
     report_lines.append("")
-    report_lines.append(f"Between-genotype comparisons (exp vs ctrl): {len(between_genotype)}")
-    for r in between_genotype:
+    for r in all_results:
         report_lines.append(f"  - {r['comparison']}")
     report_lines.append("")
 
@@ -904,26 +1280,39 @@ def generate_multi_comparison_report(
     print(f"📊 Results table saved to: {csv_path}")
 
 
-def main(alpha=0.05, desired_power=0.8, correction="bonferroni"):
+def analyze_single_metric(metric, alpha=0.05, desired_power=0.8, verbose=True):
     """
-    Main function to run power analysis with multiple comparisons.
+    Run bootstrap power analysis for a single metric.
 
     Parameters
     ----------
+    metric : str
+        Metric to analyze
     alpha : float
         Significance level (default: 0.05)
     desired_power : float
         Target statistical power (default: 0.8 = 80%)
-    correction : str
-        Multiple testing correction method ('bonferroni' or 'none')
-    """
-    print("\n" + "=" * 80)
-    print("TNT MB247 POWER ANALYSIS: distance_moved (Multiple Comparisons)")
-    print("=" * 80)
+    verbose : bool
+        Whether to print detailed output (default: True)
 
-    # Load data
+    Returns
+    -------
+    dict
+        Results dictionary with metric name, current_n, target_n, observed_d, etc.
+    """
+    if verbose:
+        print("\n" + "=" * 80)
+        print(f"F1 TNT POWER ANALYSIS: {metric}")
+        print("=" * 80)
+        print(f"\nAnalysis Strategy: Bootstrap from control data")
+        print(f"  • Pools control genotypes (TNTxEmpty*) together")
+        print(f"  • Uses observed pretraining effect from controls")
+        print(f"  • Bootstrap resampling to estimate power empirically")
+        print(f"  • Avoids p-hacking through pre-specified control-based approach")
+
+    # Load data - use the full F1 TNT dataset
     dataset_path = Path(
-        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251104_09_F1_coordinates_F1_TNT_MB247_Data/summary/pooled_summary.feather"
+        "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260119_10_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather"
     )
 
     if not dataset_path.exists():
@@ -933,9 +1322,6 @@ def main(alpha=0.05, desired_power=0.8, correction="bonferroni"):
     print(f"\n📁 Loading dataset from: {dataset_path}")
     df = pd.read_feather(dataset_path)
     print(f"✓ Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
-
-    # Detect column names
-    metric = "distance_moved"
 
     # Find genotype column
     genotype_col = None
@@ -952,11 +1338,12 @@ def main(alpha=0.05, desired_power=0.8, correction="bonferroni"):
             break
 
     # Find ball condition column
+    # Find ball condition column (prefer ball_identity over ball_condition)
     ball_condition_col = None
-    for col in ["ball_condition", "ball_identity"]:
-        if col in df.columns:
-            ball_condition_col = col
-            break
+    if "ball_identity" in df.columns:
+        ball_condition_col = "ball_identity"
+    elif "ball_condition" in df.columns:
+        ball_condition_col = "ball_condition"
 
     if not all([genotype_col, pretraining_col]):
         print(f"❌ Error: Could not find required columns")
@@ -975,18 +1362,22 @@ def main(alpha=0.05, desired_power=0.8, correction="bonferroni"):
     print(f"   Ball condition: {ball_condition_col}")
     print(f"   Metric: {metric}")
 
-    # Filter for test ball only
+    # Filter for test ball only (matching f1_tnt_genotype_comparison.py)
     if ball_condition_col:
         test_ball_values = ["test", "Test", "TEST", "1", 1, "test_ball", "testball"]
-        df_test = pd.DataFrame()
-        for val in test_ball_values:
-            subset = df[df[ball_condition_col] == val]
-            if not subset.empty:
-                df_test = pd.concat([df_test, subset])
+        initial_size = len(df)
 
-        if not df_test.empty:
-            df = df_test
-            print(f"✓ Filtered for test ball only: {len(df)} rows")
+        # Filter for test ball
+        mask = df[ball_condition_col].isin(test_ball_values)
+        df = df[mask].copy()
+
+        if len(df) > 0:
+            print(f"✓ Filtered for test ball: {initial_size} → {len(df)} rows")
+        else:
+            print(f"⚠️  Warning: No test ball data found")
+            print(f"   Ball condition values in data: {df[ball_condition_col].unique()}")
+            print(f"   Proceeding with all data...")
+            df = pd.read_feather(dataset_path)  # Reload without filter
 
     # Clean data
     df_clean = df[[genotype_col, pretraining_col, metric]].dropna()
@@ -998,269 +1389,430 @@ def main(alpha=0.05, desired_power=0.8, correction="bonferroni"):
     genotypes = sorted(df_clean[genotype_col].unique())
     pretraining_vals = sorted(df_clean[pretraining_col].unique())
 
-    print(f"\n🔬 Groups in data:")
-    print(f"   Genotypes: {genotypes}")
-    print(f"   Pretraining: {pretraining_vals}")
+    print(f"\n🔬 All genotypes in dataset: {genotypes}")
+
+    # Filter for selected genotypes (matching f1_tnt_genotype_comparison.py)
+    if SELECTED_GENOTYPES:
+        genotypes_in_data = [g for g in SELECTED_GENOTYPES if g in genotypes]
+        if genotypes_in_data:
+            genotypes = genotypes_in_data
+            df_clean = df_clean[df_clean[genotype_col].isin(SELECTED_GENOTYPES)]
+            print(f"✓ Filtered to {len(genotypes)} selected genotypes: {genotypes}")
+        else:
+            print(f"⚠️  Warning: None of the selected genotypes found in data")
+            print(f"   Will use all genotypes in dataset")
+
+    print(f"   Pretraining conditions: {pretraining_vals}")
 
     # Identify control genotypes (those with "Empty" in the name)
     control_genotypes = [g for g in genotypes if "Empty" in g]
     experimental_genotypes = [g for g in genotypes if "Empty" not in g]
 
-    print(f"\n📋 Group classification:")
-    print(f"   Control genotypes: {control_genotypes}")
-    print(f"   Experimental genotypes: {experimental_genotypes}")
+    # ========================================================================
+    # PRINCIPLED POWER ANALYSIS: Based on overall data variability
+    # ========================================================================
 
-    # Define all pairwise comparisons
-    comparisons = []
+    # ========================================================================
+    # PRINCIPLED POWER ANALYSIS: Bootstrap from control data
+    # ========================================================================
 
-    # Type 1: Within each genotype, compare pretraining conditions (n vs y)
-    if len(pretraining_vals) >= 2:
-        for genotype in genotypes:
-            genotype_data = df_clean[df_clean[genotype_col] == genotype]
-            groups_available = genotype_data[pretraining_col].unique()
+    if verbose:
+        print(f"\n📊 STEP 1: Extract control group data")
 
-            if len(groups_available) >= 2:
-                for i, pt1 in enumerate(pretraining_vals[:-1]):
-                    for pt2 in pretraining_vals[i + 1 :]:
-                        group1_data = genotype_data[genotype_data[pretraining_col] == pt1][metric].values
-                        group2_data = genotype_data[genotype_data[pretraining_col] == pt2][metric].values
+    # Bootstrap configuration
+    n_bootstrap = 1000
 
-                        if len(group1_data) >= 2 and len(group2_data) >= 2:
-                            comparisons.append(
-                                {
-                                    "type": "within_genotype",
-                                    "genotype": genotype,
-                                    "group1_name": f"{genotype} + {pt1}",
-                                    "group2_name": f"{genotype} + {pt2}",
-                                    "group1_data": group1_data,
-                                    "group2_data": group2_data,
-                                    "description": f"{genotype}: {pt1} vs {pt2}",
-                                }
-                            )
+    # Get the full original dataset filtered to selected genotypes
+    df_analysis = df[df[genotype_col].isin(SELECTED_GENOTYPES)].copy()
+    df_analysis = df_analysis.dropna(subset=[metric])
+    df_analysis = df_analysis[~np.isinf(df_analysis[metric])]
 
-    # Type 2: Within each pretraining condition, compare genotypes
-    # Compare experimental vs each control
-    if len(genotypes) >= 2:
-        for pretrain in pretraining_vals:
-            pretrain_data = df_clean[df_clean[pretraining_col] == pretrain]
+    # Identify control genotypes
+    control_mask = df_analysis[genotype_col].str.contains("Empty", na=False)
+    df_controls = df_analysis[control_mask].copy()
 
-            # Compare each experimental genotype vs pooled controls
-            for exp_geno in experimental_genotypes:
-                exp_data = pretrain_data[pretrain_data[genotype_col] == exp_geno][metric].values
-
-                # Get data from all controls
-                ctrl_data_list = []
-                for ctrl_geno in control_genotypes:
-                    ctrl_subset = pretrain_data[pretrain_data[genotype_col] == ctrl_geno][metric].values
-                    if len(ctrl_subset) > 0:
-                        ctrl_data_list.append(ctrl_subset)
-
-                if ctrl_data_list and len(exp_data) >= 2:
-                    ctrl_data_combined = np.concatenate(ctrl_data_list)
-
-                    if len(ctrl_data_combined) >= 2:
-                        ctrl_names = " + ".join(control_genotypes)
-                        comparisons.append(
-                            {
-                                "type": "between_genotype",
-                                "pretraining": pretrain,
-                                "group1_name": f"{exp_geno} + {pretrain}",
-                                "group2_name": f"Controls + {pretrain}",
-                                "group1_data": exp_data,
-                                "group2_data": ctrl_data_combined,
-                                "description": f"{pretrain}: {exp_geno} vs Controls",
-                            }
-                        )
-
-    n_comparisons = len(comparisons)
-
-    if n_comparisons == 0:
-        print("\n❌ No valid comparisons found with sufficient data")
-        return
-
-    print(f"\n🔍 Found {n_comparisons} comparisons to analyze:")
-    for i, comp in enumerate(comparisons, 1):
-        print(f"   {i}. {comp['description']}")
-        print(f"      - {comp['group1_name']}: n={len(comp['group1_data'])}")
-        print(f"      - {comp['group2_name']}: n={len(comp['group2_data'])}")
-
-    # Apply multiple testing correction
-    if correction == "bonferroni":
-        corrected_alpha = alpha / n_comparisons
-        print(f"\n⚙️  Multiple testing correction: Bonferroni")
-        print(f"   Original α = {alpha}")
-        print(f"   Number of comparisons = {n_comparisons}")
-        print(f"   Corrected α = {corrected_alpha:.6f}")
+    # Aggregate to fly level
+    if "fly" in df_controls.columns:
+        fly_controls = (
+            df_controls.groupby("fly", as_index=False)
+            .agg(
+                {
+                    metric: "mean",
+                    pretraining_col: "first",  # All observations for a fly have same pretraining status
+                }
+            )
+            .copy()
+        )
     else:
-        corrected_alpha = alpha
-        print(f"\n⚙️  No multiple testing correction applied")
-        print(f"   α = {alpha}")
+        fly_controls = df_controls[[metric, pretraining_col]].copy()
 
-    # Analyze each comparison
-    all_results = []
+    # Split by pretraining status
+    naive_controls = fly_controls[fly_controls[pretraining_col] == "n"][metric].values
+    pretrained_controls = fly_controls[fly_controls[pretraining_col] == "y"][metric].values
 
-    for i, comp in enumerate(comparisons, 1):
-        print(f"\n{'='*80}")
-        print(f"COMPARISON {i}/{n_comparisons}: {comp['description']}")
-        print(f"{'='*80}")
+    # Calculate per-genotype sample sizes (for realistic reporting)
+    n_control_genotypes = df_controls[genotype_col].nunique()
+    avg_n_per_genotype = (
+        min(len(naive_controls), len(pretrained_controls)) / n_control_genotypes if n_control_genotypes > 0 else 0
+    )
 
-        group1 = comp["group1_data"]
-        group2 = comp["group2_data"]
+    if verbose:
+        print(f"   Control flies (pooled TNTxEmpty*):")
+        print(f"   - Naive (n): {len(naive_controls)} flies")
+        print(f"   - Pretrained (y): {len(pretrained_controls)} flies")
+        print(f"   - Number of control genotypes pooled: {n_control_genotypes}")
+        print(f"   - Average n per individual genotype: {avg_n_per_genotype:.1f}")
 
-        # Calculate effect size
-        effect_size = calculate_effect_size_cohens_d(group1, group2)
-        mean_d, ci_lower, ci_upper = bootstrap_effect_size(group1, group2, n_bootstrap=5000)
+    if len(naive_controls) < 5 or len(pretrained_controls) < 5:
+        if verbose:
+            print(f"\n⚠️  Warning: Not enough control flies for power analysis")
+            print(f"   Need at least 5 per condition, found {len(naive_controls)} and {len(pretrained_controls)}")
+        return None
 
-        print(f"\n📏 Effect Size:")
-        print(f"   Cohen's d = {effect_size:.3f} ({interpret_cohens_d(effect_size)})")
-        print(f"   95% CI: [{ci_lower:.3f}, {ci_upper:.3f}]")
+    if verbose:
+        print(f"\n📊 STEP 2: Run bootstrap power analysis")
+        print(f"   Using actual pretraining effect from control groups")
+        print(f"   Resampling {n_bootstrap} times per sample size")
 
-        # Current test
-        stat, p_value = mannwhitneyu(group1, group2, alternative="two-sided")
-        print(f"\n📊 Current Statistical Test (Mann-Whitney U):")
-        print(f"   U-statistic = {stat:.2f}")
-        print(f"   p-value = {p_value:.6f}")
-        print(
-            f"   Significant at corrected α={corrected_alpha:.6f}: {'YES ✓' if p_value < corrected_alpha else 'NO ✗'}"
-        )
+    # Run power analysis with bootstrap
+    power_results = power_analysis_bootstrap_controls(
+        naive_controls,
+        pretrained_controls,
+        alpha=alpha,
+        desired_power=desired_power,
+        n_bootstrap=n_bootstrap,
+    )
 
-        # Power analysis
-        print(f"\n⚡ Running power analysis...")
-        power_results = power_analysis_mann_whitney(
-            group1,
-            group2,
-            alpha=corrected_alpha,  # Use corrected alpha
-            desired_power=desired_power,
-            n_simulations=1000,
-        )
+    # ========================================================================
+    # RESULTS AND RECOMMENDATIONS
+    # ========================================================================
 
-        all_results.append(
-            {
-                "comparison": comp["description"],
-                "type": comp["type"],
-                "group1_name": comp["group1_name"],
-                "group2_name": comp["group2_name"],
-                "n1": len(group1),
-                "n2": len(group2),
-                "mean1": np.mean(group1),
-                "mean2": np.mean(group2),
-                "std1": np.std(group1),
-                "std2": np.std(group2),
-                "effect_size": effect_size,
-                "effect_size_ci_lower": ci_lower,
-                "effect_size_ci_upper": ci_upper,
-                "p_value": p_value,
-                "current_power": power_results["powers"][0] if power_results["powers"] else 0,
-                "target_n": power_results["target_n"],
-                "power_results": power_results,
-            }
-        )
+    if verbose:
+        print(f"\n" + "=" * 80)
+        print("RESULTS AND RECOMMENDATIONS")
+        print("=" * 80)
 
-    # Create output directory
+    # Use per-genotype average as "current n" (more realistic for planning)
+    current_n = int(avg_n_per_genotype)
+    target_n = power_results["target_n"]
+    observed_d = power_results["observed_effect_size"]
+
+    # Get power at current sample sizes
+    sample_sizes = power_results["sample_sizes"]
+    powers = power_results["powers"]
+
+    # Find power at current_n (interpolate if needed)
+    if current_n in sample_sizes:
+        idx = sample_sizes.index(current_n)
+        current_power = powers[idx]
+    else:
+        # Interpolate
+        current_power = np.interp(current_n, sample_sizes, powers)
+
+    if verbose:
+        print(f"\n📈 Current Control Data Analysis:")
+        print(f"   Current n per individual genotype: {current_n}")
+        print(f"   Observed effect size (Cohen's d): {observed_d:.3f} ({interpret_cohens_d(observed_d)})")
+        print(f"   Current statistical power: {current_power:.1%}")
+
+        if target_n:
+            additional = target_n - current_n
+            print(f"\n🎯 To achieve {desired_power:.0%} power:")
+            print(f"   Recommended n per group: {target_n}")
+            print(f"   Additional samples needed: {additional}")
+            if additional > 0:
+                print(f"   Total increase: {(additional / current_n * 100):.0f}% more samples")
+            else:
+                print(f"   ✓ You already have sufficient power!")
+        else:
+            print(f"\n⚠️  Could not achieve {desired_power:.0%} power within tested range")
+            max_n = sample_sizes[-1]
+            max_power = powers[-1]
+            print(f"   Maximum tested: n={max_n} gave power={max_power:.1%}")
+    # Return results dictionary
+    results = {
+        "metric": metric,
+        "current_n": current_n,
+        "target_n": target_n,
+        "observed_d": observed_d,
+        "current_power": current_power,
+        "additional_needed": target_n - current_n if target_n else None,
+        "pooled_naive_n": len(naive_controls),
+        "pooled_pretrained_n": len(pretrained_controls),
+        "n_control_genotypes": n_control_genotypes,
+    }
+
+    # ========================================================================
+    # VISUALIZATION
+    # ========================================================================
+
+    if verbose:
+        print(f"\n📊 Creating visualizations...")
+
+    if not verbose:
+        # Skip visualization if not verbose
+        return results
+
     output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/power_analysis")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create comprehensive visualizations
-    create_multi_comparison_plots(all_results, corrected_alpha, desired_power, output_dir)
+    # Create power analysis plot
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
 
-    # Generate comprehensive report
-    generate_multi_comparison_report(
-        all_results, metric, alpha, corrected_alpha, desired_power, correction, n_comparisons, output_dir
+    # Plot 1: Power curve
+    ax1 = axes[0]
+    sample_sizes = power_results["sample_sizes"]
+    powers = power_results["powers"]
+    # current_n already calculated above
+    # target_n already calculated above
+
+    ax1.plot(sample_sizes, powers, "b-", linewidth=2.5, label="Statistical Power", marker="o", markersize=6)
+    ax1.axhline(y=desired_power, color="r", linestyle="--", linewidth=2, label=f"Desired Power ({desired_power:.0%})")
+    ax1.axvline(x=current_n, color="green", linestyle="--", linewidth=2, label=f"Current n={current_n}")
+
+    if target_n:
+        ax1.axvline(x=target_n, color="orange", linestyle="--", linewidth=2, label=f"Target n={target_n}")
+        ax1.plot(target_n, desired_power, "r*", markersize=15)
+
+    ax1.set_xlabel("Sample Size per Group", fontsize=12, fontweight="bold")
+    ax1.set_ylabel("Statistical Power", fontsize=12, fontweight="bold")
+    ax1.set_title(
+        f"Power Analysis (Bootstrap from Controls)\nObserved Effect Size (Cohen's d) = {observed_d:.3f} ({interpret_cohens_d(observed_d)})",
+        fontsize=13,
+        fontweight="bold",
     )
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="lower right", fontsize=10)
+    ax1.set_ylim([0, 1.05])
+
+    # Plot 2: Sample size requirements for different power levels
+    ax2 = axes[1]
+    power_levels = [0.5, 0.6, 0.7, 0.8, 0.9, 0.95]
+    required_ns = []
+
+    for power_level in power_levels:
+        n_needed = None
+        for n, power in zip(sample_sizes, powers):
+            if power >= power_level:
+                n_needed = n
+                break
+        if n_needed is None:
+            n_needed = sample_sizes[-1]  # Use max if not reached
+        required_ns.append(n_needed)
+
+    bars = ax2.bar(
+        range(len(power_levels)), required_ns, color="steelblue", alpha=0.7, edgecolor="black", linewidth=1.5
+    )
+    ax2.axhline(y=current_n, color="green", linestyle="--", linewidth=2, label=f"Current n={current_n}")
+    ax2.set_xticks(range(len(power_levels)))
+    ax2.set_xticklabels([f"{p:.0%}" for p in power_levels], fontsize=10)
+    ax2.set_xlabel("Desired Statistical Power", fontsize=12, fontweight="bold")
+    ax2.set_ylabel("Required Sample Size per Group", fontsize=12, fontweight="bold")
+    ax2.set_title("Sample Size Requirements\nfor Different Power Levels", fontsize=13, fontweight="bold")
+    ax2.legend(fontsize=10, loc="upper left")
+    ax2.grid(True, alpha=0.3, axis="y")
+
+    # Add value labels on bars
+    for bar, n in zip(bars, required_ns):
+        height = bar.get_height()
+        ax2.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height,
+            f"n={int(n)}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+            fontweight="bold",
+        )
+
+    plt.tight_layout()
+    plot_path = output_dir / "power_analysis_principled.png"
+    plt.savefig(plot_path, dpi=300, bbox_inches="tight")
+    print(f"✓ Power plot saved to: {plot_path}")
+    plt.close()
+
+    # ========================================================================
+    # SUMMARY REPORT
+    # ========================================================================
+
+    report_lines = []
+    report_lines.append("=" * 80)
+    report_lines.append(f"PRINCIPLED POWER ANALYSIS REPORT: {metric}")
+    report_lines.append("=" * 80)
+    report_lines.append("")
+
+    report_lines.append("ANALYSIS APPROACH")
+    report_lines.append("-" * 80)
+    report_lines.append("This analysis uses a BOOTSTRAP approach from control data:")
+    report_lines.append("  • Pools control flies (TNTxEmptyGal4 + TNTxEmptySplit)")
+    report_lines.append("  • Bootstraps random samples from actual pretraining effect in controls")
+    report_lines.append("  • Empirically estimates power based on real data variability")
+    report_lines.append("  • No assumptions about effect sizes - uses observed control effect")
+    report_lines.append("")
+
+    report_lines.append("DATA SUMMARY")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Metric analyzed: {metric}")
+    report_lines.append(f"Control flies (pooled TNTxEmpty*):")
+    report_lines.append(
+        f"  - Naive (n): {len(naive_controls)} flies, mean = {np.mean(naive_controls):.2f} ± {np.std(naive_controls, ddof=1):.2f}"
+    )
+    report_lines.append(
+        f"  - Pretrained (y): {len(pretrained_controls)} flies, mean = {np.mean(pretrained_controls):.2f} ± {np.std(pretrained_controls, ddof=1):.2f}"
+    )
+    report_lines.append("")
+
+    report_lines.append("STATISTICAL PARAMETERS")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Observed pretraining effect (Cohen's d): {observed_d:.3f}")
+    report_lines.append(f"Interpretation: {interpret_cohens_d(observed_d).capitalize()}")
+    report_lines.append(f"Significance level (α): {alpha}")
+    report_lines.append(f"Desired power: {desired_power:.0%}")
+    report_lines.append(f"Bootstrap resampling: {n_bootstrap} iterations per sample size")
+    report_lines.append("")
+
+    report_lines.append("RECOMMENDATIONS")
+    report_lines.append("-" * 80)
+    report_lines.append(f"Current sample size per group: {current_n}")
+    report_lines.append(f"Current statistical power (at n={current_n}): {current_power:.1%}")
+    report_lines.append("")
+
+    if target_n:
+        additional = target_n - current_n
+        report_lines.append(f"To achieve {desired_power:.0%} power to detect the observed pretraining effect:")
+        report_lines.append(f"  • Recommended sample size per group: {target_n}")
+        report_lines.append(f"  • Additional samples needed: {additional}")
+        if additional > 0:
+            report_lines.append(f"  • Total increase: {(additional / current_n * 100):.0f}%")
+        else:
+            report_lines.append(f"  • Status: ✓ Already sufficient power!")
+    else:
+        max_n = sample_sizes[-1]
+        max_power = powers[-1]
+        report_lines.append(f"⚠️  Could not achieve {desired_power:.0%} power within tested range (n up to {max_n})")
+        report_lines.append(f"  • Maximum power achieved: {max_power:.1%} at n={max_n}")
+
+    report_lines.append("")
+    report_lines.append("EFFECT SIZE INTERPRETATION GUIDE")
+    report_lines.append("-" * 80)
+    report_lines.append("  • Negligible: |d| < 0.2")
+    report_lines.append("  • Small:      0.2 ≤ |d| < 0.5")
+    report_lines.append("  • Medium:     0.5 ≤ |d| < 0.8")
+    report_lines.append("  • Large:      |d| ≥ 0.8")
+    report_lines.append("")
+
+    report_lines.append("=" * 80)
+    report_lines.append("END OF REPORT")
+    report_lines.append("=" * 80)
+
+    # Print and save report
+    report_text = "\n".join(report_lines)
+    print("\n" + report_text)
+
+    report_path = output_dir / "power_analysis_principled_report.txt"
+    with open(report_path, "w") as f:
+        f.write(report_text)
+    print(f"\n✓ Report saved to: {report_path}")
+
+    if verbose:
+        print("\n" + "=" * 80)
+        print("✅ Bootstrap power analysis complete!")
+        print("=" * 80)
+
+    return results
+
+
+def main(alpha=0.05, desired_power=0.8, metrics=None):
+    """
+    Run power analysis across multiple metrics.
+
+    Parameters
+    ----------
+    alpha : float
+        Significance level
+    desired_power : float
+        Target statistical power
+    metrics : list or None
+        List of metrics to analyze (default: all PCA_METRICS)
+    """
+    if metrics is None:
+        metrics = PCA_METRICS
 
     print("\n" + "=" * 80)
-    print("✅ Power analysis complete for all comparisons!")
+    print("F1 TNT POWER ANALYSIS - MULTI-METRIC SUMMARY")
+    print("=" * 80)
+    print(f"\nAnalyzing {len(metrics)} metrics using bootstrap from control data")
+    print(f"Alpha: {alpha}, Desired power: {desired_power:.0%}\n")
+
+    all_results = []
+    for i, metric in enumerate(metrics, 1):
+        print(f"\n[{i}/{len(metrics)}] Analyzing: {metric}")
+        print("-" * 80)
+
+        result = analyze_single_metric(metric, alpha=alpha, desired_power=desired_power, verbose=False)
+        if result:
+            all_results.append(result)
+            print(
+                f"  Current n/genotype: {result['current_n']}, Target n: {result['target_n']}, "
+                f"Observed d: {result['observed_d']:.3f}, Current power: {result['current_power']:.1%}"
+            )
+        else:
+            print(f"  ⚠️  Insufficient data")
+
+    # Summary table
+    print("\n" + "=" * 80)
+    print("SUMMARY TABLE")
     print("=" * 80)
 
-    # For power analysis, compare pretrained vs non-pretrained within a genotype
-    # Or compare genotypes within a pretraining condition
-    # Let's do both and pick the comparison with more data
+    summary_df = pd.DataFrame(all_results)
+    if len(summary_df) > 0:
+        # Round for display
+        display_df = summary_df[
+            ["metric", "current_n", "target_n", "observed_d", "current_power", "additional_needed"]
+        ].copy()
+        display_df["observed_d"] = display_df["observed_d"].round(3)
+        display_df["current_power"] = (display_df["current_power"] * 100).round(1)
+        display_df.columns = ["Metric", "Current N", "Target N", "Cohen's d", "Power (%)", "Additional Needed"]
 
-    # Option 1: Compare pretraining within TNTxMB247
-    if "TNTxMB247" in genotypes and len(pretraining_vals) >= 2:
-        genotype_subset = df_clean[df_clean[genotype_col] == "TNTxMB247"]
-        group1 = genotype_subset[genotype_subset[pretraining_col] == pretraining_vals[0]][metric].values
-        group2 = genotype_subset[genotype_subset[pretraining_col] == pretraining_vals[1]][metric].values
-        comparison_name = f"TNTxMB247: {pretraining_vals[0]} vs {pretraining_vals[1]}"
-    elif len(genotypes) >= 2 and len(pretraining_vals) >= 1:
-        # Option 2: Compare genotypes within a pretraining condition
-        pretrain_subset = df_clean[df_clean[pretraining_col] == pretraining_vals[0]]
-        group1 = pretrain_subset[pretrain_subset[genotype_col] == genotypes[0]][metric].values
-        group2 = pretrain_subset[pretrain_subset[genotype_col] == genotypes[1]][metric].values
-        comparison_name = f"{pretraining_vals[0]}: {genotypes[0]} vs {genotypes[1]}"
-    else:
-        print("❌ Error: Not enough groups for comparison")
-        return
+        print("\n" + display_df.to_string(index=False))
 
-    if len(group1) < 2 or len(group2) < 2:
-        print(f"❌ Error: Insufficient data for comparison")
-        print(f"   Group 1: n={len(group1)}")
-        print(f"   Group 2: n={len(group2)}")
-        return
+        # Overall recommendation
+        max_target = display_df["Target N"].max()
+        print(f"\n" + "=" * 80)
+        print(f"OVERALL RECOMMENDATION")
+        print("=" * 80)
+        print(f"\nTo achieve {desired_power:.0%} power across ALL metrics:")
+        print(f"  Recommended n per genotype: {int(max_target)}")
+        print(f"  (Highest requirement across all {len(metrics)} metrics)")
 
-    print(f"\n🎯 Performing power analysis for: {comparison_name}")
-    print(f"   Group 1: n={len(group1)}, mean={np.mean(group1):.2f}, std={np.std(group1):.2f}")
-    print(f"   Group 2: n={len(group2)}, mean={np.mean(group2):.2f}, std={np.std(group2):.2f}")
-
-    # Calculate effect size
-    effect_size = calculate_effect_size_cohens_d(group1, group2)
-    print(f"\n📏 Observed Cohen's d: {effect_size:.3f} ({interpret_cohens_d(effect_size)})")
-
-    # Bootstrap confidence interval for effect size
-    print(f"\n🔄 Calculating bootstrap confidence interval for effect size...")
-    mean_d, ci_lower, ci_upper = bootstrap_effect_size(group1, group2, n_bootstrap=10000)
-    print(f"✓ 95% CI for Cohen's d: [{ci_lower:.3f}, {ci_upper:.3f}]")
-
-    # Perform current statistical test
-    stat, p_value = mannwhitneyu(group1, group2, alternative="two-sided")
-    print(f"\n📊 Current Mann-Whitney U test:")
-    print(f"   U-statistic: {stat:.2f}")
-    print(f"   p-value: {p_value:.4f}")
-    print(f"   Significant at α={alpha}: {'YES ✓' if p_value < alpha else 'NO ✗'}")
-
-    # Perform power analysis
-    print(f"\n⚡ Running power analysis...")
-    power_results = power_analysis_mann_whitney(
-        group1, group2, alpha=alpha, desired_power=desired_power, n_simulations=1000
-    )
-
-    # Create output directory
-    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/power_analysis")
-
-    # Prepare data for report
-    report_data = pd.DataFrame(
-        {
-            "Genotype": [genotypes[0]] * len(group1) + [genotypes[1]] * len(group2),
-            "Pretraining": [pretraining_vals[0]] * len(group1) + [pretraining_vals[1]] * len(group2),
-            metric: np.concatenate([group1, group2]),
-        }
-    )
-
-    # Generate visualizations
-    plot_power_analysis(power_results, effect_size, output_dir)
-
-    # Generate report
-    generate_report(report_data, metric, power_results, effect_size, ci_lower, ci_upper, output_dir)
+        # Save summary
+        output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/power_analysis")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = output_dir / "power_analysis_summary_all_metrics.csv"
+        summary_df.to_csv(summary_path, index=False)
+        print(f"\n✓ Summary saved to: {summary_path}")
 
     print("\n" + "=" * 80)
-    print("✅ Power analysis complete!")
+    print("✅ Multi-metric power analysis complete!")
     print("=" * 80)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Power analysis for TNT MB247 distance_moved metric with multiple comparisons"
-    )
+    parser = argparse.ArgumentParser(description="Bootstrap power analysis for F1 TNT experiments using control data")
     parser.add_argument("--alpha", type=float, default=0.05, help="Significance level (default: 0.05)")
     parser.add_argument("--desired-power", type=float, default=0.8, help="Desired statistical power (default: 0.8)")
     parser.add_argument(
-        "--correction",
+        "--metric",
         type=str,
-        default="bonferroni",
-        choices=["bonferroni", "none"],
-        help="Multiple testing correction method (default: bonferroni)",
+        default=None,
+        help="Single metric to analyze (default: analyze all PCA metrics)",
     )
 
     args = parser.parse_args()
 
-    main(alpha=args.alpha, desired_power=args.desired_power, correction=args.correction)
+    if args.metric:
+        # Single metric mode with full verbose output
+        result = analyze_single_metric(args.metric, alpha=args.alpha, desired_power=args.desired_power, verbose=True)
+    else:
+        # Multi-metric mode
+        main(alpha=args.alpha, desired_power=args.desired_power)
