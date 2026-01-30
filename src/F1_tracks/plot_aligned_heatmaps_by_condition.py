@@ -388,13 +388,23 @@ def main():
 
     args = parser.parse_args()
 
+    # Configure matplotlib for editable PDF text
+    import matplotlib
+
+    matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts
+    matplotlib.rcParams["font.family"] = "Arial"
+    # Note: text.usetex = True requires LaTeX installation, skip for now
+
     # Paths
     template_path = Path("/mnt/upramdya_data/MD/F1_Tracks/F1_New_Template.png")
     dataset_path = Path(
         "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather"
     )
     videos_base = Path("/mnt/upramdya_data/MD/F1_Tracks/Videos/251008_F1_New_Videos_Checked")
-    output_dir = Path(__file__).parent
+    output_dir = Path("/mnt/upramdya_data/MD/F1_Tracks/Plots/F1_New/PR/Heatmaps")
+
+    # make dir if not exists
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
     print(f"ALIGNED HEATMAPS BY {args.group_by.upper()}")
@@ -520,7 +530,6 @@ def main():
     # Concatenate data for each condition
     print("\n7. Creating heatmaps...")
     condition_data = {}
-    ball_positions = {}  # Store ball positions for each condition
     for condition in conditions:
         if aligned_data_by_condition[condition]:
             condition_df = pd.concat(aligned_data_by_condition[condition], ignore_index=True)
@@ -529,19 +538,36 @@ def main():
             n_points = len(condition_df)
             print(f"   {condition}: {n_flies} flies, {n_points:,} points")
 
-            # Get ball position for this condition (using first fly's data for arena params)
-            # We need to re-detect arena for one video to get the transformation
-            sample_fly = condition_df["fly"].iloc[0]
-            sample_video = get_video_path_from_fly_id(sample_fly, videos_base)
-            if sample_video:
-                sample_arena_params = detect_arena_in_video(sample_video, template_binary)
-                if sample_arena_params:
-                    ball_pos = get_ball_position_in_template(
-                        condition_df, sample_arena_params, template.shape, condition
-                    )
-                    if ball_pos:
-                        ball_positions[condition] = ball_pos
-                        print(f"     Ball position: ({ball_pos[0]:.1f}, {ball_pos[1]:.1f})")
+    # Compute common ball position across all conditions (using ball_1 only)
+    print("\n   Computing common ball position across all data (ball_1)...")
+    common_ball_position = None
+    if condition_data:
+        # Combine all condition data
+        all_data = pd.concat(condition_data.values(), ignore_index=True)
+        # Get a sample fly to obtain arena parameters
+        sample_fly = all_data["fly"].iloc[0]
+        sample_video = get_video_path_from_fly_id(sample_fly, videos_base)
+        if sample_video:
+            sample_arena_params = detect_arena_in_video(sample_video, template_binary)
+            if sample_arena_params:
+                # Use only ball_1
+                ball_x_col = "x_centre_ball_1"
+                ball_y_col = "y_centre_ball_1"
+                if ball_x_col in all_data.columns and ball_y_col in all_data.columns:
+                    ball_x_video = all_data[ball_x_col].median()
+                    ball_y_video = all_data[ball_y_col].median()
+                    if not pd.isna(ball_x_video) and not pd.isna(ball_y_video):
+                        # Transform to template coordinates
+                        x_arena = ball_x_video - sample_arena_params["arena_x"]
+                        y_arena = ball_y_video - sample_arena_params["arena_y"]
+                        scale = sample_arena_params["scale"]
+                        x_template = x_arena / scale
+                        y_template = y_arena / scale
+                        # Check if within template bounds
+                        template_h, template_w = template.shape[:2]
+                        if 0 <= x_template < template_w and 0 <= y_template < template_h:
+                            common_ball_position = (x_template, y_template)
+                            print(f"   Common ball position: ({x_template:.1f}, {y_template:.1f})")
 
     # Create figure with subplots
     n_conditions = len(condition_data)
@@ -736,8 +762,8 @@ def main():
 
         plt.close()
 
-        # Create version with proximity circles if ball positions are available
-        if ball_positions:
+        # Create version with proximity circles if common ball position is available
+        if common_ball_position:
             # Create versions with different proximity radii
             proximity_radii = [70, 140, 200]
 
@@ -754,7 +780,7 @@ def main():
                     ax = axes_flat[idx]
 
                     # Show template as background
-                    ax.imshow(template_rgb, aspect="auto", alpha=1.0)
+                    ax.imshow(template_rgb, aspect="auto", alpha=1.0, rasterized=True)
 
                     # Get pre-computed heatmap
                     heatmap = heatmaps[condition]
@@ -790,35 +816,39 @@ def main():
                             interpolation="bilinear",
                             vmin=vmin,
                             vmax=vmax,
+                            rasterized=True,
                         )
 
                         cbar = plt.colorbar(im, ax=ax, label=scale_config["label"], fraction=0.046, pad=0.04)
 
-                    # Draw proximity circle if ball position is available
-                    if condition in ball_positions:
-                        ball_x, ball_y = ball_positions[condition]
+                    # Draw proximity circle using common ball position
+                    ball_x, ball_y = common_ball_position
 
-                        circle = Circle(
-                            (ball_x, ball_y),
-                            proximity_radius_px,
-                            color="red",
-                            fill=False,
-                            linestyle="--",
-                            linewidth=2,
-                            alpha=0.8,
-                            label=f"{proximity_radius_px}px proximity",
-                        )
-                        ax.add_patch(circle)
+                    circle = Circle(
+                        (ball_x, ball_y),
+                        proximity_radius_px,
+                        color="red",
+                        fill=False,
+                        linestyle="--",
+                        linewidth=2,
+                        alpha=0.8,
+                        label=f"{proximity_radius_px}px proximity",
+                    )
+                    ax.add_patch(circle)
 
-                        # Add small dot at ball center
-                        ax.plot(ball_x, ball_y, "r+", markersize=10, markeredgewidth=2, alpha=0.8)
+                    # Add small dot at ball center
+                    ax.plot(ball_x, ball_y, "r+", markersize=10, markeredgewidth=2, alpha=0.8)
 
                     # Add title and stats
                     n_flies = data["fly"].nunique()
-                    n_points = len(data)
-                    title = f"{condition}\n{n_flies} flies, {n_points:,} points"
-                    if condition in ball_positions:
-                        title += f"\n(red circle: {proximity_radius_px}px proximity)"
+
+                    # Format condition name
+                    condition_display = condition
+                    if args.group_by == "Pretraining":
+                        condition_display = {"n": "Naive", "y": "Pretrained"}.get(condition, condition)
+
+                    title = f"{condition_display}\n{n_flies} flies"
+                    title += f"\n(red circle: ball proximity region, threshold: {proximity_radius_px}px)"
                     ax.set_title(title, fontsize=14, fontweight="bold")
 
                     ax.set_xlim(0, template.shape[1])
@@ -833,7 +863,7 @@ def main():
 
                 plt.tight_layout()
 
-                # Save figure with proximity circles
+                # Save figure with proximity circles as PNG
                 output_filename_prox = (
                     f"aligned_heatmaps_by_{args.group_by}_{scale_type}_with_proximity_{proximity_radius_px}px.png"
                 )
@@ -842,6 +872,17 @@ def main():
                 print(
                     f"   Saved {scale_type} scale heatmap with {proximity_radius_px}px proximity to: {output_path_prox}"
                 )
+
+                # Save as PDF (vector text/axes, rasterized images) - only for linear_clipped
+                if scale_type == "linear_clipped":
+                    output_filename_pdf = (
+                        f"aligned_heatmaps_by_{args.group_by}_{scale_type}_with_proximity_{proximity_radius_px}px.pdf"
+                    )
+                    output_path_pdf = output_dir / output_filename_pdf
+                    fig.savefig(output_path_pdf, dpi=300, bbox_inches="tight", format="pdf")
+                    print(
+                        f"   Saved {scale_type} scale heatmap with {proximity_radius_px}px proximity (PDF) to: {output_path_pdf}"
+                    )
 
                 plt.close()
 
