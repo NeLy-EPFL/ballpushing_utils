@@ -30,6 +30,15 @@ from pathlib import Path
 # Add src directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
+import matplotlib
+
+matplotlib.rcParams["pdf.fonttype"] = 42
+
+matplotlib.rcParams["font.family"] = "Arial"
+
+# matplotlib.rcParams["path.simplify"] = True
+# matplotlib.rcParams["path.simplify_threshold"] = 1.0
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -284,22 +293,59 @@ def compute_permutation_test(
         p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
         p_values.append(p_value)
 
-    # No FDR correction needed for single comparison
-    p_values = np.array(p_values)
-    significant_timepoints = np.where(p_values < alpha)[0]
-    n_significant = np.sum(p_values < alpha)
+    # Prepare p-values array
+    p_values_raw = np.array(p_values)
+
+    # Benjamini-Hochberg FDR correction (control across the n_bins tests)
+    def benjamini_hochberg(pvals, alpha):
+        m = len(pvals)
+        sorted_idx = np.argsort(pvals)
+        sorted_p = pvals[sorted_idx]
+        thresholds = (np.arange(1, m + 1) / m) * alpha
+        below = sorted_p <= thresholds
+        if not np.any(below):
+            reject = np.zeros(m, dtype=bool)
+        else:
+            max_i = np.max(np.where(below)[0])
+            reject = np.zeros(m, dtype=bool)
+            reject[: max_i + 1] = True
+        # map back to original ordering
+        reject_orig = np.zeros(m, dtype=bool)
+        reject_orig[sorted_idx] = reject
+
+        # Adjusted p-values (BH step-up)
+        # p_adj_sorted[i] = min_{j>=i} (m/j * p_sorted[j])
+        p_adj_sorted = np.minimum.accumulate((m / np.arange(m, 0, -1)) * sorted_p[::-1])[::-1]
+        p_adj = np.empty_like(p_adj_sorted)
+        p_adj[sorted_idx] = p_adj_sorted
+
+        return reject_orig, p_adj
+
+    # Handle NaNs in p-values (keep NaNs in place)
+    valid_mask = ~np.isnan(p_values_raw)
+    p_values_adj = np.full_like(p_values_raw, np.nan)
+    significant_mask = np.zeros_like(valid_mask, dtype=bool)
+
+    if valid_mask.any():
+        rej, p_adj_compact = benjamini_hochberg(p_values_raw[valid_mask], alpha)
+        p_values_adj[valid_mask] = p_adj_compact
+        significant_mask[valid_mask] = rej
+
+    significant_timepoints = np.where(significant_mask)[0]
+    n_significant = int(np.sum(significant_mask))
 
     results = {
         "test_group": test_group,
         "control_group": control_group,
         "time_bins": time_bins,
         "observed_diffs": observed_diffs,
-        "p_values": p_values,
+        "p_values_raw": p_values_raw,
+        "p_values": p_values_adj,
         "significant_timepoints": significant_timepoints,
         "n_significant": n_significant,
     }
 
-    print(f"    Significant bins: {n_significant}/{n_bins} (α={alpha})")
+    print(f"    Significant bins after FDR: {n_significant}/{n_bins} (α={alpha}, FDR)")
 
     return results
 
@@ -397,8 +443,8 @@ def create_velocity_plot(
         # Plot the mean line
         ax.plot(time, mean_speed, color=colors[group], linewidth=1, label=labels[group])
 
-        # Plot the confidence interval as a shaded area
-        ax.fill_between(time, lower_bound, upper_bound, color=colors[group], alpha=0.3)
+        # Plot the confidence interval as a shaded area (rasterized to avoid Illustrator issues)
+        ax.fill_between(time, lower_bound, upper_bound, color=colors[group], alpha=0.3, rasterized=True, zorder=0)
 
     # Add vertical line at start point (60 minutes) if in range
     start = 60 * 60
@@ -578,6 +624,268 @@ def generate_velocity_plot(
     )
     print(f"Velocity data shape: {data_with_velocities.shape}")
 
+    def compute_pre_post_median(
+        df,
+        time_col="time",
+        velocity_col="speed_mm_s_smooth",
+        group_col="Magnet",
+        subject_col="fly",
+        pre_window=(3400, 3600),
+        post_window=(3800, 4000),
+    ):
+        """Return DataFrame with per-fly median velocity in pre and post windows.
+
+        Only flies that have values in both windows are returned (so lines can be drawn).
+        """
+        pre_min, pre_max = pre_window
+        post_min, post_max = post_window
+
+        pre = (
+            df[(df[time_col] >= pre_min) & (df[time_col] <= pre_max)]
+            .groupby([group_col, subject_col])[velocity_col]
+            .median()
+            .reset_index()
+            .rename(columns={velocity_col: "pre_median"})
+        )
+
+        post = (
+            df[(df[time_col] >= post_min) & (df[time_col] <= post_max)]
+            .groupby([group_col, subject_col])[velocity_col]
+            .median()
+            .reset_index()
+            .rename(columns={velocity_col: "post_median"})
+        )
+
+        merged = pd.merge(pre, post, on=[group_col, subject_col], how="inner")
+        return merged
+
+    def plot_pre_post_by_group(
+        merged_df,
+        group_col="Magnet",
+        subject_col="fly",
+        output_path=None,
+        change_results=None,
+        pre_label="3400-3600s",
+        post_label="3800-4000s",
+    ):
+        """Create two-subplot figure (one per group) showing pre/post medians per fly.
+
+        Each fly is a line connecting its pre and post median.
+        """
+        groups = sorted(merged_df[group_col].unique())
+        if len(groups) == 0:
+            print("No flies found for pre/post comparison")
+            return
+
+        fig, axes = plt.subplots(1, len(groups), figsize=(6 * len(groups), 6), sharey=True)
+        if len(groups) == 1:
+            axes = [axes]
+
+        colors = {groups[0]: "orange"} if len(groups) == 1 else {g: c for g, c in zip(groups, ["orange", "blue"])}
+
+        for ax, grp in zip(axes, groups):
+            dfg = merged_df[merged_df[group_col] == grp]
+            if dfg.empty:
+                ax.set_title(f"{grp} (no data)")
+                continue
+
+            x = [0, 1]
+            for _, row in dfg.iterrows():
+                ax.plot(
+                    x, [row["pre_median"], row["post_median"]], marker="o", color=colors.get(grp, "gray"), alpha=0.7
+                )
+
+            # Plot per-group median lines for pre and post
+            med_pre = dfg["pre_median"].median()
+            med_post = dfg["post_median"].median()
+            ax.plot(x, [med_pre, med_post], marker=None, color="k", linewidth=2)
+
+            ax.set_xticks(x)
+            ax.set_xticklabels([pre_label, post_label])
+            ax.set_title(f"Magnet = {grp} (n={dfg.shape[0]})")
+            ax.set_ylabel("Median Average Speed (mm/s)")
+            ax.grid(True, alpha=0.3)
+            # (group-level annotation moved to figure-level to avoid duplicate labels)
+
+        fig.tight_layout()
+        # Add a single figure-level annotation for the between-group permutation test (absolute change)
+        if change_results is not None and "absolute_change" in change_results:
+            p_val_adj = change_results["absolute_change"].get(
+                "p_value_adj", change_results["absolute_change"].get("p_value")
+            )
+            if p_val_adj is None or np.isnan(p_val_adj):
+                sig = "ns"
+            elif p_val_adj < 0.001:
+                sig = "***"
+            elif p_val_adj < 0.01:
+                sig = "**"
+            elif p_val_adj < 0.05:
+                sig = "*"
+            else:
+                sig = "ns"
+
+            fig.suptitle(
+                f"Between-group absolute-change: {sig} (p_adj={p_val_adj:.3f})", y=1.02, fontsize=12, color="red"
+            )
+
+        if output_path is not None:
+            pdfp = Path(output_path).with_suffix(".pdf")
+            pngp = Path(output_path).with_suffix(".png")
+            svgp = Path(output_path).with_suffix(".svg")
+            fig.savefig(pdfp, format="pdf", dpi=300, bbox_inches="tight")
+            fig.savefig(pngp, format="png", dpi=300, bbox_inches="tight")
+            fig.savefig(svgp, format="svg", dpi=300, bbox_inches="tight")
+            print(f"  Saved pre/post comparison PDF: {pdfp}")
+            print(f"  Saved pre/post comparison PNG: {pngp}")
+            print(f"  Saved pre/post comparison SVG: {svgp}")
+            plt.close(fig)
+
+    # (Pre/post plotting will be done after change comparison so we can annotate significance)
+
+    def compare_velocity_changes(
+        data,
+        time_col="time",
+        velocity_col="speed_mm_s_smooth",
+        group_col="Magnet",
+        subject_col="fly",
+        pre_window=(3400, 3600),
+        post_window=(3800, 4000),
+        n_permutations=10000,
+    ):
+        """
+        Compare velocity changes between groups using permutation test.
+
+        Returns both absolute change and percent change comparisons.
+        """
+        pre_min, pre_max = pre_window
+        post_min, post_max = post_window
+
+        # Calculate pre and post medians per fly
+        pre = (
+            data[(data[time_col] >= pre_min) & (data[time_col] <= pre_max)]
+            .groupby([group_col, subject_col])[velocity_col]
+            .median()
+            .reset_index()
+            .rename(columns={velocity_col: "pre_median"})
+        )
+
+        post = (
+            data[(data[time_col] >= post_min) & (data[time_col] <= post_max)]
+            .groupby([group_col, subject_col])[velocity_col]
+            .median()
+            .reset_index()
+            .rename(columns={velocity_col: "post_median"})
+        )
+
+        merged = pd.merge(pre, post, on=[group_col, subject_col], how="inner")
+
+        # Calculate change scores
+        merged["absolute_change"] = merged["post_median"] - merged["pre_median"]
+        merged["percent_change"] = ((merged["post_median"] - merged["pre_median"]) / merged["pre_median"]) * 100
+
+        # Get groups
+        groups = sorted(merged[group_col].unique())
+        if len(groups) != 2:
+            raise ValueError(f"Expected 2 groups, found {len(groups)}")
+
+        control_group = groups[0]
+        test_group = groups[1]
+
+        results = {}
+
+        # Test absolute change
+        for metric in ["absolute_change", "percent_change"]:
+            control_vals = merged[merged[group_col] == control_group][metric].values
+            test_vals = merged[merged[group_col] == test_group][metric].values
+
+            # Observed difference in mean change
+            obs_diff = np.mean(test_vals) - np.mean(control_vals)
+
+            # Permutation test
+            combined = np.concatenate([control_vals, test_vals])
+            n_control = len(control_vals)
+
+            perm_diffs = []
+            for _ in range(n_permutations):
+                np.random.shuffle(combined)
+                perm_control = combined[:n_control]
+                perm_test = combined[n_control:]
+                perm_diff = np.mean(perm_test) - np.mean(perm_control)
+                perm_diffs.append(perm_diff)
+
+            perm_diffs = np.array(perm_diffs)
+            p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
+
+            results[metric] = {
+                "control_mean": np.mean(control_vals),
+                "control_sem": stats.sem(control_vals),
+                "test_mean": np.mean(test_vals),
+                "test_sem": stats.sem(test_vals),
+                "observed_diff": obs_diff,
+                "p_value": p_value,
+            }
+
+        # Apply Benjamini-Hochberg FDR correction across the two metrics
+        def benjamini_hochberg_array(pvals, alpha=0.05):
+            pvals = np.array(pvals)
+            m = len(pvals)
+            sorted_idx = np.argsort(pvals)
+            sorted_p = pvals[sorted_idx]
+            thresholds = (np.arange(1, m + 1) / m) * alpha
+            below = sorted_p <= thresholds
+            reject = np.zeros(m, dtype=bool)
+            if np.any(below):
+                max_i = np.max(np.where(below)[0])
+                reject[: max_i + 1] = True
+            # adjusted p-values
+            p_adj_sorted = np.minimum.accumulate((m / np.arange(m, 0, -1)) * sorted_p[::-1])[::-1]
+            p_adj = np.empty_like(p_adj_sorted)
+            p_adj[sorted_idx] = p_adj_sorted
+            return reject[sorted_idx.argsort()], p_adj
+
+        pvals = [results["absolute_change"]["p_value"], results["percent_change"]["p_value"]]
+        rej, p_adj = benjamini_hochberg_array(pvals, alpha=0.05)
+        # assign adjusted p-values and significance
+        metrics = ["absolute_change", "percent_change"]
+        for mname, p_raw, p_a, r in zip(metrics, pvals, p_adj, rej):
+            results[mname]["p_value_adj"] = float(p_a)
+            results[mname]["significant_adj"] = bool(r)
+
+        # Print results
+        print(f"\n{'='*60}")
+        print("VELOCITY CHANGE COMPARISON")
+        print(f"{'='*60}")
+        print(f"Control group: {control_group} (n={len(control_vals)})")
+        print(f"Test group: {test_group} (n={len(test_vals)})")
+        print(f"Pre window: {pre_window[0]/60:.1f}-{pre_window[1]/60:.1f} min")
+        print(f"Post window: {post_window[0]/60:.1f}-{post_window[1]/60:.1f} min")
+
+        print(f"\nABSOLUTE CHANGE (mm/s):")
+        print(
+            f"  {control_group}: {results['absolute_change']['control_mean']:.3f} ± "
+            f"{results['absolute_change']['control_sem']:.3f}"
+        )
+        print(
+            f"  {test_group}: {results['absolute_change']['test_mean']:.3f} ± "
+            f"{results['absolute_change']['test_sem']:.3f}"
+        )
+        print(f"  Difference: {results['absolute_change']['observed_diff']:.3f}")
+        print(f"  P-value: {results['absolute_change']['p_value']:.6f}")
+
+        print(f"\nPERCENT CHANGE (%):")
+        print(
+            f"  {control_group}: {results['percent_change']['control_mean']:.1f}% ± "
+            f"{results['percent_change']['control_sem']:.1f}%"
+        )
+        print(
+            f"  {test_group}: {results['percent_change']['test_mean']:.1f}% ± "
+            f"{results['percent_change']['test_sem']:.1f}%"
+        )
+        print(f"  Difference: {results['percent_change']['observed_diff']:.1f}%")
+        print(f"  P-value: {results['percent_change']['p_value']:.6f}")
+
+        return merged, results
+
     # Initialize permutation results
     permutation_results = None
 
@@ -609,6 +917,14 @@ def generate_velocity_plot(
     else:
         print(f"\nSkipping statistical analysis (--no-stats flag enabled)")
 
+    # Compare velocity changes
+    merged_changes, change_results = compare_velocity_changes(
+        data_with_velocities,
+        pre_window=(3400, 3600),
+        post_window=(3800, 4000),
+        n_permutations=n_permutations,
+    )
+
     # Generate and save full range plot
     print(f"\nGenerating full range velocity plot...")
     fig_full, ax_full = plt.subplots(figsize=(12, 6))
@@ -619,7 +935,7 @@ def generate_velocity_plot(
         group_col="Magnet",
         subject_col="fly",
         n_bins=n_bins,
-        permutation_results=None,  # No stats for full plot
+        permutation_results=permutation_results,  # show trajectory permutation stats on full plot
         output_path=None,
         time_window=None,
         ax=ax_full,
@@ -627,11 +943,14 @@ def generate_velocity_plot(
     )
     pdf_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.pdf"
     png_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.png"
+    svg_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.svg"
     fig_full.tight_layout()
     fig_full.savefig(pdf_path_full, format="pdf", dpi=300, bbox_inches="tight")
     fig_full.savefig(png_path_full, format="png", dpi=300, bbox_inches="tight")
+    fig_full.savefig(svg_path_full, format="svg", dpi=300, bbox_inches="tight")
     print(f"  Saved PDF: {pdf_path_full}")
     print(f"  Saved PNG: {png_path_full}")
+    print(f"  Saved SVG: {svg_path_full}")
     plt.close(fig_full)
 
     # Generate and save windowed plot
@@ -654,12 +973,23 @@ def generate_velocity_plot(
     )
     pdf_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.pdf"
     png_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.png"
+    svg_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.svg"
     fig_window.tight_layout()
     fig_window.savefig(pdf_path_window, format="pdf", dpi=300, bbox_inches="tight")
     fig_window.savefig(png_path_window, format="png", dpi=300, bbox_inches="tight")
+    fig_window.savefig(svg_path_window, format="svg", dpi=300, bbox_inches="tight")
     print(f"  Saved PDF: {pdf_path_window}")
     print(f"  Saved PNG: {png_path_window}")
+    print(f"  Saved SVG: {svg_path_window}")
     plt.close(fig_window)
+
+    # Now plot pre/post per-fly comparisons and annotate with permutation test results
+    try:
+        merged_pre_post = compute_pre_post_median(data_with_velocities)
+        prepost_out = output_dir / f"velocity_pre_post_by_fly_{test_group}_vs_{control_group}"
+        plot_pre_post_by_group(merged_pre_post, change_results=change_results, output_path=prepost_out)
+    except Exception as e:
+        print(f"Warning: failed to compute/plot pre/post medians after change comparison: {e}")
 
     # Save statistical results if statistics were computed
     if compute_stats and permutation_results is not None:

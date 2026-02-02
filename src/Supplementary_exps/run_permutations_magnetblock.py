@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """
-Script to generate Mann-Whitney U test jitterboxplots for MagnetBlock experiments.
+Script to generate permutation-based jitterboxplots for MagnetBlock experiments.
 
-This script generates comprehensive Mann-Whitney U test visualizations with:
-- Comparison between Magnet and non-Magnet groups
-- FDR correction across all comparisons for each metric
-- Significance-based sorting (significantly increased/neutral/significantly decreased)
-- Secondary sorting by median within each significance group
-- Color-coded backgrounds for easy interpretation
-- Statistical significance annotations (*, **, ***)
-- External legend for improved readability
+
+    parser.add_argument(
+        "--metrics-file",
+        type=str,
+        default="src/PCA/metrics_lists/final_metrics_for_pca_alt.txt",
+        help=(
+            "Path to a file listing metrics (one per line) to analyze (reduces computation)."
+            " Defaults to src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+        ),
+    )
+This script generates comprehensive permutation-test visualizations with:
+ - Comparison between Magnet and non-Magnet groups
+ - FDR correction across all comparisons for each metric
+ - Significance-based sorting (significantly increased/neutral/significantly decreased)
+ - Secondary sorting by median within each significance group
+ - Color-coded backgrounds for easy interpretation
+ - Statistical significance annotations (*, **, ***)
+ - External legend for improved readability
 
 Usage:
     python run_mannwhitney_magnetblock.py [--no-overwrite] [--test]
@@ -166,7 +176,7 @@ def format_metric_label(metric_name):
     return elegant_name
 
 
-def generate_magnet_mannwhitney_plots(
+def generate_magnet_permutation_plots(
     data,
     metrics,
     y="Magnet",
@@ -174,12 +184,13 @@ def generate_magnet_mannwhitney_plots(
     hue=None,
     palette="Set2",
     figsize=(12, 8),
-    output_dir="mann_whitney_plots",
+    output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
+    n_permutations=10000,
 ):
     """
-    Generates jitterboxplots for each metric with Mann-Whitney U tests between Magnet and non-Magnet groups.
+    Generates jitterboxplots for each metric with permutation tests between Magnet and non-Magnet groups.
     Applies FDR correction across all comparisons for each metric.
 
     Parameters:
@@ -211,7 +222,7 @@ def generate_magnet_mannwhitney_plots(
 
     for metric_idx, metric in enumerate(metrics):
         metric_start_time = time.time()
-        print(f"Generating Mann-Whitney jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
+        print(f"Generating permutation jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
         plot_data = data.dropna(subset=[metric, y])
 
@@ -242,18 +253,31 @@ def generate_magnet_mannwhitney_plots(
         control_data = convert_metric_data(control_data_raw, metric)
         test_data = convert_metric_data(test_data_raw, metric)
 
-        # Perform Mann-Whitney U test on RAW data (before conversion)
-        u_stat, p_value = mannwhitneyu(test_data_raw, control_data_raw, alternative="two-sided")
-
-        # Calculate medians on CONVERTED data for display
+        # Perform permutation test (on CONVERTED data) using median difference as statistic
         control_median = control_data.median()
         test_median = test_data.median()
         median_diff = test_median - control_median
 
-        # Calculate effect size (rank-biserial correlation)
-        n1 = len(control_data_raw)
-        n2 = len(test_data_raw)
-        effect_size = 1 - (2 * u_stat) / (n1 * n2)
+        n1 = len(control_data)
+        n2 = len(test_data)
+
+        obs_stat = float(median_diff)
+
+        combined = np.concatenate([control_data.values, test_data.values])
+        perm_diffs = np.empty(n_permutations)
+        for i in range(n_permutations):
+            np.random.shuffle(combined)
+            perm_control = combined[:n1]
+            perm_test = combined[n1:]
+            perm_diffs[i] = np.median(perm_test) - np.median(perm_control)
+
+        p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_stat)))
+
+        # Calculate effect size (Cohen's d using converted data)
+        s1 = control_data.std(ddof=1)
+        s2 = test_data.std(ddof=1)
+        pooled_sd = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / max(1, (n1 + n2 - 2)))
+        effect_size = float((test_median - control_median) / pooled_sd) if pooled_sd > 0 else np.nan
 
         # Store results
         stat_result = {
@@ -265,9 +289,10 @@ def generate_magnet_mannwhitney_plots(
             "Control_median": control_median,
             "Test_median": test_median,
             "Median_diff": median_diff,
-            "U_statistic": u_stat,
+            "U_statistic": np.nan,
             "p_value": p_value,
             "effect_size": effect_size,
+            "n_permutations": n_permutations,
         }
         all_stats.append(stat_result)
 
@@ -457,7 +482,7 @@ def generate_text_report(stats_df, data, report_file):
     report_lines = []
 
     report_lines.append("=" * 80)
-    report_lines.append("MAGNETBLOCK MANN-WHITNEY U TEST RESULTS")
+    report_lines.append("MAGNETBLOCK PERMUTATION TEST RESULTS")
     report_lines.append("=" * 80)
     report_lines.append("")
 
@@ -976,18 +1001,28 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
     print(f"  ✅ Saved: {plot_path}")
 
 
-def main(overwrite=True, test_mode=False):
-    """Main function to run Mann-Whitney analysis for MagnetBlock experiments"""
+def main(overwrite=True, test_mode=False, metrics_file=None):
+    """Main function to run permutation analysis for MagnetBlock experiments
+
+    Parameters
+    ----------
+    overwrite : bool
+        Whether to overwrite existing plots
+    test_mode : bool
+        If True, run a small subset for testing
+    metrics_file : str or None
+        Path to a file containing metric names (one per line) to restrict analysis
+    """
 
     print(f"\n{'='*80}")
-    print("MAGNETBLOCK MANN-WHITNEY U TEST ANALYSIS")
+    print("MAGNETBLOCK PERMUTATION TEST ANALYSIS")
     print(f"{'='*80}\n")
 
     # Load dataset
     dataset = load_and_clean_dataset(test_mode=test_mode)
 
     # Define output directory
-    output_dir = Path("/mnt/upramdya_data/MD/MagnetBlock/Plots/mann_whitney")
+    output_dir = Path("/mnt/upramdya_data/MD/MagnetBlock/Plots/permutation")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nOutput directory: {output_dir}")
@@ -997,6 +1032,25 @@ def main(overwrite=True, test_mode=False):
     exclude_cols = ["Magnet", "fly", "Corridor"]
     numeric_cols = dataset.select_dtypes(include=[np.number]).columns.tolist()
     metrics = [col for col in numeric_cols if col not in exclude_cols]
+
+    # If a metrics file is provided, read it and intersect with available metrics
+    if metrics_file is not None:
+        metrics_path = Path(metrics_file)
+        if metrics_path.exists():
+            with open(metrics_path, "r") as f:
+                requested = [line.strip() for line in f if line.strip()]
+            # Keep only metrics that exist in the dataset and are numeric
+            requested_present = [m for m in requested if m in metrics]
+            missing = [m for m in requested if m not in metrics]
+            if missing:
+                print(f"Warning: {len(missing)} requested metrics not found or non-numeric: {missing}")
+            if requested_present:
+                metrics = requested_present
+                print(f"Using {len(metrics)} metrics from {metrics_path}")
+            else:
+                print(f"No requested metrics found in dataset; falling back to automatic metric selection")
+        else:
+            print(f"Warning: metrics file not found: {metrics_path}; using automatic selection")
 
     print(f"\nFound {len(metrics)} numeric metrics to analyze")
 
@@ -1022,7 +1076,7 @@ def main(overwrite=True, test_mode=False):
 
     start_time = time.time()
 
-    stats_df = generate_magnet_mannwhitney_plots(
+    stats_df = generate_magnet_permutation_plots(
         data=dataset,
         metrics=metrics,
         y="Magnet",

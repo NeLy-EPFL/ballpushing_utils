@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Script to generate Mann-Whitney U test jitterboxplots for light condition experiments.
+-Script to generate permutation-test jitterboxplots for light condition experiments.
 
-This script generates comprehensive Mann-Whitney U test visualizations with:
+This script generates comprehensive permutation-test visualizations with:
 - Significance-based sorting (significantly increased/neutral/significantly decreased)
 - Secondary sorting by median within each significance group
 - Color-coded backgrounds for easy interpretation
@@ -21,6 +21,7 @@ import time
 import argparse
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -31,44 +32,54 @@ sys.path.append(str(Path(__file__).parent))  # Also add current directory
 sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting directory
 from matplotlib.patches import Rectangle, Patch
 from scipy import stats
-from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu, ttest_ind, levene
+from scipy.stats import chi2_contingency, fisher_exact, ttest_ind, levene
 from statsmodels.stats.multitest import multipletests
 
 
-def generate_light_condition_mannwhitney_plots(
+def generate_light_condition_permutation_plots(
     data,
     metrics,
     y="Light",
     control_condition="on",  # Light ON (control)
     hue=None,
     palette="Set2",
-    figsize=(15, 10),
-    output_dir="mann_whitney_plots",
+    figsize=(12, 8),
+    output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
+    n_permutations=10000,
 ):
     """
-    Generates jitterboxplots for each metric with Mann-Whitney U tests between each light condition and control.
-    Applies FDR correction across all comparisons for each metric.
+    Generate jitterboxplots for each metric with permutation tests between each
+    light condition and the control. Applies FDR correction across comparisons
+    for each metric.
 
     Parameters:
-        data (pd.DataFrame): The dataset to plot.
+        data (pd.DataFrame): Dataset to plot.
         metrics (list): List of metric names to plot.
-        y (str): The name of the column for the y-axis (light conditions). Default is "Light".
-        control_condition (str): Name of the control light condition. Default is "off".
-        hue (str, optional): The name of the column for color grouping. Default is None.
-        palette: Color palette for the plots (str or dict). Default is "Set2".
-        figsize (tuple, optional): Size of each figure. Default is (15, 10).
-        output_dir: Directory to save the plots. Default is "mann_whitney_plots".
-        fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
-        alpha (float): Significance level after FDR correction. Default is 0.05.
+        y (str): Column name for grouping (default: "Light").
+        control_condition (str): Control light condition name (default: "off").
+        hue (str, optional): Column name for color grouping (default: None).
+        palette (str or dict): Color palette for the plots (default: "Set2").
+        figsize (tuple): Figure size (width, height).
+        output_dir (str or Path): Directory to save plots.
+        fdr_method (str): Method for multiple-testing correction (default: "fdr_bh").
+        alpha (float): Significance level after FDR correction (default: 0.05).
+        n_permutations (int): Number of permutations for permutation tests
+            (default: 10000).
 
     Returns:
-        pd.DataFrame: Statistics table with Mann-Whitney U test results and FDR correction.
+        pd.DataFrame: Statistics table with permutation test results and FDR-corrected p-values.
     """
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Match font and PDF settings to magnetblock script for consistency
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
     # Get actual light conditions from data
     all_light_conditions = sorted(data[y].unique())
@@ -96,7 +107,7 @@ def generate_light_condition_mannwhitney_plots(
 
     for metric_idx, metric in enumerate(metrics):
         metric_start_time = time.time()
-        print(f"Generating Mann-Whitney jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
+        print(f"Generating permutation jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
         plot_data = data.dropna(subset=[metric, y])
 
@@ -115,7 +126,7 @@ def generate_light_condition_mannwhitney_plots(
 
         control_median = control_vals.median()  # Calculate control median once
 
-        # Determine if we should use parametric tests (t-test) or non-parametric (Mann-Whitney)
+        # Decision heuristic retained (parametric vs non-parametric), but tests below use permutation
         # Criteria: 1) Both groups have >30 samples, 2) Data is continuous (not binary-like)
         use_parametric = True
         parametric_reason = []
@@ -145,7 +156,7 @@ def generate_light_condition_mannwhitney_plots(
         n_comparisons = len(light_conditions)
         need_correction = False  # Only 2 conditions (on vs off)
 
-        test_type = "t-test" if use_parametric else "Mann-Whitney U"
+        test_type = "permutation"
         correction_note = "no correction needed (only 2 conditions)"
 
         if use_parametric:
@@ -166,44 +177,38 @@ def generate_light_condition_mannwhitney_plots(
                 continue
 
             try:
-                if use_parametric:
-                    # Use independent t-test (assuming unequal variances - Welch's t-test)
-                    # First check for equal variances using Levene's test
-                    levene_stat, levene_p = levene(test_vals, control_vals)
-                    equal_var = levene_p > 0.05  # If p > 0.05, assume equal variances
+                # Use permutation test on median difference (robust to non-normality)
+                obs_stat = float(np.median(test_vals) - np.median(control_vals))
+                combined = np.concatenate([control_vals.values, test_vals.values])
+                n_control = len(control_vals)
 
-                    # Perform t-test
-                    stat, pval = ttest_ind(test_vals, control_vals, equal_var=equal_var)
-                    test_name = f"t-test ({'equal' if equal_var else 'unequal'} var)"
-                    central_tendency = "mean"
-                else:
-                    # Use Mann-Whitney U test
-                    stat, pval = mannwhitneyu(test_vals, control_vals, alternative="two-sided")
-                    test_name = "Mann-Whitney U"
-                    central_tendency = "median"
+                perm_diffs = np.empty(n_permutations)
+                for i in range(n_permutations):
+                    np.random.shuffle(combined)
+                    perm_control = combined[:n_control]
+                    perm_test = combined[n_control:]
+                    perm_diffs[i] = np.median(perm_test) - np.median(perm_control)
 
-                # Determine direction of effect
+                pval = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_stat)))
+                stat = obs_stat
+                test_name = f"permutation({n_permutations})"
                 test_median = test_vals.median()
                 test_mean = test_vals.mean()
                 control_median = control_vals.median()
                 control_mean = control_vals.mean()
-
-                # For parametric tests, use means; for non-parametric, use medians
-                if use_parametric:
-                    direction = "increased" if test_mean > control_mean else "decreased"
-                    effect_size = test_mean - control_mean
-                else:
-                    direction = "increased" if test_median > control_median else "decreased"
-                    effect_size = test_median - control_median
-
+                direction = "increased" if obs_stat > 0 else ("decreased" if obs_stat < 0 else "none")
+                effect_size = obs_stat
+                central_tendency = "median"
             except Exception as e:
-                print(f"Error in {test_type} for {light_condition} vs {control_condition}: {e}")
+                print(f"Error in permutation test for {light_condition} vs {control_condition}: {e}")
                 pval = 1.0
                 direction = "none"
                 effect_size = 0.0
                 stat = np.nan
-                test_name = f"{test_type} (failed)"
-                central_tendency = "median"  # Default fallback
+                test_name = f"permutation({n_permutations}) (failed)"
+                test_median = np.nan
+                test_mean = np.nan
+                central_tendency = "median"
 
             pvals.append(pval)
             test_results.append(
@@ -215,14 +220,14 @@ def generate_light_condition_mannwhitney_plots(
                     "direction": direction,
                     "effect_size": effect_size,
                     "test_statistic": stat,
-                    "test_median": test_vals.median() if len(test_vals) > 0 else np.nan,
-                    "test_mean": test_vals.mean() if len(test_vals) > 0 else np.nan,
+                    "test_median": test_median,
+                    "test_mean": test_mean,
                     "control_median": control_median,
                     "control_mean": control_vals.mean(),
                     "test_n": len(test_vals),
                     "control_n": len(control_vals),
                     "test_type": test_name,
-                    "parametric": use_parametric,
+                    "parametric": False,
                     "central_tendency": central_tendency,
                 }
             )
@@ -305,45 +310,18 @@ def generate_light_condition_mannwhitney_plots(
         for result in test_results:  # Exclude control from final stats
             all_stats.append(result)
 
-        # Calculate appropriate figure height based on number of categories
+        # Calculate appropriate figure width based on number of categories
         n_categories = len(sorted_light_conditions)
-        # For light conditions (fewer categories), use different sizing than nicknames
-        # Minimum 1.0 inches per category for better readability with fewer items
-        fig_height = max(8, n_categories * 1.0 + 4)  # +4 for margins and title
-        # Increase width to accommodate legend outside
-        fig_width = figsize[0] + 4  # Extra width for external legend
+        # For light conditions (few categories), use minimum width but allow expansion
+        fig_width = max(8, n_categories * 1.0 + 4)  # +4 for margins and title
+        fig_height = figsize[1]  # Use requested height (matches magnetblock style)
 
-        # Create the plot with adjusted size
+        # Create the plot with adjusted size (vertical orientation)
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
 
-        # All scatter points are black
-        colors = ["black" for lc in sorted_light_conditions]
+        # No background shading for significance (clean styling per request)
 
-        # Add colored backgrounds only for significant results
-        y_positions = range(len(sorted_light_conditions))
-        for i, light_condition in enumerate(sorted_light_conditions):
-            result = next((r for r in all_results if r["LightCondition"] == light_condition), None)
-            if not result:
-                continue
-
-            # Add background color only for significant results (like TNT version)
-            if result["sig_level"] == "control":
-                bg_color = "lightblue"
-                alpha_bg = 0.1
-            elif result["significant"] and result["direction"] == "increased":
-                bg_color = "lightgreen"
-                alpha_bg = 0.15
-            elif result["significant"] and result["direction"] == "decreased":
-                bg_color = "lightcoral"
-                alpha_bg = 0.15
-            else:
-                # Non-significant gets no background (white/transparent)
-                continue
-
-            # Add background rectangle
-            ax.axhspan(i - 0.4, i + 0.4, color=bg_color, alpha=alpha_bg, zorder=0)
-
-        # Draw boxplots with black styling: solid for 'on', dashed for 'off'
+        # Draw vertical boxplots with black styling: solid for 'on', dashed for 'off'
         for light_condition in sorted_light_conditions:
             condition_data = plot_data[plot_data[y] == light_condition][metric].dropna()
             if len(condition_data) == 0:
@@ -355,122 +333,119 @@ def generate_light_condition_mannwhitney_plots(
             linestyle = light_condition_styles.get(light_condition, "solid")
             linewidth = 2.5
 
-            # Create boxplot with black lines
+            # Create vertical boxplot with black lines
             bp = ax.boxplot(
                 [condition_data],
                 positions=[position],
                 widths=0.6,
                 patch_artist=False,
                 showfliers=False,
-                vert=False,
+                vert=True,
                 boxprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
                 whiskerprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
                 capprops=dict(color="black", linewidth=linewidth, linestyle=linestyle),
-                medianprops=dict(color="black", linewidth=linewidth+0.5, linestyle=linestyle),
+                medianprops=dict(color="black", linewidth=linewidth + 0.5, linestyle=linestyle),
             )
-
-        # Skip the old boxplot drawing code
-        if False:
-            condition_data = plot_data[plot_data[y] == light_condition]
-            if condition_data.empty:
+        # Overlay jittered scatter per condition with requested styling (vertical)
+        for idx, lc in enumerate(sorted_light_conditions):
+            vals = plot_data[plot_data[y] == lc][metric].dropna().values
+            if len(vals) == 0:
                 continue
-
-            is_control = light_condition == control_condition
-
-            if is_control:
-                # Control group styling - red dashed boxes (like TNT version)
-                sns.boxplot(
-                    data=condition_data,
-                    x=metric,
-                    y=y,
-                    showfliers=False,
-                    width=0.5,  # Wider for better visibility with fewer categories
-                    ax=ax,
-                    boxprops=dict(facecolor="none", edgecolor="red", linewidth=2, linestyle="--"),
-                    medianprops=dict(color="red", linewidth=2),
-                    whiskerprops=dict(color="red", linewidth=1.5, linestyle="--"),
-                    capprops=dict(color="red", linewidth=1.5),
-                )
+            x_jitter = np.random.normal(idx, 0.08, size=len(vals))
+            # Light OFF: no fill, black outline; Light ON: filled black
+            if lc == "off":
+                ax.scatter(x_jitter, vals, s=40, facecolors="none", edgecolors="black", linewidths=0.8, zorder=3)
             else:
-                # Test group styling - black solid boxes (like TNT version)
-                sns.boxplot(
-                    data=condition_data,
-                    x=metric,
-                    y=y,
-                    showfliers=False,
-                    width=0.5,  # Wider for better visibility with fewer categories
-                    ax=ax,
-                    boxprops=dict(facecolor="none", edgecolor="black", linewidth=1),
-                    medianprops=dict(color="black", linewidth=1.5),
-                    whiskerprops=dict(color="black", linewidth=1),
-                    capprops=dict(color="black", linewidth=1),
-                )
+                ax.scatter(x_jitter, vals, s=40, facecolors="black", edgecolors="black", linewidths=0.5, zorder=3)
 
-        # Overlay stripplot for jitter with black color (using capitalized display labels)
-        sns.stripplot(
-            data=plot_data,
-            x=metric,
-            y=y + "_display",
-            dodge=False,
-            alpha=0.5,
-            jitter=True,
-            color="black",
-            size=8,
-            ax=ax,
-        )
+        # Explicitly set x-tick labels to show ON/OFF and sample sizes (n)
+        counts = [len(plot_data[plot_data[y] == lc]) for lc in sorted_light_conditions]
+        display_labels_ordered = [
+            f"{value_to_label.get(lc, str(lc))} (n={cnt})" for lc, cnt in zip(sorted_light_conditions, counts)
+        ]
+        ax.set_xticks(range(len(sorted_light_conditions)))
+        ax.set_xticklabels(display_labels_ordered)
 
-        # Explicitly set y-tick labels to show ON/OFF instead of numeric positions
-        display_labels_ordered = [value_to_label.get(lc, str(lc)) for lc in sorted_light_conditions]
-        ax.set_yticks(range(len(sorted_light_conditions)))
-        ax.set_yticklabels(display_labels_ordered)
+        # Set ylim BEFORE adding annotations to ensure proper positioning
+        y_max = plot_data[metric].quantile(0.99)
+        y_min = plot_data[metric].min()
+        # Add space for annotations above
+        data_range = y_max - y_min
+        ax.set_ylim(bottom=y_min - 0.05 * data_range, top=y_max + 0.15 * data_range)
 
-        # Set xlim BEFORE adding annotations to ensure proper positioning
-        x_max = plot_data[metric].quantile(0.99)
-        x_min = plot_data[metric].min()
-        # Add space for annotations on the right
-        data_range = x_max - x_min
-        ax.set_xlim(left=x_min - 0.05 * data_range, right=x_max + 0.15 * data_range)
+        # Add a single between-group significance annotation when exactly two conditions
+        if len(sorted_light_conditions) == 2:
+            vals0 = plot_data[plot_data[y] == sorted_light_conditions[0]][metric].dropna().values
+            vals1 = plot_data[plot_data[y] == sorted_light_conditions[1]][metric].dropna().values
+            if len(vals0) > 0 and len(vals1) > 0:
+                obs_stat = float(np.median(vals1) - np.median(vals0))
+                combined = np.concatenate([vals0, vals1])
+                n0 = len(vals0)
 
-        # Now add significance annotations with fixed positioning
-        for i, light_condition in enumerate(sorted_light_conditions):
-            result = next((r for r in all_results if r["LightCondition"] == light_condition), None)
-            if not result:
-                continue
+                perm_diffs = np.empty(n_permutations)
+                for i in range(n_permutations):
+                    np.random.shuffle(combined)
+                    perm0 = combined[:n0]
+                    perm1 = combined[n0:]
+                    perm_diffs[i] = np.median(perm1) - np.median(perm0)
 
-            # Add significance annotation at a fixed position relative to data range
-            if result["sig_level"] not in ["control", "ns"]:
-                yticklocs = ax.get_yticks()
-                # Position stars at 95th percentile of data range for visibility
-                x_pos = x_max + 0.05 * data_range
+                pval_between = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_stat)))
+
+                if pval_between < 0.001:
+                    sig_between = "***"
+                elif pval_between < 0.01:
+                    sig_between = "**"
+                elif pval_between < 0.05:
+                    sig_between = "*"
+                else:
+                    sig_between = "ns"
+
+                x_pos = 0.5 * (0 + 1)
+                y_pos = y_max + 0.05 * data_range
+                ann_text = f"{sig_between}"
                 ax.text(
-                    x=x_pos,
-                    y=float(yticklocs[i]),
-                    s=result["sig_level"],
+                    x_pos,
+                    y_pos,
+                    ann_text,
                     color="red",
-                    fontsize=20,
+                    fontsize=24,
                     fontweight="bold",
-                    va="center",
-                    ha="left",
+                    va="bottom",
+                    ha="center",
                     clip_on=False,
                 )
+
+        # Also add p-value summary in the top-left similar to magnetblock plots
+        if test_results:
+            p_texts = [
+                f"{r['LightCondition']}: p={r.get('pval_corrected', r.get('pval_raw', 1.0)):.3f}" for r in test_results
+            ]
+            p_text = ", ".join(p_texts)
+            ax.text(
+                0.02,
+                0.98,
+                p_text,
+                transform=ax.transAxes,
+                fontsize=10,
+                verticalalignment="top",
+                horizontalalignment="left",
+                bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
+            )
 
         # Formatting with increased font sizes
         plt.xticks(fontsize=18)
         plt.yticks(fontsize=18)
         plt.xlabel(metric, fontsize=22)
         plt.ylabel("Light Condition", fontsize=22)
-        plt.title(f"Mann-Whitney U Test: {metric} by Light Condition", fontsize=24)
+        plt.title(f"Permutation test: {metric} by Light Condition", fontsize=24)
         ax.grid(axis="x", alpha=0.3)
 
         # Create custom legend with line styles
-        from matplotlib.patches import Patch
         from matplotlib.lines import Line2D
 
         legend_elements = [
             Line2D([0], [0], color="black", linewidth=2.5, linestyle="solid", label="Light ON (Control)"),
             Line2D([0], [0], color="black", linewidth=2.5, linestyle="dashed", label="Light OFF (Test)"),
-            Patch(facecolor="lightgreen", alpha=0.15, label="Significantly Increased"),
-            Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
         ]
 
         ax.legend(
@@ -485,7 +460,7 @@ def generate_light_condition_mannwhitney_plots(
         plt.tight_layout()
 
         # Save plot
-        output_file = output_dir / f"{metric}_light_condition_mannwhitney.pdf"
+        output_file = output_dir / f"{metric}_light_condition_permutation.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
         plt.close()
 
@@ -505,12 +480,12 @@ def generate_light_condition_mannwhitney_plots(
 
     if not stats_df.empty:
         # Save statistics
-        stats_file = output_dir / "light_condition_mannwhitney_statistics.csv"
+        stats_file = output_dir / "light_condition_permutation_statistics.csv"
         stats_df.to_csv(stats_file, index=False)
         print(f"\nStatistics saved to: {stats_file}")
 
         # Generate text report
-        report_file = output_dir / "light_condition_mannwhitney_report.md"
+        report_file = output_dir / "light_condition_permutation_report.md"
         generate_text_report(stats_df, data, control_condition, report_file)
         print(f"Text report saved to: {report_file}")
 
@@ -541,7 +516,7 @@ def generate_text_report(stats_df, data, control_condition, report_file):
         Path where to save the report
     """
     report_lines = []
-    report_lines.append("# Light Condition Mann-Whitney U Test Report")
+    report_lines.append("# Light Condition Permutation Test Report")
     report_lines.append("## Statistical Analysis Results")
     report_lines.append("")
     report_lines.append(f"**Control group:** Light ON ('{control_condition}')")
@@ -833,7 +808,7 @@ def should_skip_metric(metric, output_dir, overwrite=True):
     # Check for existing plot files for this metric
     output_dir = Path(output_dir)
 
-    # Check for continuous metric plots (Mann-Whitney style)
+    # Check for continuous metric plots (permutation style)
     continuous_plot_patterns = [f"*{metric}*.pdf", f"*{metric}*.png", f"{metric}_*.pdf", f"{metric}_*.png"]
 
     # Check for binary metric plots
@@ -905,8 +880,8 @@ def get_nan_annotations(data, metrics, y_col="Light"):
     return nan_annotations
 
 
-def main(overwrite=True, test_mode=False):
-    """Main function to run Mann-Whitney plots for all metrics.
+def main(overwrite=True, test_mode=False, metrics_file="src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"):
+    """Main function to run permutation-test plots for all metrics.
 
     Parameters:
     -----------
@@ -922,7 +897,7 @@ def main(overwrite=True, test_mode=False):
     - Batch fillna operations for better performance
     - FDR correction for proper multiple testing correction
     """
-    print(f"Starting Mann-Whitney U test analysis for light condition experiments...")
+    print(f"Starting permutation-test analysis for light condition experiments...")
     if not overwrite:
         print("📄 Overwrite disabled: Will skip metrics with existing plots")
     if test_mode:
@@ -1123,7 +1098,7 @@ def main(overwrite=True, test_mode=False):
     print(f"\n📊 EFFICIENT METRICS ANALYSIS SUMMARY:")
     print(f"=" * 60)
     print(f"✅ Metrics filtering applied early for efficiency - excluded patterns filtered before categorization")
-    print(f"Found {len(continuous_metrics)} continuous metrics for Mann-Whitney analysis:")
+    print(f"Found {len(continuous_metrics)} continuous metrics for permutation analysis:")
     for i, metric in enumerate(continuous_metrics, 1):
         print(f"  {i:2d}. {metric}")
 
@@ -1140,6 +1115,25 @@ def main(overwrite=True, test_mode=False):
                 print(f"  - {metric} ({reason}, {dtype}, {unique_count} unique values)")
 
     # If in test mode, limit to first 3 metrics and show more timing info
+    # If a metrics file is provided, restrict available metrics to that list (default: PCA list)
+    if metrics_file is not None:
+        metrics_path = Path(metrics_file)
+        if metrics_path.exists():
+            with open(metrics_path, "r") as f:
+                requested = [line.strip() for line in f if line.strip()]
+            # Keep only requested metrics that were classified as continuous
+            requested_present = [m for m in requested if m in continuous_metrics]
+            missing = [m for m in requested if m not in available_metrics]
+            if missing:
+                print(f"Warning: {len(missing)} requested metrics not found or non-numeric: {missing}")
+            if requested_present:
+                continuous_metrics = requested_present
+                print(f"Using {len(continuous_metrics)} metrics from {metrics_path}")
+            else:
+                print(f"No requested continuous metrics found in dataset; proceeding with automatic selection")
+        else:
+            print(f"Warning: metrics file not found: {metrics_path}; using automatic selection")
+
     if test_mode:
         original_count = len(continuous_metrics)
         continuous_metrics = continuous_metrics[:3]
@@ -1184,11 +1178,11 @@ def main(overwrite=True, test_mode=False):
 
     # 1. Process continuous metrics with Mann-Whitney U tests
     if continuous_metrics:
-        print(f"\n--- CONTINUOUS METRICS ANALYSIS (Mann-Whitney U tests) ---")
+        print(f"\n--- CONTINUOUS METRICS ANALYSIS (permutation tests) ---")
         # Filter to only continuous metrics + required columns
         continuous_data = filtered_data[["Light"] + continuous_metrics].copy()
 
-        print(f"Generating Mann-Whitney plots for light conditions...")
+        print(f"Generating permutation plots for light conditions...")
         print(f"Continuous metrics dataset shape: {continuous_data.shape}")
         print(f"Output directory: {output_dir}")
 
@@ -1221,7 +1215,7 @@ def main(overwrite=True, test_mode=False):
                     for condition, info in condition_info.items():
                         print(f"    - {condition}: {info['annotation']}")
 
-            print(f"🚀 Starting Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics...")
+            print(f"🚀 Starting permutation analysis for {len(metrics_to_process)} continuous metrics...")
             print(f"📊 Dataset shape for analysis: {continuous_data.shape}")
             print(f"📊 Light conditions: {sorted(continuous_data['Light'].unique())}")
             print(f"📊 Sample sizes per light condition:")
@@ -1236,7 +1230,7 @@ def main(overwrite=True, test_mode=False):
 
             # Use the new FDR-corrected function
             start_time = time.time()
-            stats_df = generate_light_condition_mannwhitney_plots(
+            stats_df = generate_light_condition_permutation_plots(
                 continuous_data,
                 metrics=metrics_to_process,
                 y="Light",
@@ -1246,12 +1240,13 @@ def main(overwrite=True, test_mode=False):
                 output_dir=str(output_dir),
                 fdr_method="fdr_bh",  # Benjamini-Hochberg FDR correction
                 alpha=0.05,  # FDR-corrected significance level
+                n_permutations=10000,
             )
 
             end_time = time.time()
             elapsed_time = end_time - start_time
             print(
-                f"✅ FDR-corrected Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
+                f"✅ FDR-corrected permutation analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
             )
 
     print(f"Unique light conditions: {len(filtered_data['Light'].unique())}")
@@ -1264,7 +1259,7 @@ def main(overwrite=True, test_mode=False):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Generate Mann-Whitney U test jitterboxplots for light condition experiments",
+        description="Generate permutation-test jitterboxplots for light condition experiments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -1282,8 +1277,17 @@ Examples:
         action="store_true",
         help="Test mode: only process first 3 metrics for debugging (default: process all metrics)",
     )
+    parser.add_argument(
+        "--metrics-file",
+        type=str,
+        default="src/PCA/metrics_lists/final_metrics_for_pca_alt.txt",
+        help=(
+            "Path to a file listing metrics (one per line) to analyze (reduces computation)."
+            " Defaults to src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+        ),
+    )
 
     args = parser.parse_args()
 
     # Run main function with overwrite parameter (invert --no-overwrite)
-    main(overwrite=not args.no_overwrite, test_mode=args.test)
+    main(overwrite=not args.no_overwrite, test_mode=args.test, metrics_file=args.metrics_file)
