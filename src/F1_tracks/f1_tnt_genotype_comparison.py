@@ -65,10 +65,10 @@ SELECTED_GENOTYPES = [
     # "TNTxTH",
     #'PRxTH',
     # "TNTxTRH",
-    # "TNTxMB247",
+    "TNTxMB247",
     #'PRxMB247',
-    "TNTxLC10-2",
-    "TNTxLC16-1",
+    # "TNTxLC10-2",
+    # "TNTxLC16-1",
     #'PRxLC16-1',
 ]
 
