@@ -47,7 +47,7 @@ DATASET_PATHS = {
     "coordinates": "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/F1_coordinates/pooled_F1_coordinates.feather",
 }
 
-OUTPUT_DIR = "/mnt/upramdya_data/MD/F1_Tracks/F1_TNT/MB"
+OUTPUT_DIR = "/mnt/upramdya_data/MD/F1_Tracks/F1_TNT/All"
 
 # ============================================================================
 # GENOTYPE SELECTION - Comment out genotypes to exclude from analysis
@@ -61,14 +61,14 @@ SELECTED_GENOTYPES = [
     "TNTxEmptySplit",
     #'TNTxPR',
     # === EXPERIMENTAL GENOTYPES (paired with internal controls) ===
-    # "TNTxDDC",
-    # "TNTxTH",
+    "TNTxDDC",
+    "TNTxTH",
     #'PRxTH',
-    # "TNTxTRH",
+    "TNTxTRH",
     "TNTxMB247",
     #'PRxMB247',
-    # "TNTxLC10-2",
-    # "TNTxLC16-1",
+    "TNTxLC10-2",
+    "TNTxLC16-1",
     #'PRxLC16-1',
 ]
 
