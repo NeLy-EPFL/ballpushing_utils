@@ -10,6 +10,13 @@ This script is adapted for dark olfaction experiments with grouping by:
 - BallType (ctrl, sand)
 """
 
+import matplotlib
+
+matplotlib.rcParams["pdf.fonttype"] = 42
+
+matplotlib.rcParams["font.family"] = "Arial"
+
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -17,12 +24,36 @@ import seaborn as sns
 import argparse
 from pathlib import Path
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 
 def filter_data_by_time_window(data, time_col, start_time=-10, end_time=30):
     """Filter data to a specific time window."""
     return data[(data[time_col] >= start_time) & (data[time_col] <= end_time)]
+
+
+def downsample_to_seconds(data, time_col, value_col, group_cols, subject_col="fly"):
+    """
+    Downsample data to 1 datapoint per second per fly by rounding time to nearest second.
+
+    This mirrors the alignment approach used in light trajectory plots.
+    """
+    if data.empty:
+        return data
+
+    data = data.sort_values([subject_col, time_col]).copy()
+    data["time_rounded"] = data[time_col].round(0).astype(int)
+
+    agg_map = {value_col: "mean"}
+    for col in group_cols:
+        if col in data.columns:
+            agg_map[col] = "first"
+
+    downsampled = data.groupby([subject_col, "time_rounded"], as_index=False).agg(agg_map)
+    downsampled = downsampled.rename(columns={"time_rounded": time_col})
+
+    return downsampled
 
 
 def create_line_plot(data, x_col, y_col, hue_col, title, ax, color_mapping=None, linestyle_mapping=None):
@@ -112,7 +143,7 @@ def create_line_plot(data, x_col, y_col, hue_col, title, ax, color_mapping=None,
         )
 
     # Add vertical line at time 0
-    ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0%)")
+    # ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0%)")
 
     # Set labels and title
     ax.set_title(title, fontsize=14, fontweight="bold")
@@ -134,106 +165,6 @@ def create_line_plot(data, x_col, y_col, hue_col, title, ax, color_mapping=None,
     )
 
     return ax
-
-
-def normalize_adjusted_time_to_percentage(df, time_col="adjusted_time"):
-    """
-    Normalize time to 0-100% for each fly and resample to standard 0.1% intervals.
-
-    Args:
-        df: DataFrame with time and 'fly' columns
-        time_col: Name of the time column to normalize (default: 'adjusted_time')
-
-    Returns:
-        DataFrame with normalized time and standardized intervals
-    """
-    if time_col not in df.columns or "fly" not in df.columns:
-        print(f"Warning: Cannot normalize - missing '{time_col}' or 'fly' columns")
-        return df
-
-    print(f"Original {time_col} range: {df[time_col].min():.2f} to {df[time_col].max():.2f} seconds")
-
-    # Create standard time grid (0-100% in 0.1% steps)
-    standard_time_grid = np.arange(0, 100.1, 0.1)
-
-    normalized_data = []
-
-    # Group by fly and normalize each fly's data separately
-    for fly_id in df["fly"].unique():
-        fly_data = df[df["fly"] == fly_id].copy()
-
-        # Skip flies with no valid time data
-        if fly_data[time_col].isna().all():
-            continue
-
-        # Get valid time values for this fly
-        valid_mask = ~fly_data[time_col].isna()
-        if not valid_mask.any():
-            continue
-
-        valid_times = fly_data.loc[valid_mask, time_col]
-        min_time = valid_times.min()
-        max_time = valid_times.max()
-
-        # Skip if all times are the same or we have less than 2 points
-        if max_time <= min_time or valid_mask.sum() < 2:
-            continue
-
-        # Normalize to 0-100% for this fly
-        normalized_time = ((fly_data[time_col] - min_time) / (max_time - min_time)) * 100
-
-        # Create DataFrame for this fly with standard time grid
-        # Use the original time_col name to maintain consistency
-        fly_normalized = pd.DataFrame({time_col: standard_time_grid})
-
-        # Add fly identifier and other metadata columns
-        for col in ["fly", "Light", "Genotype", "BallType"]:
-            if col in fly_data.columns:
-                fly_normalized[col] = fly_data[col].iloc[0]
-
-        # Interpolate ball distance to standard time grid
-        ball_col = "distance_ball_0"
-        if ball_col in fly_data.columns:
-            valid_indices = valid_mask
-            interp_values = np.interp(
-                standard_time_grid,
-                normalized_time[valid_indices],
-                fly_data.loc[valid_indices, ball_col],
-                left=np.nan,
-                right=np.nan,
-            )
-            fly_normalized[ball_col] = interp_values
-
-        # Add other metadata columns without interpolation
-        for col in df.columns:
-            if col not in fly_normalized.columns and col not in [
-                "adjusted_time",
-                "time",
-                "distance_ball_0",
-                "frame",
-                "x_fly_0",
-                "y_fly_0",
-                "x_ball_0",
-                "y_ball_0",
-                "distance_fly_0",
-                "interaction_event",
-                "interaction_event_onset",
-            ]:
-                fly_normalized[col] = fly_data[col].iloc[0]
-
-        normalized_data.append(fly_normalized)
-
-    if not normalized_data:
-        print("Warning: No flies could be normalized")
-        return df
-
-    # Combine all normalized fly data
-    result_df = pd.concat(normalized_data, ignore_index=True)
-
-    print(f"Normalized {len(df['fly'].unique())} flies to standard 0-100% time grid")
-    print(f"Resulting dataset shape: {result_df.shape}")
-
-    return result_df
 
 
 def find_maximum_shared_time(df, fly_col="fly", time_col="adjusted_time"):
@@ -409,7 +340,7 @@ def create_line_plot_trimmed_time(
         )
 
     # Add vertical line at time 0
-    ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0s)")
+    # ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0s)")
 
     ax.set_xlabel(x_label, fontsize=12)
     ax.set_ylabel(y_label, fontsize=12)
@@ -576,22 +507,25 @@ def compute_permutation_test_genotype(
         p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
         p_values.append(p_value)
 
-    # No FDR correction needed for single comparison
-    p_values = np.array(p_values)
-    significant_timepoints = np.where(p_values < alpha)[0]
-    n_significant = np.sum(p_values < alpha)
+    # Apply FDR correction across all time bins
+    p_values_raw = np.array(p_values)
+    rejected, p_values_corrected, _, _ = multipletests(p_values_raw, alpha=alpha, method="fdr_bh")
 
     results = {
         "test_group": test_group,
         "control_group": control_group,
         "time_bins": time_bins,
         "observed_diffs": observed_diffs,
-        "p_values": p_values,
-        "significant_timepoints": significant_timepoints,
-        "n_significant": n_significant,
+        "p_values_raw": p_values_raw,
+        "p_values_corrected": p_values_corrected,
+        "p_values": p_values_corrected,  # For backward compatibility with plotting code
+        "significant_timepoints": np.where(rejected)[0],
+        "n_significant": np.sum(rejected),
+        "n_significant_raw": np.sum(p_values_raw < alpha),
     }
 
-    print(f"    Significant bins: {n_significant}/{n_bins} (α={alpha})")
+    print(f"    Raw significant bins: {results['n_significant_raw']}/{n_bins}")
+    print(f"    FDR significant bins: {results['n_significant']}/{n_bins} (α={alpha})")
 
     return results
 
@@ -637,6 +571,9 @@ def create_trajectory_plot_with_permutation(
     bin_edges : array
         Bin edges for time bins
     """
+    # Pixel to mm conversion factor (500 pixels = 30 mm)
+    PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
     if data.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
         ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14)
@@ -654,44 +591,69 @@ def create_trajectory_plot_with_permutation(
     control_group = "TNTxEmptyGal4"
     test_group = [g for g in groups if g != control_group][0]
 
+    # Get sample sizes for labels
+    n_control = data[data[group_col] == control_group][subject_col].nunique() if control_group in groups else 0
+    n_test = data[data[group_col] == test_group][subject_col].nunique() if test_group in groups else 0
+
+    # Convert to mm (don't shift individual fly data)
+    data_copy = data.copy()
+    data_copy[f"{value_col}_mm"] = data_copy[value_col] / PIXELS_PER_MM
+    value_col_plot = f"{value_col}_mm"
+
     # Create time bins for averaging (finer bins for smoothness)
     time_bin_size = 0.1
-    data_copy = data.copy()
     min_time = data_copy[time_col].min()
     max_time = data_copy[time_col].max()
     fine_bin_edges = np.arange(min_time, max_time + time_bin_size, time_bin_size)
     data_copy["time_bin_fine"] = pd.cut(data_copy[time_col], bins=fine_bin_edges, labels=False, include_lowest=True)
     data_copy["time_bin_center"] = data_copy["time_bin_fine"] * time_bin_size + time_bin_size / 2 + min_time
 
+    # Compute mean trajectories to find baseline for y-axis shift
+    # Same approach as light trajectories script - group by time directly
+    all_means = []
+    for group in groups:
+        group_data = data_copy[data_copy[group_col] == group]
+        # Group by time_bin_center to get mean and SEM
+        time_grouped = group_data.groupby("time_bin_center")[value_col_plot].agg(["mean", "sem"]).reset_index()
+        all_means.extend(time_grouped["mean"].values)
+
+    # Find the minimum mean value to use as y-axis baseline
+    y_baseline = min(all_means) if all_means else 0
+
     # Plot mean trajectories with error bands (no individual flies)
     for group in groups:
         group_data = data_copy[data_copy[group_col] == group]
 
-        # Get median value per fly per time bin
-        binned_per_fly = (
-            group_data.groupby([subject_col, "time_bin_center"])[value_col].median().reset_index()
-        )
+        # Group by time bin centers to compute mean and SEM
+        # Same approach as light trajectories script
+        time_grouped = group_data.groupby("time_bin_center")[value_col_plot].agg(["mean", "sem"]).reset_index()
 
-        # Calculate mean and SEM across flies
-        time_stats = binned_per_fly.groupby("time_bin_center")[value_col].agg(["mean", "sem"]).reset_index()
+        # Determine line style and color (IR8a purple, Empty grey)
+        linestyle = "dashed" if group == test_group else "solid"
+        if color_mapping is not None:
+            color = color_mapping.get(group, "gray")
+        else:
+            color = "#9467bd" if group == test_group else "#7f7f7f"
+        alpha_band = 0.15 if group == test_group else 0.25
 
-        # Plot mean line
+        # Plot mean trajectory - shift by baseline
         ax.plot(
-            time_stats["time_bin_center"],
-            time_stats["mean"],
-            color=color_mapping.get(group, "gray"),
-            linewidth=3,
-            label=group,
+            time_grouped["time_bin_center"],
+            time_grouped["mean"] - y_baseline,
+            linestyle=linestyle,
+            color=color,
+            linewidth=2.5,
+            label=f"{group} (n={n_control if group == control_group else n_test})",
             zorder=10,
         )
 
-        # Plot error band (SEM)
+        # Error band (SEM)
         ax.fill_between(
-            time_stats["time_bin_center"],
-            time_stats["mean"] - time_stats["sem"],
-            time_stats["mean"] + time_stats["sem"],
-            color=color_mapping.get(group, "gray"),
-            alpha=0.3,
+            time_grouped["time_bin_center"],
+            time_grouped["mean"] - y_baseline - time_grouped["sem"],
+            time_grouped["mean"] - y_baseline + time_grouped["sem"],
+            color=color,
+            alpha=alpha_band,
             zorder=5,
         )
 
@@ -701,17 +663,22 @@ def create_trajectory_plot_with_permutation(
             ax.axvline(edge, color="gray", linestyle="dotted", alpha=0.4, zorder=1)
 
     # Add vertical line at time 0
-    ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, linewidth=2, label="Exit time (0)", zorder=8)
+    # ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, linewidth=2, label="Exit time (0)", zorder=8)
 
     # Get current y-axis limits and extend them to make room for significance annotations
-    y_min, y_max = ax.get_ylim()
-    y_range = y_max - y_min
+    # Compute range from shifted data
+    y_max_shifted = max(all_means) - y_baseline if all_means else 0
+    y_range = y_max_shifted
 
-    # Extend y-axis by 20% to make room for significance stars
-    ax.set_ylim(y_min, y_max + 0.20 * y_range)
+    # Set y-axis limits - start at 0, add modest space at top for annotations
+    ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
 
     # Annotate significance levels from permutation test
     if permutation_results is not None and bin_edges is not None:
+        # Position for annotations (slightly above the top of data)
+        y_annotation_stars = y_max_shifted + 0.02 * y_range
+        y_annotation_pval = y_max_shifted + 0.05 * y_range
+
         for idx in permutation_results["significant_timepoints"]:
             if idx >= len(bin_edges) - 1:
                 continue
@@ -732,39 +699,42 @@ def create_trajectory_plot_with_permutation(
                 significance = ""
 
             if significance:
-                # Position stars using the original y_max and y_range (before extension)
-                y_star = y_max + 0.05 * y_range
+                # Add significance stars
                 ax.text(
                     x_pos,
-                    y_star,
+                    y_annotation_stars,
                     significance,
                     ha="center",
-                    va="bottom",
+                    va="center",
                     fontsize=16,
                     color="red",
                     fontweight="bold",
                     zorder=15,
                 )
 
-    # Formatting
-    ax.set_xlabel("Adjusted Time (%)" if "%" in str(data[time_col].max()) or data[time_col].max() > 100 else "Adjusted Time (s)", fontsize=12)
-    ax.set_ylabel("Distance to Ball (pixels)", fontsize=12)
-    ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14, pad=10)
-    ax.legend(loc="best", fontsize=10)
-    ax.grid(True, alpha=0.3)
+                # Add p-value below the stars
+                ax.text(
+                    x_pos,
+                    y_annotation_pval,
+                    f"p={p_value:.3f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    color="darkgray",
+                    zorder=15,
+                )
 
-    # Add sample sizes
-    n_control = data[data[group_col] == control_group][subject_col].nunique() if control_group in groups else 0
-    n_test = data[data[group_col] == test_group][subject_col].nunique() if test_group in groups else 0
-    ax.text(
-        0.02,
-        0.98,
-        f"n({control_group})={n_control}, n({test_group})={n_test}",
-        transform=ax.transAxes,
-        fontsize=9,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6),
+    # Formatting
+    ax.set_xlabel(
+        "Adjusted Time (%)" if "%" in str(data[time_col].max()) or data[time_col].max() > 100 else "Adjusted Time (s)",
+        fontsize=12,
     )
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=12)
+    ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14, pad=10)
+    # Legend outside plot window, top right
+    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=10)
+    # Remove background grid - only keep the time bin vertical lines
+    ax.grid(False)
 
 
 def main():
@@ -864,148 +834,31 @@ def main():
     # Print time range
     print(f"Time range: {df_clean[time_col].min():.2f}s to {df_clean[time_col].max():.2f}s")
 
-    # =============================================================================
-    # IMPLEMENTATION 1: PERCENTAGE-BASED NORMALIZATION (0-100%)
-    # =============================================================================
-    print(f"\n{'='*60}")
-    print("IMPLEMENTATION 1: PERCENTAGE-BASED NORMALIZATION")
-    print(f"{'='*60}")
-
-    # Transform time to normalized percentage
-    df_percentage = normalize_adjusted_time_to_percentage(df_clean, time_col=time_col)
-    print(
-        f"After normalization: {time_col} range {df_percentage[time_col].min():.1f}% to {df_percentage[time_col].max():.1f}%"
+    # Downsample to 1 datapoint per second per fly (align to integer seconds)
+    group_cols = [light_col, genotype_col, balltype_col]
+    df_aligned = downsample_to_seconds(
+        df_clean,
+        time_col=time_col,
+        value_col=ball_distance_col,
+        group_cols=group_cols,
+        subject_col="fly",
     )
+
+    print(f"\nDataset shape after downsampling: {df_aligned.shape}")
+    print(f"Time range after downsampling: {df_aligned[time_col].min():.2f}s to {df_aligned[time_col].max():.2f}s")
 
     # Define color mappings for consistent styling
     genotype_colors = {"TNTxEmptyGal4": "#7f7f7f", "TNTxIR8a": "#9467bd"}
     balltype_colors = {"ctrl": "green", "sand": "brown"}
-
-    # Combined grouping colors (Light_Genotype_BallType)
-    # Create combined group column - convert categorical columns to strings first
-    df_percentage["Combined_Group"] = (
-        df_percentage[light_col].astype(str)
-        + "_"
-        + df_percentage[genotype_col].astype(str)
-        + "_"
-        + df_percentage[balltype_col].astype(str)
-    )
-
-    # Plot 1: Ball distance by Genotype (percentage-based) - SIDE-BY-SIDE BY LIGHT
-    # Get unique light conditions
-    light_conditions = sorted(df_percentage[light_col].unique())
-
-    # Create side-by-side subplots for light conditions
-    fig1, axes1 = plt.subplots(1, len(light_conditions), figsize=(12 * len(light_conditions) / 2, 6))
-    if len(light_conditions) == 1:
-        axes1 = [axes1]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions):
-        # Filter data for this light condition
-        df_light = df_percentage[df_percentage[light_col] == light_condition].copy()
-
-        create_line_plot(
-            data=df_light,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col=genotype_col,
-            title=f"Light: {light_condition}",
-            ax=axes1[idx],
-            color_mapping=genotype_colors,
-        )
-
-    # Add overall title
-    fig1.suptitle("Ball Distance Over Normalized Time (%) by Genotype", fontsize=16, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    output_path_percentage_genotype = Path(__file__).parent / "dark_olfaction_coordinates_percentage_time_genotype.png"
-    plt.savefig(output_path_percentage_genotype, dpi=300, bbox_inches="tight")
-    print(f"Percentage-based plots (Genotype, side-by-side) saved to: {output_path_percentage_genotype}")
-
-    # Plot 2: Ball distance by BallType (percentage-based) - SIDE-BY-SIDE BY LIGHT
-    # Create side-by-side subplots for light conditions
-    fig2, axes2 = plt.subplots(1, len(light_conditions), figsize=(12 * len(light_conditions) / 2, 6))
-    if len(light_conditions) == 1:
-        axes2 = [axes2]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions):
-        # Filter data for this light condition
-        df_light = df_percentage[df_percentage[light_col] == light_condition].copy()
-
-        create_line_plot(
-            data=df_light,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col=balltype_col,
-            title=f"Light: {light_condition}",
-            ax=axes2[idx],
-            color_mapping=balltype_colors,
-        )
-
-    # Add overall title
-    fig2.suptitle("Ball Distance Over Normalized Time (%) by BallType", fontsize=16, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    output_path_percentage_balltype = Path(__file__).parent / "dark_olfaction_coordinates_percentage_time_balltype.png"
-    plt.savefig(output_path_percentage_balltype, dpi=300, bbox_inches="tight")
-    print(f"Percentage-based plots (BallType, side-by-side) saved to: {output_path_percentage_balltype}")
-
-    # Plot 3: Ball distance by combined grouping (percentage-based) - SIDE-BY-SIDE BY LIGHT
-    # Create color mapping for combined groups
-    combined_colors = {}
-    for group in df_percentage["Combined_Group"].unique():
-        light, genotype, balltype = group.split("_", 2)
-        # Use genotype color as base
-        combined_colors[group] = genotype_colors.get(genotype, "gray")
-
-    # Create linestyle mapping based on balltype
-    combined_linestyles = {}
-    for group in df_percentage["Combined_Group"].unique():
-        light, genotype, balltype = group.split("_", 2)
-        combined_linestyles[group] = ":" if balltype == "sand" else "-"
-
-    # Get unique light conditions
-    light_conditions = sorted(df_percentage[light_col].unique())
-
-    # Create side-by-side subplots for light conditions
-    fig3, axes3 = plt.subplots(1, len(light_conditions), figsize=(14 * len(light_conditions) / 2, 6))
-    if len(light_conditions) == 1:
-        axes3 = [axes3]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions):
-        # Filter data for this light condition
-        df_light = df_percentage[df_percentage[light_col] == light_condition].copy()
-
-        create_line_plot(
-            data=df_light,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col="Combined_Group",
-            title=f"Light: {light_condition}",
-            ax=axes3[idx],
-            color_mapping=combined_colors,
-            linestyle_mapping=combined_linestyles,
-        )
-
-    # Add overall title
-    fig3.suptitle(
-        "Ball Distance Over Normalized Time (%) by Genotype × BallType", fontsize=16, fontweight="bold", y=1.02
-    )
-
-    plt.tight_layout()
-    output_path_percentage_combined = Path(__file__).parent / "dark_olfaction_coordinates_percentage_time_combined.png"
-    plt.savefig(output_path_percentage_combined, dpi=300, bbox_inches="tight")
-    print(f"Percentage-based plots (Combined, side-by-side) saved to: {output_path_percentage_combined}")
-
     # =============================================================================
-    # IMPLEMENTATION 2: TRIMMED TIME APPROACH (ACTUAL SECONDS)
+    # IMPLEMENTATION 1: TRIMMED TIME APPROACH (ACTUAL SECONDS)
     # =============================================================================
     print(f"\n{'='*60}")
-    print("IMPLEMENTATION 2: TRIMMED TIME APPROACH")
+    print("IMPLEMENTATION 1: TRIMMED TIME APPROACH")
     print(f"{'='*60}")
 
-    # Use original cleaned data
-    original_df_clean = df_clean.copy()
+    # Use downsampled data
+    original_df_clean = df_aligned.copy()
 
     print(f"Original data shape for trimmed approach: {original_df_clean.shape}")
     print(
@@ -1026,6 +879,18 @@ def main():
         + "_"
         + df_trimmed[balltype_col].astype(str)
     )
+
+    # Create color mapping for combined groups
+    combined_colors = {}
+    for group in df_trimmed["Combined_Group"].unique():
+        _, genotype, _ = group.split("_", 2)
+        combined_colors[group] = genotype_colors.get(genotype, "gray")
+
+    # Create linestyle mapping based on balltype
+    combined_linestyles = {}
+    for group in df_trimmed["Combined_Group"].unique():
+        _, _, balltype = group.split("_", 2)
+        combined_linestyles[group] = ":" if balltype == "sand" else "-"
 
     # Plot 4: Ball distance by Genotype (trimmed time) - SIDE-BY-SIDE BY LIGHT
     # Get unique light conditions
@@ -1053,7 +918,7 @@ def main():
         )
 
     # Add overall title
-    fig4.suptitle("Ball Distance Over Trimmed Adjusted Time by Genotype", fontsize=16, fontweight="bold", y=1.02)
+    fig4.suptitle("", fontsize=16, fontweight="bold", y=1.02)
 
     plt.tight_layout()
     output_path_trimmed_genotype = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_genotype.png"
@@ -1083,7 +948,7 @@ def main():
         )
 
     # Add overall title
-    fig5.suptitle("Ball Distance Over Trimmed Adjusted Time by BallType", fontsize=16, fontweight="bold", y=1.02)
+    fig5.suptitle("", fontsize=16, fontweight="bold", y=1.02)
 
     plt.tight_layout()
     output_path_trimmed_balltype = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_balltype.png"
@@ -1119,9 +984,7 @@ def main():
         )
 
     # Add overall title
-    fig6.suptitle(
-        "Ball Distance Over Trimmed Adjusted Time by Genotype × BallType", fontsize=16, fontweight="bold", y=1.02
-    )
+    fig6.suptitle("", fontsize=16, fontweight="bold", y=1.02)
 
     plt.tight_layout()
     output_path_trimmed_combined = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_combined.png"
@@ -1129,10 +992,10 @@ def main():
     print(f"Trimmed time plots (Combined, side-by-side) saved to: {output_path_trimmed_combined}")
 
     # =============================================================================
-    # IMPLEMENTATION 3: POOLED BALLTYPES WITH PERMUTATION TESTS (GENOTYPE EFFECT)
+    # IMPLEMENTATION 2: POOLED BALLTYPES WITH PERMUTATION TESTS (GENOTYPE EFFECT)
     # =============================================================================
     print(f"\n{'='*60}")
-    print("IMPLEMENTATION 3: POOLED BALLTYPES (Genotype Effect with Permutation Tests)")
+    print("IMPLEMENTATION 2: POOLED BALLTYPES (Genotype Effect with Permutation Tests)")
     print(f"{'='*60}")
 
     # Pool across BallTypes
@@ -1200,22 +1063,29 @@ def main():
         )
 
     fig7.suptitle(
-        "Ball Distance Over Time - Genotype Effect (Pooled BallTypes) with Permutation Tests",
+        "",
         fontsize=16,
         fontweight="bold",
         y=1.02,
     )
 
     plt.tight_layout()
-    output_path_pooled_genotype = Path(__file__).parent / "dark_olfaction_coordinates_pooled_genotype_permutation.png"
+    output_dir = Path("/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Plots/Trajectories")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path_pooled_genotype = output_dir / "dark_olfaction_coordinates_pooled_genotype_permutation.png"
     plt.savefig(output_path_pooled_genotype, dpi=300, bbox_inches="tight")
+    # Also save as PDF and SVG
+    pdf_path = output_path_pooled_genotype.with_suffix(".pdf")
+    svg_path = output_path_pooled_genotype.with_suffix(".svg")
+    plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
+    plt.savefig(svg_path, dpi=300, bbox_inches="tight")
     print(f"\nPooled BallTypes plots (Genotype with permutation tests) saved to: {output_path_pooled_genotype}")
 
     # =============================================================================
-    # IMPLEMENTATION 4: CTRL BALLTYPE ONLY WITH PERMUTATION TESTS
+    # IMPLEMENTATION 3: CTRL BALLTYPE ONLY WITH PERMUTATION TESTS
     # =============================================================================
     print(f"\n{'='*60}")
-    print("IMPLEMENTATION 4: CTRL BALLTYPE ONLY (with Permutation Tests)")
+    print("IMPLEMENTATION 3: CTRL BALLTYPE ONLY (with Permutation Tests)")
     print(f"{'='*60}")
 
     # Filter to only ctrl BallType
@@ -1281,28 +1151,30 @@ def main():
         )
 
     fig8.suptitle(
-        "Ball Distance Over Time - Genotype Effect (Ctrl BallType Only) with Permutation Tests",
+        "",
         fontsize=16,
         fontweight="bold",
         y=1.02,
     )
 
     plt.tight_layout()
-    output_path_ctrl_genotype = Path(__file__).parent / "dark_olfaction_coordinates_ctrl_genotype_permutation.png"
+    output_dir = Path("/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Plots/Trajectories")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path_ctrl_genotype = output_dir / "dark_olfaction_coordinates_ctrl_genotype_permutation.png"
     plt.savefig(output_path_ctrl_genotype, dpi=300, bbox_inches="tight")
+    # Also save as PDF and SVG
+    pdf_path = output_path_ctrl_genotype.with_suffix(".pdf")
+    svg_path = output_path_ctrl_genotype.with_suffix(".svg")
+    plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
+    plt.savefig(svg_path, dpi=300, bbox_inches="tight")
     print(f"\nCtrl BallType only plots (Genotype with permutation tests) saved to: {output_path_ctrl_genotype}")
 
     # =============================================================================
     # SUMMARY STATISTICS
     # =============================================================================
     print("\n" + "=" * 80)
-    print("SUMMARY STATISTICS FOR BOTH APPROACHES")
+    print("SUMMARY STATISTICS")
     print("=" * 80)
-
-    print(f"\nPercentage-based approach:")
-    print(f"  - Data normalized to 0-100% per fly")
-    print(f"  - Final dataset: {df_percentage.shape[0]} data points from {df_percentage['fly'].nunique()} flies")
-    print(f"  - Time range: {df_percentage[time_col].min():.1f}% to {df_percentage[time_col].max():.1f}%")
 
     print(f"\nTrimmed time approach:")
     print(f"  - Maximum shared time: {max_shared_time:.2f} seconds")
@@ -1341,13 +1213,12 @@ def main():
             print(f"  No data in this window")
 
     print(f"\n{'='*80}")
-    print("COMPARISON SUMMARY")
+    print("SUMMARY")
     print(f"{'='*80}")
-    print("Four visualization approaches created:")
-    print("1. Percentage-based: Normalizes each fly's time to 0-100%, allows comparison of relative progression")
-    print("2. Trimmed time: Uses actual seconds but only up to maximum shared time, preserves absolute timing")
-    print("3. Pooled BallTypes: Focus on genotype effect across all ball types with permutation tests")
-    print("4. Ctrl BallType only: Focus on standard ball condition with permutation tests")
+    print("Three visualization approaches created:")
+    print("1. Trimmed time: Uses actual seconds but only up to maximum shared time, preserves absolute timing")
+    print("2. Pooled BallTypes: Focus on genotype effect across all ball types with permutation tests")
+    print("3. Ctrl BallType only: Focus on standard ball condition with permutation tests")
 
     print(f"\nGrouping factors:")
     print(f"  - Light: {sorted(df_clean[light_col].unique())}")
@@ -1355,10 +1226,6 @@ def main():
     print(f"  - BallType: {sorted(df_clean[balltype_col].unique())}")
 
     print(f"\nFiles saved:")
-    print(f"  Percentage-based:")
-    print(f"    - {output_path_percentage_genotype}")
-    print(f"    - {output_path_percentage_balltype}")
-    print(f"    - {output_path_percentage_combined} (side-by-side comparison)")
     print(f"  Trimmed time:")
     print(f"    - {output_path_trimmed_genotype}")
     print(f"    - {output_path_trimmed_balltype}")
@@ -1370,7 +1237,7 @@ def main():
 
     print(f"\n✅ All plots generated successfully!")
 
-    return df_percentage, df_trimmed
+    return df_trimmed
 
 
 if __name__ == "__main__":

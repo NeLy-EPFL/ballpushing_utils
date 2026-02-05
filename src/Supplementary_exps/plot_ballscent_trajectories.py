@@ -6,16 +6,19 @@ This script generates trajectory visualizations with:
 - Time-binned analysis of ball positions
 - FDR-corrected permutation tests for each time bin
 - Significance annotations (*, **, ***)
-- Comparison between Scented control and other ball types (Washed, New)
-- Individual fly trajectories with mean overlay
+- Comparison between control and other ball scents
+- Mean trajectories with error bands
+- Downsampling to 1 datapoint per second (aligned to integer seconds)
+- Combined figure with all comparisons in a subplot layout
 
 Usage:
-    python plot_ballscent_trajectories.py [--n-bins N] [--n-permutations N] [--output-dir PATH]
+    python plot_ballscent_trajectories.py [--n-bins N] [--n-permutations N] [--output-dir PATH] [--test]
 
 Arguments:
     --n-bins: Number of time bins for analysis (default: 12)
     --n-permutations: Number of permutations for statistical testing (default: 10000)
     --output-dir: Directory to save plots (default: /mnt/upramdya_data/MD/Ball_scents/Plots/trajectories)
+    --test: Test mode - limit to 10 flies per condition for quick verification
 """
 
 import sys
@@ -28,19 +31,140 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import pandas as pd
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
+matplotlib.rcParams["pdf.fonttype"] = 42  # To avoid type 3 fonts in PDFs
+matplotlib.rcParams["font.family"] = "Arial"
 
-def load_coordinates_dataset():
-    """Load the ball scent coordinates dataset and additional control datasets"""
-    # Main ball scents dataset
+# Fixed color mapping for ball scents - matches colors from run_permutation_ballscents.py
+# Ensures consistent colors across all plots
+BALLSCENT_COLORS = {
+    "New": "#7f7f7f",  # Grey - control (new clean ball)
+    "New + Pre-exposed": "#1f77b4",  # Blue
+    "Washed": "#2ca02c",  # Green
+    "Washed + Pre-exposed": "#ff7f0e",  # Orange
+    "Pre-exposed": "#9467bd",  # Purple (if present in data)
+    "Scented": "#ff7f0e",  # Orange - alias for "Washed + Pre-exposed"
+    "Ctrl": "#7f7f7f",  # Grey - control
+    "CtrlScent": "#9467bd",  # Purple
+}
+
+
+def get_ballscent_color(ballscent):
+    """Get the fixed color for a ball scent condition.
+
+    Parameters:
+    -----------
+    ballscent : str
+        Name of the ball scent condition
+
+    Returns:
+    --------
+    str
+        Hex color code for the ball scent condition
+    """
+    return BALLSCENT_COLORS.get(ballscent, "#7f7f7f")
+
+
+def normalize_ball_scent_labels(df, group_col="BallScent"):
+    """Normalize/alias BallScent values to canonical factorial labels.
+
+    Maps existing values to one of: Ctrl, CtrlScent, Washed, Scented, New, NewScent
+    using substring and fuzzy matching when needed.
+    """
+    if group_col not in df.columns:
+        raise ValueError(f"Column '{group_col}' not found in dataframe")
+
+    design_keys = ["Ctrl", "CtrlScent", "Washed", "Scented", "New", "NewScent"]
+    available = pd.Series(df[group_col].dropna().unique()).astype(str).tolist()
+    from difflib import get_close_matches
+
+    mapping = {}
+    for val in available:
+        # Try exact match first
+        if val in design_keys:
+            mapping[val] = val
+            continue
+        # Try fuzzy matching
+        matches = get_close_matches(val, design_keys, n=1, cutoff=0.6)
+        if matches:
+            mapping[val] = matches[0]
+        else:
+            # Keep original if no match
+            mapping[val] = val
+
+    # For any entries that were not mapped, try simple substring heuristics
+    for val in list(mapping.keys()):
+        if mapping[val] == val and val not in design_keys:
+            # Try substring matching
+            val_lower = val.lower()
+            if "ctrl" in val_lower and "scent" in val_lower:
+                mapping[val] = "CtrlScent"
+            elif "ctrl" in val_lower:
+                mapping[val] = "Ctrl"
+            elif "scent" in val_lower and "new" not in val_lower and "wash" not in val_lower:
+                mapping[val] = "Scented"
+            elif "new" in val_lower and "scent" in val_lower:
+                mapping[val] = "NewScent"
+            elif "new" in val_lower:
+                mapping[val] = "New"
+            elif "wash" in val_lower and "scent" in val_lower:
+                mapping[val] = "Scented"
+            elif "wash" in val_lower:
+                mapping[val] = "Washed"
+
+    remapped = {k: v for k, v in mapping.items() if k != v}
+    print(f"Normalizing {group_col} labels (total variants: {len(mapping)}):")
+    for k, v in mapping.items():
+        if k != v:
+            print(f"  {k} -> {v}")
+
+    df = df.copy()
+    df[group_col] = df[group_col].map(lambda x: mapping.get(str(x), x))
+    # Preserve canonical mapping in a separate column for downstream matching
+    canonical_col = f"{group_col}_canonical"
+    df[group_col + "_canonical"] = df[group_col]
+    # Map canonical keys to descriptive factorial labels for plots/reports
+    display_map = {
+        "Ctrl": "Ctrl",
+        "CtrlScent": "Pre-exposed",
+        "Washed": "Washed",
+        "Scented": "Washed + Pre-exposed",
+        "New": "New",
+        "NewScent": "New + Pre-exposed",
+    }
+
+    df[group_col] = df[group_col].map(lambda x: display_map.get(x, x))
+    return df
+
+
+def load_coordinates_dataset(test_mode=False):
+    """
+    Load the ball scent coordinates dataset.
+
+    Parameters:
+    -----------
+    test_mode : bool
+        If True, only load first subset of data for testing
+
+    Returns:
+    --------
+    pd.DataFrame
+        Loaded and preprocessed coordinates dataset
+    """
+    # Pooled ball scents dataset
     dataset_path = "/mnt/upramdya_data/MD/Ball_scents/Datasets/251103_10_summary_ballscents_Data/coordinates/pooled_coordinates.feather"
 
-    print(f"Loading coordinates dataset from: {dataset_path}")
+    print(f"\n{'='*60}")
+    print(f"LOADING COORDINATES DATASET")
+    print(f"{'='*60}")
+
+    print(f"Loading from: {Path(dataset_path).name}")
     try:
         dataset = pd.read_feather(dataset_path)
         print(f"✅ Ball scents coordinates dataset loaded successfully! Shape: {dataset.shape}")
@@ -48,71 +172,65 @@ def load_coordinates_dataset():
         print(f"❌ Dataset not found at {dataset_path}")
         raise FileNotFoundError(f"Coordinates dataset not found at {dataset_path}")
 
-    # Additional control datasets
-    ctrl_paths = [
-        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/Other/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather",
-        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/Other/coordinates/230705_FeedingState_2_AM_Videos_Tracked_coordinates.feather",
-    ]
+    # Check for required columns
+    required_cols = ["time", "distance_ball_0", "fly", "BallScent"]
+    missing = [col for col in required_cols if col not in dataset.columns]
+    if missing:
+        print(f"❌ Missing required columns: {missing}")
+        print(f"Available columns: {list(dataset.columns)}")
+        raise ValueError(f"Missing columns: {missing}")
 
-    ctrl_datasets = []
-    for ctrl_path in ctrl_paths:
-        print(f"\nLoading additional control dataset from: {ctrl_path}")
-        try:
-            ctrl_data = pd.read_feather(ctrl_path)
-            print(f"  Loaded shape: {ctrl_data.shape}")
+    print(f"✅ All required columns present")
+    print(f"  Unique ball scents: {sorted(dataset['BallScent'].unique())}")
+    print(f"  Total flies: {dataset['fly'].nunique()}")
+    print(f"  Time range: {dataset['time'].min():.2f}s to {dataset['time'].max():.2f}s")
 
-            # Check if FeedingState column exists
-            if "FeedingState" not in ctrl_data.columns:
-                print(f"  ⚠️  Warning: FeedingState column not found, skipping this dataset")
-                print(f"  Available columns: {list(ctrl_data.columns)}")
-                continue
+    # Downsample to 1 datapoint per second per fly (align to integer seconds)
+    print(f"\nDownsampling data to 1 datapoint per second per fly...")
+    dataset = dataset.sort_values(["fly", "time"]).copy()
+    dataset["time_rounded"] = dataset["time"].round(0).astype(int)
 
-            # Filter for starved_noWater flies only
-            initial_shape = ctrl_data.shape
-            ctrl_data = ctrl_data[ctrl_data["FeedingState"] == "starved_noWater"].copy()
-            print(f"  Filtered to starved_noWater: {initial_shape} -> {ctrl_data.shape}")
+    # Aggregate by fly and rounded time
+    downsampled = dataset.groupby(["fly", "time_rounded"], as_index=False).agg(
+        {
+            "distance_ball_0": "mean",
+            "BallScent": "first",
+        }
+    )
 
-            if len(ctrl_data) == 0:
-                print(f"  ⚠️  Warning: No starved_noWater flies found in this dataset")
-                continue
+    # Rename time_rounded back to time for consistency
+    downsampled = downsampled.rename(columns={"time_rounded": "time"})
 
-            # Add BallScent column as "Ctrl"
-            ctrl_data["BallScent"] = "Ctrl"
+    print(f"✅ Downsampled shape: {downsampled.shape}")
 
-            # Check for unique flies
-            if "fly" in ctrl_data.columns:
-                n_flies = ctrl_data["fly"].nunique()
-                print(f"  Number of flies: {n_flies}")
+    # Normalize BallScent labels to canonical factorial names
+    print(f"\nNormalizing BallScent labels...")
+    downsampled = normalize_ball_scent_labels(downsampled, group_col="BallScent")
 
-            ctrl_datasets.append(ctrl_data)
+    for scent in sorted(downsampled["BallScent"].unique()):
+        n_flies = downsampled[downsampled["BallScent"] == scent]["fly"].nunique()
+        n_points = len(downsampled[downsampled["BallScent"] == scent])
+        print(f"  {scent}: {n_flies} flies, {n_points} datapoints")
 
-        except FileNotFoundError:
-            print(f"  ⚠️  Warning: Control dataset not found at {ctrl_path}")
-            continue
-        except Exception as e:
-            print(f"  ⚠️  Error loading control dataset: {e}")
-            continue
+    # Filter to only include specific ball scent conditions (matching permutation tests)
+    # Keep: New (control), New + Pre-exposed, Washed, Washed + Pre-exposed
+    allowed_scents = ["New", "New + Pre-exposed", "Washed", "Washed + Pre-exposed"]
+    initial_shape = downsampled.shape
+    downsampled = downsampled[downsampled["BallScent"].isin(allowed_scents)].copy()
+    print(f"\n📊 Filtered to allowed ball scents: {allowed_scents}")
+    print(f"   Shape: {initial_shape} -> {downsampled.shape}")
+    print(f"   Remaining conditions: {sorted(downsampled['BallScent'].unique())}")
 
-    # Combine all datasets
-    if ctrl_datasets:
-        print(f"\n📊 Combining {len(ctrl_datasets)} control datasets with main dataset...")
-        all_datasets = [dataset] + ctrl_datasets
-        combined_dataset = pd.concat(all_datasets, ignore_index=True)
-        print(f"✅ Combined dataset shape: {combined_dataset.shape}")
-        print(f"   BallScent conditions: {sorted(combined_dataset['BallScent'].unique())}")
+    if test_mode:
+        limited_flies = []
+        for scent in downsampled["BallScent"].unique():
+            scent_flies = downsampled[downsampled["BallScent"] == scent]["fly"].unique()[:10]
+            limited_flies.extend(scent_flies)
 
-        # Print sample counts
-        if "fly" in combined_dataset.columns:
-            print(f"\n   Sample counts by BallScent:")
-            for scent in sorted(combined_dataset["BallScent"].unique()):
-                n_flies = combined_dataset[combined_dataset["BallScent"] == scent]["fly"].nunique()
-                n_points = len(combined_dataset[combined_dataset["BallScent"] == scent])
-                print(f"     {scent}: {n_flies} flies, {n_points} data points")
+        downsampled = downsampled[downsampled["fly"].isin(limited_flies)].copy()
+        print(f"⚠️  TEST MODE: Limited to {downsampled['fly'].nunique()} flies total")
 
-        return combined_dataset
-    else:
-        print(f"\n⚠️  No control datasets could be loaded, using only main dataset")
-        return dataset
+    return downsampled
 
 
 def preprocess_data(
@@ -170,7 +288,7 @@ def compute_permutation_test_with_fdr(
     processed_data,
     metric="avg_distance_ball_0",
     group_col="BallScent",
-    control_group="Scented",
+    control_group="New",
     n_permutations=10000,
     alpha=0.05,
     progress=True,
@@ -286,15 +404,16 @@ def compute_permutation_test_with_fdr(
 def create_trajectory_plot(
     data,
     ball_scent,
-    control_scent="Scented",
+    control_scent="New",
     time_col="time",
     value_col="distance_ball_0",
     group_col="BallScent",
     subject_col="fly",
     n_bins=12,
     permutation_results=None,
-    output_path=None,
-    show_individual_flies=True,
+    color_mapping=None,
+    ax=None,
+    global_ylim=None,
 ):
     """
     Create a trajectory plot comparing a ball scent to control.
@@ -319,49 +438,97 @@ def create_trajectory_plot(
         Number of time bins
     permutation_results : dict
         Results from permutation test
-    output_path : Path or str
-        Where to save the plot
-    show_individual_flies : bool
-        Whether to show individual fly trajectories
+    color_mapping : dict
+        Color mapping for ball scents
+    ax : matplotlib.axes.Axes, optional
+        Axis to plot on. If None, creates new figure
+    global_ylim : tuple, optional
+        Global (min, max) for y-axis to ensure consistency across subplots
+
+    Returns:
+    --------
+    matplotlib.axes.Axes
+        The matplotlib axis with the plot
     """
+    # Pixel to mm conversion factor (500 pixels = 30 mm)
+    PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
     # Filter data for this comparison
     subset_data = data[data[group_col].isin([control_scent, ball_scent])].copy()
 
     if len(subset_data) == 0:
         print(f"Warning: No data for {ball_scent} vs {control_scent}")
-        return
+        return None
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 7))
+    # Convert to mm (don't shift individual fly data)
+    subset_data[f"{value_col}_mm"] = subset_data[value_col] / PIXELS_PER_MM
+    value_col_plot = f"{value_col}_mm"
+
+    # Create figure if ax not provided
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(12, 7))
+    else:
+        fig = ax.figure
 
     # Color palette
-    colors = {control_scent: "red", ball_scent: "blue"}
-
-    # Plot individual fly trajectories if requested
-    if show_individual_flies:
+    if color_mapping is None:
+        color_mapping = {}
         for scent in [control_scent, ball_scent]:
-            scent_data = subset_data[subset_data[group_col] == scent]
-            for fly in scent_data[subject_col].unique():
-                fly_data = scent_data[scent_data[subject_col] == fly]
-                ax.plot(fly_data[time_col], fly_data[value_col], color=colors[scent], alpha=0.2, linewidth=0.8)
+            color_mapping[scent] = get_ballscent_color(scent)
+
+    colors = {
+        control_scent: color_mapping.get(control_scent, get_ballscent_color(control_scent)),
+        ball_scent: color_mapping.get(ball_scent, get_ballscent_color(ball_scent)),
+    }
+    line_styles = {control_scent: "solid", ball_scent: "dashed"}
+
+    # Error band transparency
+    error_alphas = {control_scent: 0.25, ball_scent: 0.15}
+
+    # Get sample sizes for labels
+    n_control = subset_data[subset_data[group_col] == control_scent][subject_col].nunique()
+    n_test = subset_data[subset_data[group_col] == ball_scent][subject_col].nunique()
+
+    labels = {
+        control_scent: f"{control_scent} (n={n_control})",
+        ball_scent: f"{ball_scent} (n={n_test})",
+    }
+
+    # Compute mean trajectories to find baseline for y-axis shift
+    all_means = []
+    for scent in [control_scent, ball_scent]:
+        scent_data = subset_data[subset_data[group_col] == scent]
+        time_grouped = scent_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
+        all_means.extend(time_grouped["mean"].values)
+
+    # Find the minimum mean value to use as y-axis baseline
+    y_baseline = min(all_means)
 
     # Plot mean trajectories with error bands
     for scent in [control_scent, ball_scent]:
         scent_data = subset_data[subset_data[group_col] == scent]
 
         # Group by time to compute mean and SEM
-        time_grouped = scent_data.groupby(time_col)[value_col].agg(["mean", "sem"]).reset_index()
+        time_grouped = scent_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
 
-        # Plot mean line
-        ax.plot(time_grouped[time_col], time_grouped["mean"], color=colors[scent], linewidth=3, label=scent, zorder=10)
+        # Plot mean line with appropriate line style
+        ax.plot(
+            time_grouped[time_col],
+            time_grouped["mean"] - y_baseline,
+            color=colors[scent],
+            linestyle=line_styles[scent],
+            linewidth=2.5,
+            label=labels[scent],
+            zorder=10,
+        )
 
         # Plot error band (SEM)
         ax.fill_between(
             time_grouped[time_col],
-            time_grouped["mean"] - time_grouped["sem"],
-            time_grouped["mean"] + time_grouped["sem"],
+            time_grouped["mean"] - y_baseline - time_grouped["sem"],
+            time_grouped["mean"] - y_baseline + time_grouped["sem"],
             color=colors[scent],
-            alpha=0.3,
+            alpha=error_alphas[scent],
             zorder=5,
         )
 
@@ -373,77 +540,80 @@ def create_trajectory_plot(
     for edge in bin_edges:
         ax.axvline(edge, color="gray", linestyle="dotted", alpha=0.5, zorder=1)
 
+    # Get current y-axis limits and extend for significance annotations
+    y_max_shifted = max(all_means) - y_baseline
+    y_range = y_max_shifted
+
+    # Set y-axis limits - start at 0, add modest space at top for annotations
+    if global_ylim is not None:
+        ax.set_ylim(global_ylim)
+        # Use global range for annotation positioning
+        y_max_shifted = global_ylim[1] - global_ylim[1] * 0.08
+        y_range = global_ylim[1]
+    else:
+        ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
+
     # Annotate significance levels
     if permutation_results is not None and ball_scent in permutation_results:
         perm_result = permutation_results[ball_scent]
 
-        y_max = subset_data[value_col].max()
-        y_annotation = y_max * 1.05
+        # Position for annotations (slightly above the top of data)
+        y_annotation_stars = y_max_shifted + 0.02 * y_range
+        y_annotation_pval = y_max_shifted + 0.05 * y_range
 
         for idx in perm_result["significant_timepoints"]:
-            bin_start = bin_edges[idx]
-            bin_end = bin_edges[idx + 1]
-            x_pos = (bin_start + bin_end) / 2
+            bin_center = (bin_edges[idx] + bin_edges[idx + 1]) / 2
+            p_val = perm_result["p_values_corrected"][idx]
 
-            p_value = perm_result["p_values_corrected"][idx]
-
-            if p_value < 0.001:
-                significance = "***"
-            elif p_value < 0.01:
-                significance = "**"
-            elif p_value < 0.05:
-                significance = "*"
+            # Determine significance level and marker
+            if p_val < 0.001:
+                marker = "***"
+            elif p_val < 0.01:
+                marker = "**"
+            elif p_val < 0.05:
+                marker = "*"
             else:
-                significance = ""
+                continue
 
-            if significance:
-                ax.annotate(
-                    significance,
-                    xy=(x_pos, y_annotation),
-                    ha="center",
-                    va="bottom",
-                    fontsize=16,
-                    color="red",
-                    fontweight="bold",
-                    zorder=15,
-                )
+            # Add significance stars
+            ax.text(
+                bin_center,
+                y_annotation_stars,
+                marker,
+                ha="center",
+                va="center",
+                fontsize=16,
+                fontweight="bold",
+                color="red",
+            )
+
+            # Add p-value below the stars
+            ax.text(
+                bin_center,
+                y_annotation_pval,
+                f"p={p_val:.3f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="darkgray",
+            )
 
     # Formatting
     ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (px)", fontsize=14)
-    ax.set_title(f"Ball Trajectory: {ball_scent} vs {control_scent}\n(FDR-corrected permutation test)", fontsize=16)
-    ax.legend(fontsize=12, loc="best")
-    ax.grid(True, alpha=0.3)
-
-    # Add sample sizes to legend
-    n_control = subset_data[subset_data[group_col] == control_scent][subject_col].nunique()
-    n_test = subset_data[subset_data[group_col] == ball_scent][subject_col].nunique()
-    ax.text(
-        0.02,
-        0.98,
-        f"n({control_scent})={n_control}, n({ball_scent})={n_test}",
-        transform=ax.transAxes,
-        fontsize=10,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+    ax.set_ylabel("Ball distance from start (mm)", fontsize=14)
+    ax.set_title(
+        f"Ball Trajectory: {ball_scent} vs {control_scent}\n(FDR-corrected permutation test)",
+        fontsize=16,
     )
+    ax.legend(fontsize=12, loc="upper left")
+    ax.grid(False)
 
-    plt.tight_layout()
-
-    # Save plot
-    if output_path:
-        plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        # Also save as PNG
-        png_path = output_path.with_suffix(".png")
-        plt.savefig(png_path, dpi=300, bbox_inches="tight")
-        print(f"  Saved: {output_path}")
-
-    plt.close()
+    return ax
 
 
 def create_combined_trajectory_plot(
     data,
-    control_scent="Scented",
+    control_scent="New",
     time_col="time",
     value_col="distance_ball_0",
     group_col="BallScent",
@@ -489,21 +659,10 @@ def create_combined_trajectory_plot(
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8))
 
-    # Color palette - distinct colors for each condition
-    color_map = {
-        "Scented": "#e74c3c",  # Red
-        "CtrlScent": "#c0392b",  # Dark Red
-        "Washed": "#3498db",  # Blue
-        "New": "#2ecc71",  # Green
-        "NewScent": "#27ae60",  # Dark Green
-        "Ctrl": "#9b59b6",  # Purple
-    }
-
-    # Fallback colors if conditions don't match expected names
-    default_colors = ["#e74c3c", "#3498db", "#2ecc71", "#9b59b6", "#f39c12", "#1abc9c", "#34495e"]
-    for i, scent in enumerate(ball_scents):
-        if scent not in color_map:
-            color_map[scent] = default_colors[i % len(default_colors)]
+    # Color palette - use fixed colors matching permutation tests
+    color_map = {}
+    for scent in ball_scents:
+        color_map[scent] = get_ballscent_color(scent)
 
     # Plot individual fly trajectories if requested
     if show_individual_flies:
@@ -660,10 +819,10 @@ def create_combined_trajectory_plot(
 
 
 def generate_all_trajectory_plots(
-    data, control_scent="Scented", n_bins=12, n_permutations=10000, output_dir=None, show_progress=True
+    data, control_scent="New", n_bins=12, n_permutations=10000, output_dir=None, show_progress=True
 ):
     """
-    Generate trajectory plots for all ball scents vs control.
+    Generate combined trajectory plot with all ball scents.
 
     Parameters:
     -----------
@@ -702,10 +861,10 @@ def generate_all_trajectory_plots(
         raise ValueError(f"Missing required columns: {missing_cols}")
 
     # Get ball scents
-    ball_scents = data["BallScent"].unique()
+    ball_scents = sorted(data["BallScent"].unique())
     test_scents = [s for s in ball_scents if s != control_scent]
 
-    print(f"\nBall scents in dataset: {sorted(ball_scents)}")
+    print(f"\nBall scents in dataset: {ball_scents}")
     print(f"Test scents: {test_scents}")
     print(f"Control scent: {control_scent}")
 
@@ -733,12 +892,49 @@ def generate_all_trajectory_plots(
         progress=show_progress,
     )
 
-    # Generate plots for each test scent
-    print(f"\nGenerating trajectory plots...")
-    for test_scent in test_scents:
-        print(f"\n  Creating plot for {test_scent} vs {control_scent}...")
+    # Create color mapping for all ball scents using fixed colors
+    color_mapping = {}
+    for scent in [control_scent] + test_scents:
+        color_mapping[scent] = get_ballscent_color(scent)
 
-        output_path = output_dir / f"trajectory_{test_scent}_vs_{control_scent}.pdf"
+    # Compute global y-axis range across all comparisons
+    print(f"\nComputing global y-axis range...")
+    global_y_max = 0
+    PIXELS_PER_MM = 500 / 30
+
+    for test_scent in sorted(test_scents):
+        subset = data[data["BallScent"].isin([control_scent, test_scent])].copy()
+        subset["distance_mm"] = subset["distance_ball_0"] / PIXELS_PER_MM
+        max_val = subset["distance_mm"].max()
+        if max_val > global_y_max:
+            global_y_max = max_val
+
+    # Add space for annotations
+    global_ylim = (0, global_y_max + 0.08 * global_y_max)
+    print(f"  Global y-axis range: {global_ylim}")
+
+    # Create combined figure with all subplots
+    print(f"\nCreating combined figure with all comparisons...")
+    n_test = len(test_scents)
+
+    # Determine layout (prefer wide layout)
+    if n_test == 1:
+        fig, axes = plt.subplots(1, 1, figsize=(12, 7))
+        axes = [axes]
+    elif n_test == 2:
+        fig, axes = plt.subplots(1, 2, figsize=(24, 7))
+    elif n_test == 3:
+        fig, axes = plt.subplots(1, 3, figsize=(36, 7))
+    else:
+        # For more than 3, use 2 rows
+        n_cols = (n_test + 1) // 2
+        n_rows = 2
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols, 7 * n_rows))
+        axes = axes.flatten()
+
+    # Create plot for each test scent
+    for idx, test_scent in enumerate(sorted(test_scents)):
+        print(f"  [{idx+1}/{n_test}] Creating plot for {test_scent} vs {control_scent}...")
 
         create_trajectory_plot(
             data,
@@ -750,28 +946,35 @@ def generate_all_trajectory_plots(
             subject_col="fly",
             n_bins=n_bins,
             permutation_results=permutation_results,
-            output_path=output_path,
-            show_individual_flies=True,
+            color_mapping=color_mapping,
+            ax=axes[idx],
+            global_ylim=global_ylim,
         )
 
-    # Generate combined plot with all conditions
-    print(f"\n  Creating combined plot with all conditions...")
-    output_path_combined = output_dir / f"trajectory_all_conditions_combined.pdf"
-    create_combined_trajectory_plot(
-        data,
-        control_scent=control_scent,
-        time_col="time",
-        value_col="distance_ball_0",
-        group_col="BallScent",
-        subject_col="fly",
-        n_bins=n_bins,
-        permutation_results=permutation_results,
-        output_path=output_path_combined,
-        show_individual_flies=True,
-    )
+    # Hide any unused subplots
+    for idx in range(n_test, len(axes)):
+        axes[idx].set_visible(False)
+
+    # Adjust layout and save combined figure
+    plt.tight_layout()
+
+    combined_output_path = output_dir / "trajectory_ballscent_combined.pdf"
+    fig.savefig(combined_output_path, dpi=300, bbox_inches="tight")
+
+    # Also save as PNG and SVG
+    png_combined_path = combined_output_path.with_suffix(".png")
+    svg_combined_path = combined_output_path.with_suffix(".svg")
+    fig.savefig(png_combined_path, dpi=300, bbox_inches="tight")
+    fig.savefig(svg_combined_path, dpi=300, bbox_inches="tight")
+
+    print(f"\n✅ Combined figure saved to:")
+    print(f"   PDF: {combined_output_path}")
+    print(f"   PNG: {png_combined_path}")
+    print(f"   SVG: {svg_combined_path}")
+    plt.close(fig)
 
     # Save statistical results
-    stats_file = output_dir / "trajectory_permutation_statistics.txt"
+    stats_file = output_dir / "trajectory_ballscent_permutation_statistics.txt"
     with open(stats_file, "w") as f:
         f.write("Ball Scent Trajectory Permutation Test Results\n")
         f.write("=" * 60 + "\n\n")
@@ -781,7 +984,7 @@ def generate_all_trajectory_plots(
         f.write(f"FDR correction method: Benjamini-Hochberg\n")
         f.write(f"Significance level: α = 0.05\n\n")
 
-        for test_scent in test_scents:
+        for test_scent in sorted(test_scents):
             if test_scent not in permutation_results:
                 continue
 
@@ -818,6 +1021,7 @@ Examples:
   python plot_ballscent_trajectories.py
   python plot_ballscent_trajectories.py --n-bins 15 --n-permutations 5000
   python plot_ballscent_trajectories.py --output-dir /path/to/output
+  python plot_ballscent_trajectories.py --test
         """,
     )
 
@@ -837,15 +1041,21 @@ Examples:
         help="Directory to save plots (default: /mnt/upramdya_data/MD/Ball_scents/Plots/trajectories)",
     )
 
-    parser.add_argument("--control", type=str, default="Scented", help="Control ball scent name (default: Scented)")
+    parser.add_argument("--control", type=str, default="New", help="Control ball scent name (default: New)")
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
+
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Test mode - limit to 10 flies per condition for quick verification",
+    )
 
     args = parser.parse_args()
 
     # Load data
     print("Loading ball scent coordinates data...")
-    data = load_coordinates_dataset()
+    data = load_coordinates_dataset(test_mode=args.test)
 
     # Generate plots
     generate_all_trajectory_plots(
