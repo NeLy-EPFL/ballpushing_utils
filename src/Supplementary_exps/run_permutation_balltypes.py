@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Script to generate Mann-Whitney U test jitterboxplots for ball types experiments.
+Script to generate permutation test jitterboxplots for ball types experiments.
 
-This script generates comprehensive Mann-Whitney U test visualizations with:
+This script generates comprehensive permutation test visualizations with:
+- Permutation tests (10,000 permutations) instead of Mann-Whitney U tests
+- Outlier clipping at 99th percentile for better visualization
 - Significance-based sorting (significantly increased/neutral/significantly decreased)
 - Secondary sorting by median within each significance group
-- Color-coded backgrounds for easy interpretation
-- Statistical significance annotations (*, **, ***)
+- Statistical significance annotations (*, **, ***) with gray p-values
 - External legend for improved readability
 - Proper spacing between boxplots
 
@@ -30,17 +31,49 @@ sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
+
 import seaborn as sns
 from matplotlib.patches import Rectangle, Patch
 from scipy import stats
-from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu
+from scipy.stats import chi2_contingency, fisher_exact
 import scipy.stats as stats_module
 from statsmodels.stats.multitest import multipletests
 import time
 import argparse
 
 
-def generate_balltype_mannwhitney_plots(
+# Fixed color mapping for ball types - ensures consistent colors across all plots
+# Colors match trajectory plot colors
+BALLTYPE_COLORS = {
+    "ctrl": "#7f7f7f",  # Grey - control
+    "rusty": "#d62728",  # Red
+    "manufactured": "#1f77b4",  # Blue
+    "sand": "#ff69b4",  # Pink
+    "silicon": "#17becf",  # Teal/Cyan
+    "sillicon": "#17becf",  # Teal/Cyan (alternative spelling in data)
+    "rubber": "#7f7f7f",  # Grey (fallback)
+}
+
+
+def get_balltype_color(balltype):
+    """Get the fixed color for a ball type.
+
+    Parameters:
+    -----------
+    balltype : str
+        Name of the ball type
+
+    Returns:
+    --------
+    str
+        Hex color code for the ball type
+    """
+    # Return the color, or a fallback grey if not found
+    return BALLTYPE_COLORS.get(balltype, "#7f7f7f")
+
+
+def generate_balltype_permutation_plots(
     data,
     metrics,
     y="BallType",
@@ -48,13 +81,17 @@ def generate_balltype_mannwhitney_plots(
     hue=None,
     palette="Set2",
     figsize=(15, 10),
-    output_dir="mann_whitney_plots",
+    output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
+    n_permutations=10000,
+    filter_balltypes=None,
+    scatter_size=35,
 ):
     """
-    Generates jitterboxplots for each metric with Mann-Whitney U tests between each ball type and control.
+    Generates jitterboxplots for each metric with permutation tests between each ball type and control.
     Applies FDR correction across all comparisons for each metric.
+    Clips outliers at 99th percentile for better visualization.
 
     Parameters:
         data (pd.DataFrame): The dataset to plot.
@@ -64,24 +101,40 @@ def generate_balltype_mannwhitney_plots(
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
         figsize (tuple, optional): Size of each figure. Default is (15, 10).
-        output_dir: Directory to save the plots. Default is "mann_whitney_plots".
+        output_dir: Directory to save the plots. Default is "permutation_plots".
         fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
         alpha (float): Significance level after FDR correction. Default is 0.05.
+        n_permutations (int): Number of permutations for permutation tests. Default is 10000.
+        filter_balltypes (list, optional): If provided, only include these ball types in analysis.
+        scatter_size (int): Size of scatter points. Default is 35.
 
     Returns:
-        pd.DataFrame: Statistics table with Mann-Whitney U test results and FDR correction.
+        pd.DataFrame: Statistics table with permutation test results and FDR correction.
     """
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Set Arial font globally for editable text in PDFs
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    matplotlib.rcParams["ps.fonttype"] = 42
+    matplotlib.rcParams["font.family"] = "sans-serif"
+    matplotlib.rcParams["font.sans-serif"] = ["Arial"]
+
     all_stats = []
 
     for metric_idx, metric in enumerate(metrics):
         metric_start_time = time.time()
-        print(f"Generating Mann-Whitney jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
+        print(f"Generating permutation test jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
         plot_data = data.dropna(subset=[metric, y])
+
+        # Filter to specific ball types if requested
+        if filter_balltypes is not None:
+            plot_data = plot_data[plot_data[y].isin(filter_balltypes)].copy()
+            if len(plot_data) == 0:
+                print(f"  Warning: No data after filtering to {filter_balltypes}")
+                continue
 
         # Get all ball types except control
         ball_types = [bt for bt in plot_data[y].unique() if bt != control_balltype]
@@ -98,7 +151,7 @@ def generate_balltype_mannwhitney_plots(
 
         control_median = control_vals.median()  # Calculate control median once
 
-        # Perform Mann-Whitney U tests for all ball types vs control
+        # Perform permutation tests for all ball types vs control
         pvals = []
         test_results = []
 
@@ -109,18 +162,35 @@ def generate_balltype_mannwhitney_plots(
                 continue
 
             try:
-                stat, pval = mannwhitneyu(test_vals, control_vals, alternative="two-sided")
-                # Determine direction of effect
+                # Permutation test using median difference as statistic
                 test_median = test_vals.median()
-                control_median = control_vals.median()
+                obs_diff = test_median - control_median
+
+                n1 = len(control_vals)
+                n2 = len(test_vals)
+
+                # Combine data for permutation
+                combined = np.concatenate([control_vals.values, test_vals.values])
+                perm_diffs = np.empty(n_permutations)
+
+                for i in range(n_permutations):
+                    np.random.shuffle(combined)
+                    perm_control = combined[:n1]
+                    perm_test = combined[n1:]
+                    perm_diffs[i] = np.median(perm_test) - np.median(perm_control)
+
+                # Two-sided p-value
+                pval = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_diff)))
+
+                # Determine direction of effect
                 direction = "increased" if test_median > control_median else "decreased"
                 effect_size = test_median - control_median
+
             except Exception as e:
-                print(f"Error in Mann-Whitney test for {ball_type} vs {control_balltype}: {e}")
+                print(f"Error in permutation test for {ball_type} vs {control_balltype}: {e}")
                 pval = 1.0
                 direction = "none"
                 effect_size = 0.0
-                stat = np.nan
 
             pvals.append(pval)
             test_results.append(
@@ -131,11 +201,11 @@ def generate_balltype_mannwhitney_plots(
                     "pval_raw": pval,
                     "direction": direction,
                     "effect_size": effect_size,
-                    "test_statistic": stat,
                     "test_median": test_vals.median() if len(test_vals) > 0 else np.nan,
                     "control_median": control_median,
                     "test_n": len(test_vals),
                     "control_n": len(control_vals),
+                    "n_permutations": n_permutations,
                 }
             )
 
@@ -213,6 +283,11 @@ def generate_balltype_mannwhitney_plots(
         plot_data[y] = pd.Categorical(plot_data[y], categories=sorted_ball_types, ordered=True)
         plot_data = plot_data.sort_values(by=[y])
 
+        # Clip outliers at 99th percentile for better visualization
+        percentile_99 = plot_data[metric].quantile(0.99)
+        plot_data_clipped = plot_data.copy()
+        plot_data_clipped[metric] = plot_data_clipped[metric].clip(upper=percentile_99)
+
         # Store stats for output
         for result in test_results:  # Exclude control from final stats
             all_stats.append(result)
@@ -225,152 +300,158 @@ def generate_balltype_mannwhitney_plots(
         # Increase width to accommodate legend outside
         fig_width = figsize[0] + 4  # Extra width for external legend
 
-        # Create the plot with adjusted size
-        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        # Create the plot with adjusted size (vertical orientation)
+        fig_width_vert = max(10, n_categories * 1.2 + 2)  # Width based on number of categories
+        fig_height_vert = 10  # Fixed height for vertical plots
+        fig, ax = plt.subplots(figsize=(fig_width_vert, fig_height_vert))
 
-        # Set up colors for ball types
-        if isinstance(palette, dict):
-            colors = [palette.get(bt, "gray") for bt in sorted_ball_types]
-        elif isinstance(palette, str):
-            colors = sns.color_palette(palette, n_colors=len(sorted_ball_types))
+        # Set up colors matching trajectory plots using fixed mapping
+        # This ensures the same ball type always gets the same color
+        color_mapping = {}
+        for bt in sorted_ball_types:
+            color_mapping[bt] = get_balltype_color(bt)
+
+        colors = [color_mapping[bt] for bt in sorted_ball_types]
+
+        x_positions = range(len(sorted_ball_types))
+
+        # Draw vertical boxplots with colors matching trajectory plots
+        bp = ax.boxplot(
+            [plot_data_clipped[plot_data_clipped[y] == bt][metric].dropna().values for bt in sorted_ball_types],
+            positions=x_positions,
+            widths=0.6,
+            patch_artist=True,
+            showfliers=False,
+            boxprops=dict(linewidth=1.5),
+            whiskerprops=dict(linewidth=1.5),
+            capprops=dict(linewidth=1.5),
+            medianprops=dict(linewidth=2, color="black"),
+        )
+
+        # Color the boxes
+        for patch, color in zip(bp["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.7)
+            patch.set_edgecolor("black")
+
+        # Overlay stripplot for individual points with matching colors
+        for i, ball_type in enumerate(sorted_ball_types):
+            ball_type_data = plot_data_clipped[plot_data_clipped[y] == ball_type][metric].dropna()
+            if len(ball_type_data) == 0:
+                continue
+
+            # Add jitter to x positions
+            x_jitter = np.random.normal(i, 0.08, size=len(ball_type_data))
+            ax.scatter(
+                x_jitter,
+                ball_type_data.values,
+                s=25,
+                c=color_mapping[ball_type],
+                alpha=0.5,
+                edgecolors="none",
+                zorder=3,
+            )
+
+        # Add significance brackets and annotations
+        y_max = plot_data_clipped[metric].max()
+        y_min = plot_data_clipped[metric].min()
+        y_range = y_max - y_min
+
+        # Find control position
+        control_idx = sorted_ball_types.index(control_balltype)
+
+        # Add brackets for significant comparisons
+        bracket_height = y_max + 0.05 * y_range
+        bracket_offset = 0.08 * y_range  # Vertical spacing between brackets
+
+        significant_comparisons = []
+        for i, ball_type in enumerate(sorted_ball_types):
+            if ball_type == control_balltype:
+                continue
+
+            result = next((r for r in all_results if r["BallType"] == ball_type), None)
+            if result and result["sig_level"] not in ["control", "ns"]:
+                significant_comparisons.append((i, result))
+
+        # Draw brackets for significant comparisons
+        for bracket_idx, (test_idx, result) in enumerate(significant_comparisons):
+            # Calculate bracket height (stack multiple brackets)
+            current_height = bracket_height + bracket_idx * bracket_offset
+
+            # Draw horizontal line connecting control to test
+            x1, x2 = control_idx, test_idx
+            if x1 > x2:
+                x1, x2 = x2, x1
+
+            # Draw bracket
+            ax.plot([x1, x1], [current_height - 0.01 * y_range, current_height], "k-", linewidth=1.5)
+            ax.plot([x1, x2], [current_height, current_height], "k-", linewidth=1.5)
+            ax.plot([x2, x2], [current_height - 0.01 * y_range, current_height], "k-", linewidth=1.5)
+
+            # Add significance stars
+            mid_x = (x1 + x2) / 2
+            ax.text(
+                mid_x,
+                current_height + 0.01 * y_range,
+                result["sig_level"],
+                ha="center",
+                va="bottom",
+                fontsize=16,
+                color="red",
+                fontweight="bold",
+            )
+
+            # Add p-value in gray below stars
+            pval = result["pval_fdr"]
+            if pval < 0.001:
+                p_text = "p<0.001"
+            else:
+                p_text = f"p={pval:.3f}"
+
+            ax.text(
+                mid_x,
+                current_height + 0.04 * y_range,
+                p_text,
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color="gray",
+            )
+
+        # Set ylim to accommodate brackets
+        if significant_comparisons:
+            max_bracket_height = bracket_height + len(significant_comparisons) * bracket_offset + 0.08 * y_range
+            ax.set_ylim(bottom=y_min - 0.05 * y_range, top=max_bracket_height)
         else:
-            colors = palette  # Assume it's already a list of colors
+            ax.set_ylim(bottom=y_min - 0.05 * y_range, top=y_max + 0.1 * y_range)
 
-        # Add colored backgrounds only for significant results
-        y_positions = range(len(sorted_ball_types))
-        for i, ball_type in enumerate(sorted_ball_types):
-            result = next((r for r in all_results if r["BallType"] == ball_type), None)
-            if not result:
-                continue
-
-            # Add background color only for significant results (like TNT version)
-            if result["sig_level"] == "control":
-                bg_color = "lightblue"
-                alpha_bg = 0.1
-            elif result["significant_fdr"] and result["direction"] == "increased":
-                bg_color = "lightgreen"
-                alpha_bg = 0.15
-            elif result["significant_fdr"] and result["direction"] == "decreased":
-                bg_color = "lightcoral"
-                alpha_bg = 0.15
-            else:
-                # Non-significant gets no background (white/transparent)
-                continue
-
-            # Add background rectangle
-            ax.axhspan(i - 0.4, i + 0.4, color=bg_color, alpha=alpha_bg, zorder=0)
-
-        # Draw boxplots with unfilled styling (like TNT version)
-        for ball_type in sorted_ball_types:
-            ball_type_data = plot_data[plot_data[y] == ball_type]
-            if ball_type_data.empty:
-                continue
-
-            is_control = ball_type == control_balltype
-
-            if is_control:
-                # Control group styling - red dashed boxes (like TNT version)
-                sns.boxplot(
-                    data=ball_type_data,
-                    x=metric,
-                    y=y,
-                    showfliers=False,
-                    width=0.5,  # Wider for better visibility with fewer categories
-                    ax=ax,
-                    boxprops=dict(facecolor="none", edgecolor="red", linewidth=2, linestyle="--"),
-                    medianprops=dict(color="red", linewidth=2),
-                    whiskerprops=dict(color="red", linewidth=1.5, linestyle="--"),
-                    capprops=dict(color="red", linewidth=1.5),
-                )
-            else:
-                # Test group styling - black solid boxes (like TNT version)
-                sns.boxplot(
-                    data=ball_type_data,
-                    x=metric,
-                    y=y,
-                    showfliers=False,
-                    width=0.5,  # Wider for better visibility with fewer categories
-                    ax=ax,
-                    boxprops=dict(facecolor="none", edgecolor="black", linewidth=1),
-                    medianprops=dict(color="black", linewidth=1.5),
-                    whiskerprops=dict(color="black", linewidth=1),
-                    capprops=dict(color="black", linewidth=1),
-                )
-
-        # Overlay stripplot for jitter with ball type colors (like TNT version)
-        sns.stripplot(
-            data=plot_data,
-            x=metric,
-            y=y,
-            dodge=False,
-            alpha=0.7,
-            jitter=True,
-            palette=colors,
-            size=6,  # Larger dots for better visibility
-            ax=ax,
+        # Formatting for vertical orientation
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(sorted_ball_types, rotation=45, ha="right", fontsize=11)
+        ax.set_ylabel(metric, fontsize=14)
+        ax.set_xlabel("Ball Type", fontsize=14)
+        ax.set_title(
+            f"Permutation Test: {metric} by Ball Type\n(FDR corrected, {n_permutations} permutations)", fontsize=14
         )
+        ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
+        ax.set_axisbelow(True)
 
-        # Add significance annotations
-        yticklabels = [label.get_text() for label in ax.get_yticklabels()]
-        x_range = ax.get_xlim()[1] - ax.get_xlim()[0]
-
-        for i, ball_type in enumerate(sorted_ball_types):
-            result = next((r for r in all_results if r["BallType"] == ball_type), None)
-            if not result:
-                continue
-
-            # Add significance annotation (like TNT version)
-            if result["sig_level"] not in ["control", "ns"]:
-                yticklocs = ax.get_yticks()
-                ax.text(
-                    x=ax.get_xlim()[1] + 0.01 * x_range,
-                    y=float(yticklocs[i]),
-                    s=result["sig_level"],
-                    color="red",
-                    fontsize=14,
-                    fontweight="bold",
-                    va="center",
-                    ha="left",
-                    clip_on=False,
-                )
-
-        # Set xlim to accommodate annotations
-        x_max = plot_data[metric].quantile(0.99)
-        ax.set_xlim(left=None, right=x_max * 1.2)  # Extra space for annotations
-
-        # Formatting (like TNT version)
-        plt.xticks(fontsize=12)
-        plt.yticks(fontsize=10)
-        plt.xlabel(metric, fontsize=14)
-        plt.ylabel("Ball Type", fontsize=14)
-        plt.title(f"Mann-Whitney U Test: {metric} by Ball Type (FDR corrected)", fontsize=16)
-        ax.grid(axis="x", alpha=0.3)
-
-        # Create custom legend (like TNT version)
-        from matplotlib.patches import Patch
-
-        legend_elements = [
-            Patch(facecolor="none", edgecolor="red", linestyle="--", linewidth=2, label="Control Group"),
-            Patch(facecolor="none", edgecolor="black", linewidth=1, label="Test Groups"),
-            Patch(facecolor="lightgreen", alpha=0.15, label="Significantly Increased"),
-            Patch(facecolor="lightblue", alpha=0.1, label="Control"),
-            Patch(facecolor="lightcoral", alpha=0.15, label="Significantly Decreased"),
-        ]
-
-        ax.legend(
-            legend_elements,
-            [str(elem.get_label()) for elem in legend_elements],
-            fontsize=10,
-            bbox_to_anchor=(1.05, 1),
-            loc="upper left",
-        )
+        # Remove top and right spines for cleaner look
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_linewidth(1.5)
 
         # Use tight_layout with padding to accommodate external legend
         plt.tight_layout()
 
         # Save plot
-        output_file = output_dir / f"{metric}_balltype_mannwhitney_fdr.pdf"
+        output_file = output_dir / f"{metric}_balltype_permutation_fdr.pdf"
         plt.savefig(output_file, dpi=300, bbox_inches="tight")
+
+        # Also save as PNG
+        output_file_png = output_dir / f"{metric}_balltype_permutation_fdr.png"
+        plt.savefig(output_file_png, dpi=300, bbox_inches="tight")
         plt.close()
 
         print(f"  Plot saved: {output_file}")
@@ -391,12 +472,12 @@ def generate_balltype_mannwhitney_plots(
 
     if not stats_df.empty:
         # Save statistics
-        stats_file = output_dir / "balltype_mannwhitney_fdr_statistics.csv"
+        stats_file = output_dir / "balltype_permutation_fdr_statistics.csv"
         stats_df.to_csv(stats_file, index=False)
         print(f"\nStatistics saved to: {stats_file}")
 
         # Generate text report
-        report_file = output_dir / "balltype_mannwhitney_fdr_report.md"
+        report_file = output_dir / "balltype_permutation_fdr_report.md"
         generate_text_report(stats_df, data, control_balltype, report_file)
         print(f"Text report saved to: {report_file}")
 
@@ -429,10 +510,13 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
         Path where to save the report
     """
     report_lines = []
-    report_lines.append("# Ball Types Mann-Whitney U Test Report")
+    report_lines.append("# Ball Types Permutation Test Report")
     report_lines.append("## FDR-Corrected Statistical Analysis Results")
     report_lines.append("")
     report_lines.append(f"**Control group:** {control_balltype}")
+    report_lines.append(
+        f"**Test method:** Permutation test with {stats_df['n_permutations'].iloc[0] if 'n_permutations' in stats_df.columns else 10000} permutations"
+    )
     report_lines.append("")
 
     # Group by metric
@@ -734,7 +818,7 @@ def should_skip_metric(metric, output_dir, overwrite=True):
     # Check for existing plot files for this metric
     output_dir = Path(output_dir)
 
-    # Check for continuous metric plots (Mann-Whitney style)
+    # Check for continuous metric plots (permutation test style)
     continuous_plot_patterns = [f"*{metric}*.pdf", f"*{metric}*.png", f"{metric}_*.pdf", f"{metric}_*.png"]
 
     # Check for binary metric plots
@@ -1076,7 +1160,7 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_balltype=None
 
 
 def main(overwrite=True, test_mode=False):
-    """Main function to run Mann-Whitney plots for all metrics.
+    """Main function to run permutation test plots for all metrics.
 
     Parameters:
     -----------
@@ -1092,14 +1176,14 @@ def main(overwrite=True, test_mode=False):
     - Batch fillna operations for better performance
     - FDR correction for proper multiple testing correction
     """
-    print(f"Starting Mann-Whitney U test analysis for ball types experiments...")
+    print(f"Starting permutation test analysis for ball types experiments...")
     if not overwrite:
         print("📄 Overwrite disabled: Will skip metrics with existing plots")
     if test_mode:
         print("🧪 TEST MODE: Only processing first 3 metrics for debugging")
 
     # Define output directories
-    base_output_dir = Path("/mnt/upramdya_data/MD/Ballpushing_Balltypes/Plots/Summary_metrics/BallTypes_Mannwhitney")
+    base_output_dir = Path("/mnt/upramdya_data/MD/Ballpushing_Balltypes/Plots/Summary_metrics/BallTypes_Permutation")
 
     # Ensure the base output directory exists
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1107,7 +1191,7 @@ def main(overwrite=True, test_mode=False):
 
     # Clean up any potential old outputs to avoid confusion
     print("Ensuring clean output directory structure...")
-    condition_subdir = "mannwhitney_balltypes"
+    condition_subdir = "permutation_balltypes"
     condition_dir = base_output_dir / condition_subdir
     condition_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Created/verified: {condition_dir}")
@@ -1285,7 +1369,7 @@ def main(overwrite=True, test_mode=False):
     print(f"\n📊 EFFICIENT METRICS ANALYSIS SUMMARY:")
     print(f"=" * 60)
     print(f"✅ Metrics filtering applied early for efficiency - excluded patterns filtered before categorization")
-    print(f"Found {len(continuous_metrics)} continuous metrics for Mann-Whitney analysis:")
+    print(f"Found {len(continuous_metrics)} continuous metrics for permutation test analysis:")
     for i, metric in enumerate(continuous_metrics, 1):
         print(f"  {i:2d}. {metric}")
 
@@ -1301,7 +1385,7 @@ def main(overwrite=True, test_mode=False):
                 dtype = dataset[metric].dtype
                 print(f"  - {metric} ({reason}, {dtype}, {unique_count} unique values)")
 
-    # Use continuous metrics for the Mann-Whitney analysis
+    # Use continuous metrics for the permutation test analysis
     metric_cols = continuous_metrics
 
     # If in test mode, limit to first 3 metrics and show more timing info
@@ -1336,6 +1420,9 @@ def main(overwrite=True, test_mode=False):
     filtered_data = dataset
     print(f"Dataset shape: {filtered_data.shape}")
 
+    # Initialize subset_available for later use
+    subset_available = False
+
     if len(filtered_data) == 0:
         print(f"No data for ball types analysis. Skipping...")
         return
@@ -1347,13 +1434,13 @@ def main(overwrite=True, test_mode=False):
     print(f"Ball types in dataset: {sorted(filtered_data['BallType'].unique())}")
     print(f"Using simplified color palette for visualization")
 
-    # 1. Process continuous metrics with Mann-Whitney U tests
+    # 1. Process continuous metrics with permutation tests
     if continuous_metrics:
-        print(f"\n--- CONTINUOUS METRICS ANALYSIS (Mann-Whitney U tests) ---")
+        print(f"\n--- CONTINUOUS METRICS ANALYSIS (Permutation tests) ---")
         # Filter to only continuous metrics + required columns
         continuous_data = filtered_data[["BallType"] + continuous_metrics].copy()
 
-        print(f"Generating Mann-Whitney plots for ball types...")
+        print(f"Generating permutation test plots for ball types...")
         print(f"Continuous metrics dataset shape: {continuous_data.shape}")
         print(f"Output directory: {output_dir}")
 
@@ -1389,7 +1476,9 @@ def main(overwrite=True, test_mode=False):
                     for balltype, info in balltype_info.items():
                         print(f"    - {balltype}: {info['annotation']}")
 
-            print(f"🚀 Starting Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics...")
+            print(
+                f"🚀 Starting permutation test analysis for {len(metrics_to_process)} continuous metrics (non-overwrite mode)..."
+            )
             print(f"📊 Dataset shape for analysis: {continuous_data.shape}")
             print(f"📊 Ball types: {sorted(continuous_data['BallType'].unique())}")
             print(f"📊 Sample sizes per ball type:")
@@ -1414,14 +1503,26 @@ def main(overwrite=True, test_mode=False):
             else:
                 control_balltype = str(control_balltype)  # Ensure it's a string
 
+            # Check if subset ball types are available
+            subset_balltypes = ["ctrl", "rusty", "sand"]
+            subset_available = all(bt in available_balltypes for bt in subset_balltypes)
+            if subset_available:
+                print(f"\n✓ Subset ball types available for focused analysis: {subset_balltypes}")
+            else:
+                print(f"\n⚠ Some subset ball types not available: {subset_balltypes}")
+                print(f"  Available: {sorted(available_balltypes)}")
+
+            print(f"\n{'='*60}")
+            print(f"FULL ANALYSIS: All ball types")
+            print(f"{'='*60}")
             print(
-                f"🚀 Starting FDR-corrected Mann-Whitney analysis for {len(metrics_to_process)} continuous metrics..."
+                f"🚀 Starting FDR-corrected permutation test analysis for {len(metrics_to_process)} continuous metrics..."
             )
             print(f"📊 Control group: {control_balltype}")
             print(f"📊 Test groups: {[bt for bt in continuous_data['BallType'].unique() if bt != control_balltype]}")
 
-            # Use the new FDR-corrected function
-            stats_df = generate_balltype_mannwhitney_plots(
+            # Use the new FDR-corrected permutation test function
+            stats_df = generate_balltype_permutation_plots(
                 continuous_data,
                 metrics=metrics_to_process,
                 y="BallType",
@@ -1431,13 +1532,52 @@ def main(overwrite=True, test_mode=False):
                 output_dir=str(output_dir),
                 fdr_method="fdr_bh",  # Benjamini-Hochberg FDR correction
                 alpha=0.05,  # FDR-corrected significance level
+                n_permutations=10000,  # Number of permutations
+                filter_balltypes=None,  # All ball types
+                scatter_size=50,  # Larger scatter points
             )
 
             end_time = time.time()
             elapsed_time = end_time - start_time
-            print(
-                f"✅ FDR-corrected Mann-Whitney analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)"
-            )
+            print(f"✅ Full analysis completed in {elapsed_time:.2f} seconds ({elapsed_time/60:.2f} minutes)\n")
+
+            # ===== SUBSET ANALYSIS: ctrl, rusty, sand only =====
+            if subset_available:
+                print(f"{'='*60}")
+                print(f"SUBSET ANALYSIS: ctrl vs rusty and sand")
+                print(f"{'='*60}")
+
+                # Create subset output directory
+                subset_dir = output_dir.parent / "permutation_balltypes_subset_rusty_sand"
+                subset_dir.mkdir(parents=True, exist_ok=True)
+                print(f"📁 Subset output directory: {subset_dir}")
+
+                start_time_subset = time.time()
+                print(f"🚀 Starting subset analysis for {len(metrics_to_process)} metrics...")
+                print(f"📊 Ball types: {subset_balltypes}")
+                print(f"📊 Control: {control_balltype}")
+                print(f"📊 Test groups: {[bt for bt in subset_balltypes if bt != control_balltype]}")
+
+                stats_df_subset = generate_balltype_permutation_plots(
+                    continuous_data,
+                    metrics=metrics_to_process,
+                    y="BallType",
+                    control_balltype=control_balltype,
+                    hue="BallType",
+                    palette="Set1",
+                    output_dir=str(subset_dir),
+                    fdr_method="fdr_bh",
+                    alpha=0.05,
+                    n_permutations=10000,
+                    filter_balltypes=subset_balltypes,  # Filter to subset
+                    scatter_size=50,  # Larger scatter points
+                )
+
+                end_time_subset = time.time()
+                elapsed_time_subset = end_time_subset - start_time_subset
+                print(
+                    f"✅ Subset analysis completed in {elapsed_time_subset:.2f} seconds ({elapsed_time_subset/60:.2f} minutes)\n"
+                )
 
     # 2. Process binary metrics with Fisher's exact tests
     if binary_metrics:
@@ -1478,7 +1618,7 @@ def main(overwrite=True, test_mode=False):
 if __name__ == "__main__":
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="Generate Mann-Whitney U test jitterboxplots for ball types experiments",
+        description="Generate permutation test jitterboxplots for ball types experiments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
