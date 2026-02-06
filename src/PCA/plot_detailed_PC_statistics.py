@@ -49,6 +49,12 @@ parser.add_argument(
     help="Control selection mode: 'tailored' for split-based controls or 'emptysplit' for universal Empty-Split control (default: tailored)",
 )
 parser.add_argument(
+    "--use-permutation-per-pc",
+    action="store_true",
+    default=False,
+    help="Use permutation test instead of Mann-Whitney U for per-PC significance testing (default: Mann-Whitney U)",
+)
+parser.add_argument(
     "--dataset",
     type=str,
     default=None,
@@ -59,6 +65,7 @@ args = parser.parse_args()
 # Output directory
 OUTPUT_DIR = args.output_dir
 CONTROL_MODE = args.control_mode
+USE_PERMUTATION_PER_PC = args.use_permutation_per_pc
 
 # Use dataset from command line if provided, otherwise use hardcoded path
 if args.dataset:
@@ -142,7 +149,26 @@ def colour_y_ticklabels(ax, nickname_to_region, color_dict):
             tick.set_color(color_dict[region])
 
 
-def permutation_test(group1, group2, n_permutations=1000, random_state=None):
+def permutation_test_1d(group1, group2, n_permutations=10000, random_state=None):
+    """Univariate permutation test for a single dimension using mean difference"""
+    rng = np.random.default_rng(random_state)
+    observed = np.abs(group1.mean() - group2.mean())
+    combined = np.concatenate([group1, group2])
+    n1 = len(group1)
+    count = 0
+    for _ in range(n_permutations):
+        perm_idx = rng.permutation(len(combined))
+        perm_combined = combined[perm_idx]
+        perm_group1 = perm_combined[:n1]
+        perm_group2 = perm_combined[n1:]
+        stat = np.abs(perm_group1.mean() - perm_group2.mean())
+        if stat >= observed:
+            count += 1
+    pval = (count + 1) / (n_permutations + 1)
+    return pval
+
+
+def permutation_test(group1, group2, n_permutations=10000, random_state=None):
     """Permutation test for multivariate difference"""
     rng = np.random.default_rng(random_state)
     observed = np.linalg.norm(group1.mean(axis=0) - group2.mean(axis=0))
@@ -171,7 +197,7 @@ def mahalanobis_distance(group1, group2):
     return dist
 
 
-def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_state=None):
+def mahalanobis_permutation_test(group1, group2, n_permutations=10000, random_state=None):
     """Permutation test using Mahalanobis distance"""
     rng = np.random.default_rng(random_state)
     observed = mahalanobis_distance(group1, group2)
@@ -430,8 +456,8 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
             continue
         control_name = control_names[0]
 
-        # Mann-Whitney U per dimension + FDR
-        mannwhitney_pvals = []
+        # Per-PC testing (Mann-Whitney U or Permutation test) + FDR
+        ppc_pvals = []
         dims_tested = []
         directions = {}
 
@@ -441,19 +467,23 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
             if group_scores.empty or control_scores.empty:
                 continue
 
-            stat, pval = mannwhitneyu(group_scores, control_scores, alternative="two-sided")
-            mannwhitney_pvals.append(pval)
+            if USE_PERMUTATION_PER_PC:
+                pval = permutation_test_1d(group_scores.values, control_scores.values, random_state=42)
+            else:
+                stat, pval = mannwhitneyu(group_scores, control_scores, alternative="two-sided")
+
+            ppc_pvals.append(pval)
             dims_tested.append(dim)
 
             # Calculate direction
             directions[dim] = 1 if group_scores.mean() > control_scores.mean() else -1
 
-        if len(mannwhitney_pvals) > 0:
-            rejected, pvals_corr, _, _ = multipletests(mannwhitney_pvals, alpha=0.05, method="fdr_bh")
+        if len(ppc_pvals) > 0:
+            rejected, pvals_corr, _, _ = multipletests(ppc_pvals, alpha=0.05, method="fdr_bh")
             significant_dims = [dims_tested[i] for i, rej in enumerate(rejected) if rej]
-            mannwhitney_any = any(rejected)
+            ppc_any = any(rejected)
         else:
-            mannwhitney_any = False
+            ppc_any = False
             significant_dims = []
             pvals_corr = []
 
@@ -471,7 +501,7 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
         result_dict = {
             "genotype": nickname,
             "control": control_name,
-            "MannWhitney_any_dim_significant": mannwhitney_any,
+            "MannWhitney_any_dim_significant": ppc_any,
             "MannWhitney_significant_dims": significant_dims,
             "num_significant_PCs": len(significant_dims),
             "Permutation_pval": perm_pval,
@@ -482,8 +512,8 @@ def run_best_pca_analysis(dataset, metrics_list, method_type, params, high_consi
         # Add PC-specific results
         for i, dim in enumerate(dims_tested):
             pc_name = dim.replace(method_name, "PC")  # Standardize to PC1, PC2, etc.
-            if i < len(mannwhitney_pvals) and i < len(pvals_corr):
-                result_dict[f"{pc_name}_pval"] = mannwhitney_pvals[i]
+            if i < len(ppc_pvals) and i < len(pvals_corr):
+                result_dict[f"{pc_name}_pval"] = ppc_pvals[i]
                 result_dict[f"{pc_name}_pval_corrected"] = pvals_corr[i]
                 result_dict[f"{pc_name}_significant"] = dim in significant_dims
                 result_dict[f"{pc_name}_direction"] = directions.get(dim, 0)

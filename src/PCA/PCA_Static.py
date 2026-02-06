@@ -114,6 +114,14 @@ Examples:
         help="Control selection mode: 'tailored' for split-based controls, 'emptysplit' for Empty-Split, or 'tnt_pr' to compare all groups vs TNTxPR (default: tailored)",
     )
 
+    # Per-PC testing method
+    parser.add_argument(
+        "--use-permutation-per-pc",
+        action="store_true",
+        default=False,
+        help="Use permutation test instead of Mann-Whitney U for per-PC significance testing (default: Mann-Whitney U)",
+    )
+
     # Dataset path
     parser.add_argument(
         "--dataset",
@@ -148,6 +156,9 @@ else:
     # Default: triple-test mode
     USE_TRIPLE_TEST = True
     USE_PERMUTATION_ONLY = False
+
+# Per-PC testing method
+USE_PERMUTATION_PER_PC = args.use_permutation_per_pc
 
 CONTROL_MODE = args.control_mode
 
@@ -303,83 +314,6 @@ def generate_edge_case_configs(optimized_configs, full_metrics_list):
     )
 
     return edge_configs
-    """
-    Generate edge case configurations matching August 2024 methodology
-
-    For each optimized metric list (List1, List2):
-    - Fixed 10 components: PCA + SparsePCA with optimized metrics
-    - Fixed 10 components: PCA + SparsePCA with full metrics
-    - Fixed 15 components: PCA + SparsePCA with optimized metrics
-    - Fixed 15 components: PCA + SparsePCA with full metrics
-
-    This generates 8 edge cases per metric list × 2 lists = 16 edge cases total
-    Matches the August 2024 analysis that found IR8a-GAL4.
-    """
-    print("\n🔧 Generating edge case configurations (August 2024 methodology)...")
-
-    edge_configs = {}
-    edge_case_counter = 1
-
-    # Get unique metric lists from optimized configs (List1, List2, etc.)
-    unique_metric_lists = {}
-    for config_key, config_data in optimized_configs.items():
-        condition = config_data["condition"]
-        if condition not in unique_metric_lists:
-            unique_metric_lists[condition] = config_data["metrics"]
-
-    print(f"   Found {len(unique_metric_lists)} unique metric lists: {list(unique_metric_lists.keys())}")
-
-    # Generate edge cases for each metric list
-    for condition, optimized_metrics in unique_metric_lists.items():
-        # For each component count (10, 15)
-        for n_components in [10, 15]:
-            # For each method (PCA, SparsePCA)
-            for method in ["PCA", "SparsePCA"]:
-                # Edge case 1: Fixed components with optimized metrics
-                edge_key = f"EdgeCase_{edge_case_counter:02d}_{condition}_{method}_fixed{n_components}comp"
-
-                if method == "PCA":
-                    params = {"n_components": n_components}
-                else:  # SparsePCA
-                    params = {
-                        "n_components": n_components,
-                        "alpha": 0.1,
-                        "ridge_alpha": 0.01,
-                        "method": "lars",
-                        "max_iter": 1000,
-                        "tol": 1e-4,
-                    }
-
-                edge_configs[edge_key] = {
-                    "condition": f"{condition}_fixed{n_components}",
-                    "method": method,
-                    "metrics": optimized_metrics,
-                    "top_params": [{"params": params}],
-                    "edge_case_type": "fixed_components_optimized_metrics",
-                    "description": f"{method} with {n_components} components and {condition} metrics ({len(optimized_metrics)} total)",
-                }
-                edge_case_counter += 1
-
-                # Edge case 2: Fixed components with full metrics
-                edge_key = f"EdgeCase_{edge_case_counter:02d}_FullMetrics_{method}_fixed{n_components}comp"
-
-                edge_configs[edge_key] = {
-                    "condition": f"FullMetrics_fixed{n_components}",
-                    "method": method,
-                    "metrics": full_metrics_list,
-                    "top_params": [{"params": params}],
-                    "edge_case_type": "fixed_components_full_metrics",
-                    "description": f"{method} with {n_components} components and full metrics ({len(full_metrics_list)} total)",
-                }
-                edge_case_counter += 1
-
-    print(f"   ✅ Generated {len(edge_configs)} edge case configurations")
-    print(f"   📊 Breakdown:")
-    print(f"      - {len(unique_metric_lists)} metric lists × 2 component counts (10, 15) × 2 methods × 2 metric types")
-    print(f"      - Total: {len(unique_metric_lists)} × 8 = {len(edge_configs)} edge cases")
-    print(f"   📈 Analysis will test: {len(optimized_configs)} optimized + {len(edge_configs)} edge cases")
-
-    return edge_configs
 
 
 def run_single_pca_analysis(dataset, config_id, condition_name, method_type, metrics_list, params, is_edge_case=False):
@@ -518,24 +452,31 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
                 continue
             control_name = control_names[0]
 
-            # Mann-Whitney U per dimension + FDR
-            mannwhitney_pvals = []
+            # Per-PC testing (Mann-Whitney U or Permutation test) + FDR
+            ppc_pvals = []
             dims_tested = []
             for dim in selected_dims:
                 group_scores = subset[subset["Nickname"] == nickname][dim]
                 control_scores = subset[subset["Nickname"] == control_name][dim]
                 if group_scores.empty or control_scores.empty:
                     continue
-                stat, pval = stats.mannwhitneyu(group_scores, control_scores, alternative="two-sided")
-                mannwhitney_pvals.append(pval)
+
+                if USE_PERMUTATION_PER_PC:
+                    # Use permutation test
+                    pval = permutation_test_1d(group_scores.values, control_scores.values, random_state=42)
+                else:
+                    # Use Mann-Whitney U (default)
+                    stat, pval = stats.mannwhitneyu(group_scores, control_scores, alternative="two-sided")
+
+                ppc_pvals.append(pval)
                 dims_tested.append(dim)
 
-            if len(mannwhitney_pvals) > 0:
-                rejected, pvals_corr, _, _ = multipletests(mannwhitney_pvals, alpha=0.05, method="fdr_bh")
-                mannwhitney_any = any(rejected)
+            if len(ppc_pvals) > 0:
+                rejected, pvals_corr, _, _ = multipletests(ppc_pvals, alpha=0.05, method="fdr_bh")
+                ppc_any = any(rejected)
                 significant_dims = [dims_tested[i] for i, rej in enumerate(rejected) if rej]
             else:
-                mannwhitney_any = False
+                ppc_any = False
                 significant_dims = []
 
             # Multivariate tests
@@ -552,7 +493,7 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
                 {
                     "Nickname": nickname,
                     "Control": control_name,
-                    "MannWhitney_any_dim_significant": mannwhitney_any,
+                    "MannWhitney_any_dim_significant": ppc_any,
                     "MannWhitney_significant_dims": significant_dims,
                     "Permutation_pval": perm_pval,
                     "Mahalanobis_pval": maha_pval,
@@ -630,8 +571,26 @@ def run_single_pca_analysis(dataset, config_id, condition_name, method_type, met
         return []
 
 
-# [Keep all the original helper functions: permutation_test, mahalanobis_distance, etc.]
-def permutation_test(group1, group2, n_permutations=1000, random_state=None):
+def permutation_test_1d(group1, group2, n_permutations=10000, random_state=None):
+    """Univariate permutation test for a single dimension using mean difference"""
+    rng = np.random.default_rng(random_state)
+    observed = np.abs(group1.mean() - group2.mean())
+    combined = np.concatenate([group1, group2])
+    n1 = len(group1)
+    count = 0
+    for _ in range(n_permutations):
+        perm_idx = rng.permutation(len(combined))
+        perm_combined = combined[perm_idx]
+        perm_group1 = perm_combined[:n1]
+        perm_group2 = perm_combined[n1:]
+        stat = np.abs(perm_group1.mean() - perm_group2.mean())
+        if stat >= observed:
+            count += 1
+    pval = (count + 1) / (n_permutations + 1)
+    return pval
+
+
+def permutation_test(group1, group2, n_permutations=10000, random_state=None):
     """Permutation test for multivariate difference"""
     rng = np.random.default_rng(random_state)
     observed = np.linalg.norm(group1.mean(axis=0) - group2.mean(axis=0))
@@ -660,7 +619,7 @@ def mahalanobis_distance(group1, group2):
     return dist
 
 
-def mahalanobis_permutation_test(group1, group2, n_permutations=1000, random_state=None):
+def mahalanobis_permutation_test(group1, group2, n_permutations=10000, random_state=None):
     """Permutation test using Mahalanobis distance"""
     rng = np.random.default_rng(random_state)
     observed = mahalanobis_distance(group1, group2)

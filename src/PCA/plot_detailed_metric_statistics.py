@@ -71,6 +71,25 @@ METRICS_PATH = os.path.join(SCRIPT_DIR, "metrics_lists", "final_metrics_for_pca_
 MIN_COMBINED_CONSISTENCY = 0.80  # Only include hits with ≥80% combined consistency
 
 
+def permutation_test_1d(group1, group2, n_permutations=10000, random_state=None):
+    """Univariate permutation test for a single dimension using mean difference"""
+    rng = np.random.default_rng(random_state)
+    observed = np.abs(group1.mean() - group2.mean())
+    combined = np.concatenate([group1, group2])
+    n1 = len(group1)
+    count = 0
+    for _ in range(n_permutations):
+        perm_idx = rng.permutation(len(combined))
+        perm_combined = combined[perm_idx]
+        perm_group1 = perm_combined[:n1]
+        perm_group2 = perm_combined[n1:]
+        stat = np.abs(perm_group1.mean() - perm_group2.mean())
+        if stat >= observed:
+            count += 1
+    pval = (count + 1) / (n_permutations + 1)
+    return pval
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="Detailed metric statistics for high combined-consistency hits")
     parser.add_argument("--output-dir", default="best_metric_analysis", help="Directory for all outputs")
@@ -99,6 +118,12 @@ def _parse_args():
         help="Control selection mode (default: tailored)",
     )
     parser.add_argument(
+        "--use-permutation-per-pc",
+        action="store_true",
+        default=False,
+        help="Use permutation test instead of Mann-Whitney U for per-metric significance testing (default: Mann-Whitney U)",
+    )
+    parser.add_argument(
         "--discrete-effects",
         action="store_true",
         help="Use discrete effect size bins (negligible <0.2, small 0.2-0.5, medium 0.5-1.0, large >1.0) instead of continuous coloring",
@@ -115,18 +140,20 @@ def _parse_args():
 # These globals will be overridden by CLI if provided
 OUTPUT_DIR = "best_metric_analysis"
 CONTROL_MODE = "tailored"
+USE_PERMUTATION_PER_PC = False
 DISCRETE_EFFECTS = False
 CLIP_EFFECTS = 1.5
 
 
 def _apply_args(args):
-    global OUTPUT_DIR, CONSISTENCY_DIR, METRICS_PATH, DATA_PATH, MIN_COMBINED_CONSISTENCY, CONTROL_MODE, DISCRETE_EFFECTS, CLIP_EFFECTS
+    global OUTPUT_DIR, CONSISTENCY_DIR, METRICS_PATH, DATA_PATH, MIN_COMBINED_CONSISTENCY, CONTROL_MODE, USE_PERMUTATION_PER_PC, DISCRETE_EFFECTS, CLIP_EFFECTS
     OUTPUT_DIR = args.output_dir
     CONSISTENCY_DIR = args.consistency_dir
     METRICS_PATH = args.metrics_path
     DATA_PATH = args.data_path
     MIN_COMBINED_CONSISTENCY = args.combined_threshold
     CONTROL_MODE = args.control_mode
+    USE_PERMUTATION_PER_PC = args.use_permutation_per_pc
     DISCRETE_EFFECTS = args.discrete_effects
     CLIP_EFFECTS = args.clip_effects
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -135,6 +162,10 @@ def _apply_args(args):
         print(f"🎨 Using discrete effect size bins (Cohen's d thresholds: 0.2/0.5/1.0)")
     if CLIP_EFFECTS is not None:
         print(f"✂️  Clipping Cohen's d values to ±{CLIP_EFFECTS} (prevents extreme values from dominating color scale)")
+    if USE_PERMUTATION_PER_PC:
+        print(f"🔀 Per-metric testing: Permutation test (10000 permutations + FDR)")
+    else:
+        print(f"📊 Per-metric testing: Mann-Whitney U (default + FDR)")
 
     # Check for consistency files in multiple locations (PCA_Static.py saves to data_files subdirectory)
     proposed_consistency_dir = args.consistency_dir
@@ -651,6 +682,13 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
     # Only analyze the high-consistency genotypes
     analysis_genotypes = [g for g in high_consistency_hits if g in metric_with_meta["Nickname"].values]
     print(f"   🎯 Analyzing {len(analysis_genotypes)} high-consistency genotypes")
+    print(f"   🔬 Computing statistical tests FRESH from raw data (not using pre-computed results)")
+    if USE_PERMUTATION_PER_PC:
+        print(f"   📊 Per-metric test: Permutation (10000 permutations + FDR correction)")
+    else:
+        print(f"   📊 Per-metric test: Mann-Whitney U (+ FDR correction)")
+    print(f"   📐 Computing Cohen's d effect sizes for all {len(valid_metrics)} metrics")
+    print()
 
     for nickname in analysis_genotypes:
         # Determine which control to use based on CONTROL_MODE
@@ -671,9 +709,10 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             continue
         control_name = control_names[0]
 
-        # Mann-Whitney U per metric + FDR correction
-        # This is the main analysis - no need for multivariate tests since hits are pre-selected
-        mannwhitney_pvals = []
+        # Per-metric testing (Mann-Whitney U or Permutation test) + FDR correction
+        # IMPORTANT: Tests are computed FRESH from raw data for each genotype-metric pair
+        # This works regardless of which test was used in PCA_Static.py for hit selection
+        ppc_pvals = []
         metrics_tested = []
         directions = {}
         effect_sizes = {}  # Store Cohen's d for each metric
@@ -684,8 +723,13 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             if group_values.empty or control_values.empty:
                 continue
 
-            stat, pval = mannwhitneyu(group_values, control_values, alternative="two-sided")
-            mannwhitney_pvals.append(pval)
+            # Compute test fresh from raw data (not pre-computed)
+            if USE_PERMUTATION_PER_PC:
+                pval = permutation_test_1d(group_values.values, control_values.values, random_state=42)
+            else:
+                stat, pval = mannwhitneyu(group_values, control_values, alternative="two-sided")
+
+            ppc_pvals.append(pval)
             metrics_tested.append(metric)
 
             # Calculate Cohen's d effect size
@@ -695,12 +739,12 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             # Calculate direction (same as sign of Cohen's d)
             directions[metric] = 1 if d > 0 else -1
 
-        if len(mannwhitney_pvals) > 0:
-            rejected, pvals_corr, _, _ = multipletests(mannwhitney_pvals, alpha=0.05, method="fdr_bh")
+        if len(ppc_pvals) > 0:
+            rejected, pvals_corr, _, _ = multipletests(ppc_pvals, alpha=0.05, method="fdr_bh")
             significant_metrics = [metrics_tested[i] for i, rej in enumerate(rejected) if rej]
-            mannwhitney_any = any(rejected)
+            ppc_any = any(rejected)
         else:
-            mannwhitney_any = False
+            ppc_any = False
             significant_metrics = []
             pvals_corr = []
 
@@ -708,16 +752,16 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         result_dict = {
             "genotype": nickname,
             "control": control_name,
-            "MannWhitney_any_metric_significant": mannwhitney_any,
+            "MannWhitney_any_metric_significant": ppc_any,
             "MannWhitney_significant_metrics": significant_metrics,
             "num_significant_metrics": len(significant_metrics),
-            "significant": mannwhitney_any,  # Use Mann-Whitney results as main criterion
+            "significant": ppc_any,  # Use per-metric test results as main criterion
         }
 
         # Add metric-specific results
         for i, metric in enumerate(metrics_tested):
-            if i < len(mannwhitney_pvals) and i < len(pvals_corr):
-                result_dict[f"{metric}_pval"] = mannwhitney_pvals[i]
+            if i < len(ppc_pvals) and i < len(pvals_corr):
+                result_dict[f"{metric}_pval"] = ppc_pvals[i]
                 result_dict[f"{metric}_pval_corrected"] = pvals_corr[i]
                 result_dict[f"{metric}_significant"] = metric in significant_metrics
                 result_dict[f"{metric}_direction"] = directions.get(metric, 0)
@@ -734,11 +778,14 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
     # (Removed) Multivariate test FDR correction block (Permutation/Mahalanobis) no longer applicable.
 
     # Save results
-    results_file = os.path.join(OUTPUT_DIR, f"metric_stats_results.csv")
+    test_method = "permutation" if USE_PERMUTATION_PER_PC else "mannwhitney"
+    results_file = os.path.join(OUTPUT_DIR, f"metric_stats_results_{test_method}.csv")
     results_df.to_csv(results_file, index=False)
 
-    print(f"   📊 Found {len(results_df)} genotypes in analysis")
-    print(f"   🎯 Significant hits: {len(results_df[results_df['significant']])}")
+    print(f"\n   ✅ Statistical testing complete!")
+    print(f"   📊 Genotypes analyzed: {len(results_df)}")
+    print(f"   🎯 Genotypes with ≥1 significant metric: {len(results_df[results_df['significant']])}")
+    print(f"   🧪 Test method: {'Permutation (10000 perms)' if USE_PERMUTATION_PER_PC else 'Mann-Whitney U'}")
     print(f"   💾 Results saved to {results_file}")
 
     return results_df, correlation_matrix

@@ -155,7 +155,8 @@ def significance_label(p_value):
 # Statistical method selection
 USE_LMM = True  # Use Linear Mixed-Effects Models for effect sizes and diagnostics
 USE_RESIDUAL_PERMUTATION = False  # Permutation tests on residuals
-USE_MANN_WHITNEY = True  # Enabled: use for significance annotations (simpler, no blocking assumptions)
+USE_MANN_WHITNEY = False  # Disabled: using permutation tests instead
+USE_PERMUTATION_TEST = True  # Use permutation tests for pairwise comparisons
 
 # Diagnostic options
 SAVE_DIAGNOSTIC_PLOTS = True  # Save diagnostic plots for model validation
@@ -565,27 +566,33 @@ def perform_mann_whitney_continuous_analysis(df, condition_col, condition_values
                     continue
 
                 # Mann-Whitney U test
-                stat, p_value = mannwhitneyu(group1, group2, alternative="two-sided")
+                statistic, p_value = mannwhitneyu(group1, group2, alternative="two-sided")
 
-                results[metric]["pairwise"][f"{cond1}_vs_{cond2}"] = {
+                comparison_key = f"{cond1}_vs_{cond2}"
+                results[metric]["pairwise"][comparison_key] = {
                     "p_value": p_value,
-                    "significant": p_value < ALPHA,
-                    "mean_diff": group1.mean() - group2.mean(),
+                    "statistic": statistic,
+                    "significance": significance_label(p_value),
                 }
 
         except Exception as e:
             print(f"  Warning: Could not analyze {metric} with Mann-Whitney: {e}")
 
     return results
+
+
+def perform_permutation_continuous_analysis(df, condition_col, condition_values, metrics=None):
     """
     Perform permutation test analysis on continuous metrics.
+    Tests for differences between groups using permutation-based p-values.
+    Uses mean difference as the test statistic.
     """
     if metrics is None:
         metrics = auto_detect_continuous_metrics(df)
 
     results = {}
 
-    for metric in metrics:
+    for metric in tqdm(metrics, desc="Permutation tests"):
         if metric not in df.columns:
             continue
 
@@ -598,6 +605,9 @@ def perform_mann_whitney_continuous_analysis(df, condition_col, condition_values
 
             results[metric] = {"pairwise": {}}
 
+            # Set seed once per metric for reproducibility
+            np.random.seed(42)
+
             # Pairwise comparisons
             for cond1, cond2 in combinations(condition_values, 2):
                 group1 = data[data[condition_col] == cond1][metric].values
@@ -607,32 +617,33 @@ def perform_mann_whitney_continuous_analysis(df, condition_col, condition_values
                     continue
 
                 # Observed difference in means
-                obs_diff = np.abs(group1.mean() - group2.mean())
+                observed_diff = np.mean(group1) - np.mean(group2)
 
                 # Permutation test
                 combined = np.concatenate([group1, group2])
+                n1 = len(group1)
+                n_total = len(combined)
+
+                # Generate permutation distribution
                 perm_diffs = []
-                np.random.seed(42)
-                for _ in range(n_permutations):
-                    perm_combined = np.random.permutation(combined)
-                    perm_g1 = perm_combined[: len(group1)]
-                    perm_g2 = perm_combined[len(group1) :]
-                    perm_diffs.append(np.abs(perm_g1.mean() - perm_g2.mean()))
+                for _ in range(N_PERMUTATIONS):
+                    # Shuffle and split
+                    perm_idx = np.random.permutation(n_total)
+                    perm_group1 = combined[perm_idx[:n1]]
+                    perm_group2 = combined[perm_idx[n1:]]
+                    perm_diff = np.mean(perm_group1) - np.mean(perm_group2)
+                    perm_diffs.append(perm_diff)
 
-                p_value = np.mean(np.array(perm_diffs) >= obs_diff)
+                perm_diffs = np.array(perm_diffs)
 
-                # Cohen's d effect size
-                pooled_std = np.sqrt(
-                    ((len(group1) - 1) * group1.std() ** 2 + (len(group2) - 1) * group2.std() ** 2)
-                    / (len(group1) + len(group2) - 2)
-                )
-                cohens_d = (group1.mean() - group2.mean()) / pooled_std if pooled_std > 0 else 0
+                # Two-tailed p-value
+                p_value = np.sum(np.abs(perm_diffs) >= np.abs(observed_diff)) / N_PERMUTATIONS
 
-                results[metric]["pairwise"][f"{cond1}_vs_{cond2}"] = {
+                comparison_key = f"{cond1}_vs_{cond2}"
+                results[metric]["pairwise"][comparison_key] = {
                     "p_value": p_value,
-                    "cohens_d": cohens_d,
-                    "mean_diff": group1.mean() - group2.mean(),
-                    "significant": p_value < ALPHA,
+                    "observed_diff": observed_diff,
+                    "significance": significance_label(p_value),
                 }
 
         except Exception as e:
@@ -873,6 +884,141 @@ def plot_continuous_metrics(
 
 
 # ============================================================================
+# STATISTICAL REPORTING
+# ============================================================================
+
+
+def format_p_value(p_value):
+    """Format p-value for display with appropriate precision"""
+    if p_value is None or np.isnan(p_value):
+        return "n/a"
+    # Use scientific notation for very small p-values
+    if p_value < 1e-4:
+        return f"{p_value:.3e}"
+    # For larger p-values, use fixed notation with 6 decimal places
+    return f"{p_value:.6f}"
+
+
+def save_statistical_results_table(
+    df, condition_col, condition_values, analysis_type, metrics, perm_results, output_dir
+):
+    """
+    Generate detailed markdown table with statistical results for publication.
+
+    Includes: metric name, comparison, sample sizes, means, p-value, significance.
+    """
+    print(f"\n📝 Generating statistical results table...")
+
+    # Prepare data for table
+    table_rows = []
+
+    for metric in metrics:
+        if metric not in df.columns or metric not in perm_results:
+            continue
+
+        # Get elegant metric name with units
+        metric_label = format_metric_label(metric)
+
+        # Get pairwise comparisons
+        pairwise_results = perm_results[metric].get("pairwise", {})
+
+        for comparison_key, result in pairwise_results.items():
+            parts = comparison_key.split("_vs_")
+            if len(parts) != 2:
+                continue
+
+            cond1, cond2 = parts
+
+            # Get sample sizes and means for each condition
+            group1_data = df[df[condition_col] == cond1][metric].dropna()
+            group2_data = df[df[condition_col] == cond2][metric].dropna()
+
+            # Convert units if needed
+            group1_converted = convert_metric_data(group1_data, metric)
+            group2_converted = convert_metric_data(group2_data, metric)
+
+            n1 = len(group1_data)
+            n2 = len(group2_data)
+            mean1 = group1_converted.mean()
+            mean2 = group2_converted.mean()
+            std1 = group1_converted.std()
+            std2 = group2_converted.std()
+
+            p_value = result.get("p_value", np.nan)
+            significance = result.get("significance", "n/a")
+            observed_diff = result.get("observed_diff", np.nan)
+
+            # Convert observed difference to appropriate units
+            if is_distance_metric(metric):
+                observed_diff_converted = observed_diff / PIXELS_PER_MM
+            elif is_time_metric(metric):
+                observed_diff_converted = observed_diff / 60.0
+            else:
+                observed_diff_converted = observed_diff
+
+            table_rows.append(
+                {
+                    "Metric": metric_label,
+                    "Comparison": f"{cond1} vs {cond2}",
+                    "N1": n1,
+                    "N2": n2,
+                    "Mean1": mean1,
+                    "SD1": std1,
+                    "Mean2": mean2,
+                    "SD2": std2,
+                    "Difference": observed_diff_converted,
+                    "P-value": p_value,
+                    "Significance": significance,
+                }
+            )
+
+    # Convert to DataFrame and save
+    if table_rows:
+        df_results = pd.DataFrame(table_rows)
+
+        # Save as markdown
+        output_path = Path(output_dir) / "statistical_results.md"
+        with open(output_path, "w") as f:
+            f.write(f"# Statistical Results: {analysis_type.replace('_', ' ').title()}\n\n")
+            f.write(f"**Analysis type:** {analysis_type}\n\n")
+
+            # Determine which statistical test was used
+            if USE_PERMUTATION_TEST:
+                f.write(f"**Method:** Permutation test ({N_PERMUTATIONS:,} permutations)\n\n")
+            elif USE_MANN_WHITNEY:
+                f.write(f"**Method:** Mann-Whitney U test\n\n")
+            else:
+                f.write(f"**Method:** Unknown statistical test\n\n")
+
+            f.write(f"**Significance levels:** * p<0.05, ** p<0.01, *** p<0.001\n\n")
+            f.write("---\n\n")
+
+            # Format the table
+            f.write("| Metric | Comparison | N₁ | N₂ | Mean₁ ± SD₁ | Mean₂ ± SD₂ | Difference | P-value | Sig. |\n")
+            f.write("|--------|------------|----|----|--------------|--------------|------------|---------|------|\n")
+
+            for _, row in df_results.iterrows():
+                f.write(
+                    f"| {row['Metric']} | {row['Comparison']} | "
+                    f"{row['N1']} | {row['N2']} | "
+                    f"{row['Mean1']:.3f} ± {row['SD1']:.3f} | "
+                    f"{row['Mean2']:.3f} ± {row['SD2']:.3f} | "
+                    f"{row['Difference']:.3f} | "
+                    f"{format_p_value(row['P-value'])} | {row['Significance']} |\n"
+                )
+
+        # Also save as CSV for easy import into other tools
+        csv_path = Path(output_dir) / "statistical_results.csv"
+        df_results.to_csv(csv_path, index=False)
+
+        print(f"  ✓ Saved markdown table: {output_path.name}")
+        print(f"  ✓ Saved CSV: {csv_path.name}")
+        print(f"  Total comparisons: {len(table_rows)}")
+    else:
+        print("  ⚠ No results to save")
+
+
+# ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 
@@ -952,10 +1098,16 @@ def main():
         print(f"{'='*80}")
 
         lmm_results = perform_lmm_continuous_analysis(df, condition_col, condition_values, metrics)
-        mw_results = perform_mann_whitney_continuous_analysis(df, condition_col, condition_values, metrics)
+
+        if USE_PERMUTATION_TEST:
+            print(f"\nRunning permutation tests with {N_PERMUTATIONS:,} permutations...")
+            mw_results = perform_permutation_continuous_analysis(df, condition_col, condition_values, metrics)
+            print(f"✓ Permutation tests complete on {len(mw_results)} metrics")
+        else:
+            mw_results = perform_mann_whitney_continuous_analysis(df, condition_col, condition_values, metrics)
+            print(f"✓ Mann-Whitney U tests complete on {len(mw_results)} metrics")
 
         print(f"✓ LMM analysis complete on {len(lmm_results)} metrics")
-        print(f"✓ Mann-Whitney U tests complete on {len(mw_results)} metrics")
 
         # ====================================================================
         # PLOTTING
@@ -969,6 +1121,17 @@ def main():
         )
 
         print(f"\n✓ All plots saved to: {output_dir}")
+
+        # ====================================================================
+        # SAVE STATISTICAL RESULTS TABLE
+        # ====================================================================
+        print(f"\n{'='*80}")
+        print("SAVING STATISTICAL RESULTS")
+        print(f"{'='*80}")
+
+        save_statistical_results_table(
+            df, condition_col, condition_values, analysis_type, metrics, mw_results, output_dir
+        )
 
     # ========================================================================
     # FINAL SUMMARY

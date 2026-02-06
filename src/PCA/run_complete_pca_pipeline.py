@@ -235,7 +235,9 @@ def create_results_directory():
     return results_dir
 
 
-def run_script_with_logging(script_name, description, results_dir, control_mode="tailored", dataset_path=None):
+def run_script_with_logging(
+    script_name, description, results_dir, control_mode="tailored", dataset_path=None, use_permutation_per_pc=False
+):
     """Run a script and capture its output"""
     print(f"\n{'='*80}")
     print(f"🚀 STEP: {description}")
@@ -275,6 +277,8 @@ def run_script_with_logging(script_name, description, results_dir, control_mode=
             ]
             if dataset_path:
                 cmd.extend(["--data-path", dataset_path])
+            if use_permutation_per_pc:
+                cmd.append("--use-permutation-per-pc")
         elif script_name == "simple_consistency_plot.py":
             # Simple consistency plot takes analysis_dir as positional arg and output dir as -o
             # Point it to data_files subdirectory where consistency CSVs are located
@@ -301,6 +305,8 @@ def run_script_with_logging(script_name, description, results_dir, control_mode=
                 cmd.append("--triple-test")
             elif STAT_MODE == "permutation":
                 cmd.append("--permutation-only")
+            if use_permutation_per_pc:
+                cmd.append("--use-permutation-per-pc")
         else:
             cmd = [sys.executable, script_path, results_dir]
             if script_name in ["PCA_Static.py", "plot_detailed_PC_statistics.py", "plot_hits_heatmap.py"]:
@@ -308,6 +314,8 @@ def run_script_with_logging(script_name, description, results_dir, control_mode=
             # Add dataset path for scripts that support it
             if script_name == "plot_detailed_PC_statistics.py" and dataset_path:
                 cmd.extend(["--dataset", dataset_path])
+            if script_name == "plot_detailed_PC_statistics.py" and use_permutation_per_pc:
+                cmd.append("--use-permutation-per-pc")
 
         result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=src_dir)
 
@@ -614,7 +622,7 @@ Examples:
         "--control-mode",
         type=str,
         choices=["tailored", "emptysplit", "tnt_pr", "both"],
-        default="both",
+        default="tailored",
         help="Control selection mode (default: both for full rerun)",
     )
     parser.add_argument(
@@ -623,6 +631,12 @@ Examples:
         choices=["multivariate", "triple", "permutation"],
         default="triple",
         help="Statistical testing mode: 'triple' (Mann-Whitney + Permutation + Mahalanobis, default, publication mode), 'permutation' (Permutation only), or 'multivariate' (Permutation + Mahalanobis)",
+    )
+    parser.add_argument(
+        "--use-permutation-per-pc",
+        action="store_true",
+        default=False,
+        help="Use permutation test instead of Mann-Whitney U for per-PC/per-metric significance testing (default: Mann-Whitney U)",
     )
     parser.add_argument(
         "--dataset",
@@ -696,7 +710,9 @@ Examples:
 
         # Execute each step
         for script_name, description in pipeline_steps:
-            success = run_script_with_logging(script_name, description, results_dir, control_mode, args.dataset)
+            success = run_script_with_logging(
+                script_name, description, results_dir, control_mode, args.dataset, args.use_permutation_per_pc
+            )
             step_results[script_name] = success
 
             # If a critical step fails, ask user if they want to continue
