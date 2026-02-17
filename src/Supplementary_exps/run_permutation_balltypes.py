@@ -43,15 +43,71 @@ import time
 import argparse
 
 
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def mm_to_inches(mm_value):
+    return mm_value / 25.4
+
+
+def is_distance_metric(metric_name):
+    """Check if a metric represents distance (in pixels)"""
+    distance_keywords = [
+        "distance",
+        "dist",
+        "head_ball",
+        "fly_distance_moved",
+        "max_distance",
+        "distance_moved",
+        "distance_ratio",
+    ]
+    return any(keyword in metric_name.lower() for keyword in distance_keywords)
+
+
+def is_time_metric(metric_name):
+    """Check if a metric represents time (in seconds)"""
+    time_keywords = ["time", "duration", "pause", "stop", "freeze", "chamber_exit_time", "time_chamber_beginning"]
+    # Exclude ratio metrics
+    if "ratio" in metric_name.lower():
+        return False
+    return any(keyword in metric_name.lower() for keyword in time_keywords)
+
+
+def convert_metric_data(data, metric_name):
+    """Convert metric data from pixels to mm or seconds to minutes"""
+    if is_distance_metric(metric_name):
+        return data / PIXELS_PER_MM  # Convert pixels to mm
+    elif is_time_metric(metric_name):
+        return data / 60.0  # Convert seconds to minutes
+    return data
+
+
+def get_metric_unit(metric_name):
+    """Get the display unit for a metric"""
+    if is_distance_metric(metric_name):
+        return "(mm)"
+    elif is_time_metric(metric_name):
+        return "(min)"
+    return ""
+
+
+def format_metric_label(metric_name):
+    """Format metric name with appropriate unit"""
+    unit = get_metric_unit(metric_name)
+    if unit:
+        return f"{metric_name} {unit}"
+    return metric_name
+
+
 # Fixed color mapping for ball types - ensures consistent colors across all plots
 # Colors match trajectory plot colors
 BALLTYPE_COLORS = {
-    "ctrl": "#7f7f7f",  # Grey - control
+    "control": "#7f7f7f",  # Grey - control (renamed from ctrl)
     "rusty": "#d62728",  # Red
     "manufactured": "#1f77b4",  # Blue
-    "sand": "#ff69b4",  # Pink
-    "silicon": "#17becf",  # Teal/Cyan
-    "sillicon": "#17becf",  # Teal/Cyan (alternative spelling in data)
+    "sandpaper": "#ff69b4",  # Pink (renamed from sand)
+    "silicone": "#17becf",  # Teal/Cyan (renamed from silicon/sillicon)
     "rubber": "#7f7f7f",  # Grey (fallback)
 }
 
@@ -77,16 +133,20 @@ def generate_balltype_permutation_plots(
     data,
     metrics,
     y="BallType",
-    control_balltype="ctrl",
+    control_balltype="control",
     hue=None,
     palette="Set2",
-    figsize=(15, 10),
+    fig_width_mm=64,
+    fig_height_mm=89,
+    font_size_ticks=9,
+    font_size_labels=11,
+    font_size_legend=10,
+    font_size_annotations=12,
     output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
     n_permutations=10000,
     filter_balltypes=None,
-    scatter_size=35,
 ):
     """
     Generates jitterboxplots for each metric with permutation tests between each ball type and control.
@@ -97,16 +157,20 @@ def generate_balltype_permutation_plots(
         data (pd.DataFrame): The dataset to plot.
         metrics (list): List of metric names to plot.
         y (str): The name of the column for the y-axis (ball types). Default is "BallType".
-        control_balltype (str): Name of the control ball type. Default is "ctrl".
+        control_balltype (str): Name of the control ball type. Default is "control".
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
-        figsize (tuple, optional): Size of each figure. Default is (15, 10).
+        fig_width_mm (float): Figure width in mm. Default is 64.
+        fig_height_mm (float): Figure height in mm. Default is 89.
+        font_size_ticks (float): Font size for tick labels. Default is 9.
+        font_size_labels (float): Font size for axis labels. Default is 11.
+        font_size_legend (float): Font size for legend. Default is 10.
+        font_size_annotations (float): Font size for statistical annotations. Default is 12.
         output_dir: Directory to save the plots. Default is "permutation_plots".
         fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
         alpha (float): Significance level after FDR correction. Default is 0.05.
         n_permutations (int): Number of permutations for permutation tests. Default is 10000.
         filter_balltypes (list, optional): If provided, only include these ball types in analysis.
-        scatter_size (int): Size of scatter points. Default is 35.
 
     Returns:
         pd.DataFrame: Statistics table with permutation test results and FDR correction.
@@ -128,6 +192,10 @@ def generate_balltype_permutation_plots(
         print(f"Generating permutation test jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
         plot_data = data.dropna(subset=[metric, y])
+
+        # Convert metric data to proper units (mm for distance, min for time)
+        plot_data = plot_data.copy()
+        plot_data[metric] = convert_metric_data(plot_data[metric], metric)
 
         # Filter to specific ball types if requested
         if filter_balltypes is not None:
@@ -292,18 +360,13 @@ def generate_balltype_permutation_plots(
         for result in test_results:  # Exclude control from final stats
             all_stats.append(result)
 
-        # Calculate appropriate figure height based on number of categories
+        # Calculate appropriate figure size based on mm parameters
         n_categories = len(sorted_ball_types)
-        # For ball types (fewer categories), use different sizing than nicknames
-        # Minimum 1.0 inches per category for better readability with fewer items
-        fig_height = max(8, n_categories * 1.0 + 4)  # +4 for margins and title
-        # Increase width to accommodate legend outside
-        fig_width = figsize[0] + 4  # Extra width for external legend
+        fig_width_inches = mm_to_inches(fig_width_mm)
+        fig_height_inches = mm_to_inches(fig_height_mm)
 
-        # Create the plot with adjusted size (vertical orientation)
-        fig_width_vert = max(10, n_categories * 1.2 + 2)  # Width based on number of categories
-        fig_height_vert = 10  # Fixed height for vertical plots
-        fig, ax = plt.subplots(figsize=(fig_width_vert, fig_height_vert))
+        # Create the plot with specified size
+        fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
 
         # Set up colors matching trajectory plots using fixed mapping
         # This ensures the same ball type always gets the same color
@@ -315,24 +378,18 @@ def generate_balltype_permutation_plots(
 
         x_positions = range(len(sorted_ball_types))
 
-        # Draw vertical boxplots with colors matching trajectory plots
+        # Draw vertical boxplots with black outlines and no fill
         bp = ax.boxplot(
             [plot_data_clipped[plot_data_clipped[y] == bt][metric].dropna().values for bt in sorted_ball_types],
             positions=x_positions,
             widths=0.6,
             patch_artist=True,
             showfliers=False,
-            boxprops=dict(linewidth=1.5),
-            whiskerprops=dict(linewidth=1.5),
-            capprops=dict(linewidth=1.5),
+            boxprops=dict(linewidth=1.5, facecolor="none", edgecolor="black"),
+            whiskerprops=dict(linewidth=1.5, color="black"),
+            capprops=dict(linewidth=1.5, color="black"),
             medianprops=dict(linewidth=2, color="black"),
         )
-
-        # Color the boxes
-        for patch, color in zip(bp["boxes"], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-            patch.set_edgecolor("black")
 
         # Overlay stripplot for individual points with matching colors
         for i, ball_type in enumerate(sorted_ball_types):
@@ -345,7 +402,7 @@ def generate_balltype_permutation_plots(
             ax.scatter(
                 x_jitter,
                 ball_type_data.values,
-                s=25,
+                s=20,  # Match magnetblock scatter size
                 c=color_mapping[ball_type],
                 alpha=0.5,
                 edgecolors="none",
@@ -362,7 +419,7 @@ def generate_balltype_permutation_plots(
 
         # Add brackets for significant comparisons
         bracket_height = y_max + 0.05 * y_range
-        bracket_offset = 0.08 * y_range  # Vertical spacing between brackets
+        bracket_offset = 0.12 * y_range  # Vertical spacing between brackets (increased to prevent overlap)
 
         significant_comparisons = []
         for i, ball_type in enumerate(sorted_ball_types):
@@ -388,51 +445,37 @@ def generate_balltype_permutation_plots(
             ax.plot([x1, x2], [current_height, current_height], "k-", linewidth=1.5)
             ax.plot([x2, x2], [current_height - 0.01 * y_range, current_height], "k-", linewidth=1.5)
 
-            # Add significance stars
+            # Add significance stars only (no p-value text)
             mid_x = (x1 + x2) / 2
             ax.text(
                 mid_x,
-                current_height + 0.01 * y_range,
+                current_height + 0.015 * y_range,
                 result["sig_level"],
                 ha="center",
                 va="bottom",
-                fontsize=16,
+                fontsize=font_size_annotations,
                 color="red",
                 fontweight="bold",
             )
 
-            # Add p-value in gray below stars
-            pval = result["pval_fdr"]
-            if pval < 0.001:
-                p_text = "p<0.001"
-            else:
-                p_text = f"p={pval:.3f}"
-
-            ax.text(
-                mid_x,
-                current_height + 0.04 * y_range,
-                p_text,
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="gray",
-            )
-
-        # Set ylim to accommodate brackets
+        # Set ylim to accommodate brackets with extra space for annotations
         if significant_comparisons:
             max_bracket_height = bracket_height + len(significant_comparisons) * bracket_offset + 0.08 * y_range
             ax.set_ylim(bottom=y_min - 0.05 * y_range, top=max_bracket_height)
         else:
             ax.set_ylim(bottom=y_min - 0.05 * y_range, top=y_max + 0.1 * y_range)
 
-        # Formatting for vertical orientation
+        # Formatting for vertical orientation with proper font sizes
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(sorted_ball_types, rotation=45, ha="right", fontsize=11)
-        ax.set_ylabel(metric, fontsize=14)
-        ax.set_xlabel("Ball Type", fontsize=14)
-        ax.set_title(
-            f"Permutation Test: {metric} by Ball Type\n(FDR corrected, {n_permutations} permutations)", fontsize=14
-        )
+        ax.set_xticklabels(sorted_ball_types, rotation=45, ha="right", fontsize=font_size_ticks)
+
+        # Format y-axis label with unit
+        ylabel = format_metric_label(metric)
+        ax.set_ylabel(ylabel, fontsize=font_size_labels)
+
+        # Update tick label sizes
+        ax.tick_params(axis="both", labelsize=font_size_ticks)
+
         ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
         ax.set_axisbelow(True)
 
@@ -783,6 +826,18 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         print(f"Batch filled NaN values for {len(fillna_dict)} metrics")
 
     print(f"Dataset cleaning completed successfully")
+
+    # Rename ball types for clarity
+    if "BallType" in dataset.columns:
+        balltype_rename_map = {
+            "ctrl": "control",
+            "sand": "sandpaper",
+            "silicon": "silicone",
+            "sillicon": "silicone",  # Handle alternative spelling
+        }
+        dataset["BallType"] = dataset["BallType"].replace(balltype_rename_map)
+        print(f"Renamed ball types: {balltype_rename_map}")
+        print(f"Ball types after renaming: {sorted(dataset['BallType'].unique())}")
 
     # Add test mode sampling for faster debugging
     if test_mode and len(dataset) > test_sample_size:
@@ -1493,7 +1548,7 @@ def main(overwrite=True, test_mode=False):
             start_time = time.time()
 
             # Determine control ball type
-            control_balltype = "ctrl"
+            control_balltype = "control"
             available_balltypes = continuous_data["BallType"].unique()
             if control_balltype not in available_balltypes:
                 print(f"Warning: Control ball type '{control_balltype}' not found in data")
@@ -1503,8 +1558,8 @@ def main(overwrite=True, test_mode=False):
             else:
                 control_balltype = str(control_balltype)  # Ensure it's a string
 
-            # Check if subset ball types are available
-            subset_balltypes = ["ctrl", "rusty", "sand"]
+            # Check if subset ball types are available (using renamed ball types)
+            subset_balltypes = ["control", "rusty", "sandpaper"]
             subset_available = all(bt in available_balltypes for bt in subset_balltypes)
             if subset_available:
                 print(f"\n✓ Subset ball types available for focused analysis: {subset_balltypes}")
@@ -1529,12 +1584,17 @@ def main(overwrite=True, test_mode=False):
                 control_balltype=control_balltype,
                 hue="BallType",
                 palette="Set1",  # Use string palette instead of dict for compatibility
+                fig_width_mm=64,  # Match magnetblock figure width
+                fig_height_mm=89,  # Match magnetblock figure height
+                font_size_ticks=9,  # Match magnetblock font sizes
+                font_size_labels=11,
+                font_size_legend=10,
+                font_size_annotations=12,
                 output_dir=str(output_dir),
                 fdr_method="fdr_bh",  # Benjamini-Hochberg FDR correction
                 alpha=0.05,  # FDR-corrected significance level
                 n_permutations=10000,  # Number of permutations
                 filter_balltypes=None,  # All ball types
-                scatter_size=50,  # Larger scatter points
             )
 
             end_time = time.time()
@@ -1544,11 +1604,11 @@ def main(overwrite=True, test_mode=False):
             # ===== SUBSET ANALYSIS: ctrl, rusty, sand only =====
             if subset_available:
                 print(f"{'='*60}")
-                print(f"SUBSET ANALYSIS: ctrl vs rusty and sand")
+                print(f"SUBSET ANALYSIS: control vs rusty and sandpaper")
                 print(f"{'='*60}")
 
                 # Create subset output directory
-                subset_dir = output_dir.parent / "permutation_balltypes_subset_rusty_sand"
+                subset_dir = output_dir.parent / "permutation_balltypes_subset_rusty_sandpaper"
                 subset_dir.mkdir(parents=True, exist_ok=True)
                 print(f"📁 Subset output directory: {subset_dir}")
 
@@ -1565,12 +1625,17 @@ def main(overwrite=True, test_mode=False):
                     control_balltype=control_balltype,
                     hue="BallType",
                     palette="Set1",
+                    fig_width_mm=64,  # Match magnetblock figure width
+                    fig_height_mm=89,  # Match magnetblock figure height
+                    font_size_ticks=9,  # Match magnetblock font sizes
+                    font_size_labels=11,
+                    font_size_legend=10,
+                    font_size_annotations=12,
                     output_dir=str(subset_dir),
                     fdr_method="fdr_bh",
                     alpha=0.05,
                     n_permutations=10000,
                     filter_balltypes=subset_balltypes,  # Filter to subset
-                    scatter_size=50,  # Larger scatter points
                 )
 
                 end_time_subset = time.time()

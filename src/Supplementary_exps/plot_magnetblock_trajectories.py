@@ -37,6 +37,101 @@ from tqdm import tqdm
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
 
 
+def format_p_value(p_value, n_permutations):
+    """Format p-value for display, handling very small values
+
+    Parameters:
+    -----------
+    p_value : float
+        P-value to format
+    n_permutations : int
+        Number of permutations used (determines precision)
+
+    Returns:
+    --------
+    str : Formatted p-value string
+    """
+    # Permutation tests have finite precision: minimum p = 1/n_permutations
+    min_p = 1.0 / n_permutations
+
+    if p_value <= min_p:
+        # Format as "p ≤ 1e-4" etc.
+        return f"p ≤ {min_p:.0e}"
+    elif p_value < 0.001:
+        return f"{p_value:.2e}"
+    else:
+        return f"{p_value:.4f}"
+
+
+def calculate_cohens_d(group1_data, group2_data):
+    """Calculate Cohen's d effect size between two groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+
+    Returns:
+    --------
+    float : Cohen's d effect size
+    """
+    n1 = len(group1_data)
+    n2 = len(group2_data)
+
+    mean1 = np.mean(group1_data)
+    mean2 = np.mean(group2_data)
+
+    var1 = np.var(group1_data, ddof=1)
+    var2 = np.var(group2_data, ddof=1)
+
+    # Pooled standard deviation
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return np.nan
+
+    return (mean2 - mean1) / pooled_std
+
+
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
+    """Calculate bootstrapped confidence interval for difference between groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+    n_bootstrap : int
+        Number of bootstrap samples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+
+    Returns:
+    --------
+    tuple : (lower_bound, upper_bound) of the CI
+    """
+    bootstrap_diffs = []
+
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample1 = np.random.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = np.random.choice(group2_data, size=len(group2_data), replace=True)
+
+        # Calculate difference in means
+        diff = np.mean(sample2) - np.mean(sample1)
+        bootstrap_diffs.append(diff)
+
+    # Calculate CI
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return lower, upper
+
+
 def load_coordinates_dataset():
     """Load the MagnetBlock experiments coordinates dataset"""
     dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251126_10_coordinates_magnet_block_folders_Data/coordinates/pooled_coordinates.feather"
@@ -172,6 +267,12 @@ def compute_permutation_test(
     # Store results for each bin
     observed_diffs = []
     p_values = []
+    cohens_d_values = []
+    ci_lower_values = []
+    ci_upper_values = []
+    pct_change_values = []
+    pct_ci_lower_values = []
+    pct_ci_upper_values = []
 
     iterator = tqdm(time_bins, desc=f"  {test_group} vs {control_group}") if progress else time_bins
 
@@ -185,11 +286,42 @@ def compute_permutation_test(
         if len(control_vals) == 0 or len(test_vals) == 0:
             observed_diffs.append(np.nan)
             p_values.append(1.0)
+            cohens_d_values.append(np.nan)
+            ci_lower_values.append(np.nan)
+            ci_upper_values.append(np.nan)
+            pct_change_values.append(np.nan)
+            pct_ci_lower_values.append(np.nan)
+            pct_ci_upper_values.append(np.nan)
             continue
 
         # Observed difference
-        obs_diff = np.mean(test_vals) - np.mean(control_vals)
+        control_mean = np.mean(control_vals)
+        test_mean = np.mean(test_vals)
+        obs_diff = test_mean - control_mean
         observed_diffs.append(obs_diff)
+
+        # Calculate Cohen's d
+        cohens_d = calculate_cohens_d(control_vals, test_vals)
+        cohens_d_values.append(cohens_d)
+
+        # Calculate bootstrapped confidence interval
+        ci_lower, ci_upper = bootstrap_ci_difference(control_vals, test_vals, n_bootstrap=10000, ci=95)
+        ci_lower_values.append(ci_lower)
+        ci_upper_values.append(ci_upper)
+
+        # Calculate percentage change relative to control
+        if control_mean != 0:
+            pct_change = (obs_diff / control_mean) * 100
+            pct_ci_lower = (ci_lower / control_mean) * 100
+            pct_ci_upper = (ci_upper / control_mean) * 100
+        else:
+            pct_change = np.nan
+            pct_ci_lower = np.nan
+            pct_ci_upper = np.nan
+
+        pct_change_values.append(pct_change)
+        pct_ci_lower_values.append(pct_ci_lower)
+        pct_ci_upper_values.append(pct_ci_upper)
 
         # Permutation test
         combined = np.concatenate([control_vals, test_vals])
@@ -222,6 +354,12 @@ def compute_permutation_test(
         "time_bins": time_bins,
         "observed_diffs": observed_diffs,
         "p_values": p_values,
+        "cohens_d": cohens_d_values,
+        "ci_lower": ci_lower_values,
+        "ci_upper": ci_upper_values,
+        "pct_change": pct_change_values,
+        "pct_ci_lower": pct_ci_lower_values,
+        "pct_ci_upper": pct_ci_upper_values,
         "significant_timepoints": significant_timepoints,
         "n_significant": n_significant,
     }
@@ -514,29 +652,70 @@ def generate_trajectory_plot(data, n_bins=12, n_permutations=10000, output_dir=N
         output_path=output_path,
     )
 
-    # Save statistical results
-    stats_file = output_dir / "trajectory_permutation_statistics.txt"
-    with open(stats_file, "w") as f:
-        f.write("MagnetBlock Trajectory Permutation Test Results\n")
-        f.write("=" * 60 + "\n\n")
-        f.write(f"Control group: {permutation_results['control_group']}\n")
-        f.write(f"Test group: {permutation_results['test_group']}\n")
-        f.write(f"Number of permutations: {n_permutations}\n")
-        f.write(f"Number of time bins: {n_bins}\n")
-        f.write(f"Significance level: α = 0.05\n\n")
+    # Save statistical results to markdown
+    stats_file_md = output_dir / "trajectory_permutation_statistics.md"
+    with open(stats_file_md, "w") as f:
+        f.write("# MagnetBlock Trajectory Permutation Test Results\n\n")
+        f.write(f"**Control group:** {permutation_results['control_group']}\n\n")
+        f.write(f"**Test group:** {permutation_results['test_group']}\n\n")
+        f.write(f"**Number of permutations:** {n_permutations}\n\n")
+        f.write(f"**Number of time bins:** {n_bins}\n\n")
+        f.write(f"**Significance level:** α = 0.05\n\n")
+        f.write(f"**Significant bins:** {permutation_results['n_significant']}/{n_bins}\n\n")
+        f.write(f"**Significant time bins:** {list(permutation_results['significant_timepoints'])}\n\n")
 
-        f.write(f"Significant bins: {permutation_results['n_significant']}/{n_bins}\n")
-        f.write(f"Significant time bins: {list(permutation_results['significant_timepoints'])}\n\n")
+        # Write markdown table
+        f.write("## Statistical Results by Time Bin\n\n")
+        f.write(
+            "| Time Bin | Difference (mm) | % Change | 95% CI Lower (mm) | 95% CI Upper (mm) | 95% CI % Lower | 95% CI % Upper | Cohen's D | P-value | Sig |\n"
+        )
+        f.write(
+            "|----------|----------------|----------|-------------------|-------------------|----------------|----------------|-----------|---------|-----|\n"
+        )
 
-        f.write("Bin | Obs. Diff | P-value | Significant\n")
-        f.write("-" * 60 + "\n")
         for i, time_bin in enumerate(permutation_results["time_bins"]):
             obs_diff = permutation_results["observed_diffs"][i]
+            pct_change = permutation_results["pct_change"][i]
+            ci_lower = permutation_results["ci_lower"][i]
+            ci_upper = permutation_results["ci_upper"][i]
+            pct_ci_lower = permutation_results["pct_ci_lower"][i]
+            pct_ci_upper = permutation_results["pct_ci_upper"][i]
+            cohens_d = permutation_results["cohens_d"][i]
             p_val = permutation_results["p_values"][i]
             sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 else "*" if p_val < 0.05 else "ns"
-            f.write(f"{time_bin:3d} | {obs_diff:9.3f} | {p_val:7.6f} | {sig}\n")
 
-    print(f"\n✅ Statistical results saved to: {stats_file}")
+            # Format p-value
+            p_val_str = format_p_value(p_val, n_permutations)
+
+            f.write(
+                f"| {time_bin} | {obs_diff:.3f} | {pct_change:.2f}% | {ci_lower:.3f} | {ci_upper:.3f} | {pct_ci_lower:.2f}% | {pct_ci_upper:.2f}% | {cohens_d:.3f} | {p_val_str} | {sig} |\n"
+            )
+
+    print(f"\n✅ Statistical results saved to: {stats_file_md}")
+
+    # Also save as CSV for easier data analysis
+    stats_file_csv = output_dir / "trajectory_permutation_statistics.csv"
+    import pandas as pd
+
+    stats_df = pd.DataFrame(
+        {
+            "Time_Bin": permutation_results["time_bins"],
+            "Difference_mm": permutation_results["observed_diffs"],
+            "Pct_Change": permutation_results["pct_change"],
+            "CI_Lower_mm": permutation_results["ci_lower"],
+            "CI_Upper_mm": permutation_results["ci_upper"],
+            "Pct_CI_Lower": permutation_results["pct_ci_lower"],
+            "Pct_CI_Upper": permutation_results["pct_ci_upper"],
+            "Cohens_D": permutation_results["cohens_d"],
+            "P_value": permutation_results["p_values"],
+            "Significant": [
+                "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
+                for p in permutation_results["p_values"]
+            ],
+        }
+    )
+    stats_df.to_csv(stats_file_csv, index=False)
+    print(f"✅ Statistical results saved to: {stats_file_csv}")
 
     print(f"\n{'='*60}")
     print("✅ Trajectory plot generated successfully!")

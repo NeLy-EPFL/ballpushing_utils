@@ -201,6 +201,10 @@ def load_coordinates_dataset(test_mode=False):
     # Rename time_rounded back to time for consistency
     downsampled = downsampled.rename(columns={"time_rounded": "time"})
 
+    # Convert time to minutes
+    print(f"Converting time to minutes...")
+    downsampled["time"] = downsampled["time"] / 60.0
+
     print(f"✅ Downsampled shape: {downsampled.shape}")
 
     # Normalize BallScent labels to canonical factorial names
@@ -480,18 +484,9 @@ def create_trajectory_plot(
         control_scent: color_mapping.get(control_scent, get_ballscent_color(control_scent)),
         ball_scent: color_mapping.get(ball_scent, get_ballscent_color(ball_scent)),
     }
-    line_styles = {control_scent: "solid", ball_scent: "dashed"}
-
-    # Error band transparency
-    error_alphas = {control_scent: 0.25, ball_scent: 0.15}
-
-    # Get sample sizes for labels
-    n_control = subset_data[subset_data[group_col] == control_scent][subject_col].nunique()
-    n_test = subset_data[subset_data[group_col] == ball_scent][subject_col].nunique()
-
     labels = {
-        control_scent: f"{control_scent} (n={n_control})",
-        ball_scent: f"{ball_scent} (n={n_test})",
+        control_scent: control_scent,
+        ball_scent: ball_scent,
     }
 
     # Compute mean trajectories to find baseline for y-axis shift
@@ -504,31 +499,59 @@ def create_trajectory_plot(
     # Find the minimum mean value to use as y-axis baseline
     y_baseline = min(all_means)
 
-    # Plot mean trajectories with error bands
+    # Plot mean trajectories with bootstrapped confidence intervals
     for scent in [control_scent, ball_scent]:
         scent_data = subset_data[subset_data[group_col] == scent]
 
-        # Group by time to compute mean and SEM
-        time_grouped = scent_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
+        # Aggregate per fly within each time point
+        fly_aggregated = scent_data.groupby([subject_col, time_col])[value_col_plot].mean().reset_index()
 
-        # Plot mean line with appropriate line style
+        time_points = sorted(fly_aggregated[time_col].unique())
+        means = []
+        ci_lower = []
+        ci_upper = []
+
+        for time_point in time_points:
+            fly_values = fly_aggregated[fly_aggregated[time_col] == time_point][value_col_plot].values
+
+            if len(fly_values) > 0:
+                mean_val = np.mean(fly_values)
+                means.append(mean_val)
+
+                if len(fly_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_flies))
+
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_grouped = pd.DataFrame({time_col: time_points, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper})
+
         ax.plot(
             time_grouped[time_col],
             time_grouped["mean"] - y_baseline,
             color=colors[scent],
-            linestyle=line_styles[scent],
+            linestyle="solid",
             linewidth=2.5,
             label=labels[scent],
             zorder=10,
         )
 
-        # Plot error band (SEM)
         ax.fill_between(
             time_grouped[time_col],
-            time_grouped["mean"] - y_baseline - time_grouped["sem"],
-            time_grouped["mean"] - y_baseline + time_grouped["sem"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
             color=colors[scent],
-            alpha=error_alphas[scent],
+            alpha=0.2,
             zorder=5,
         )
 
@@ -553,13 +576,12 @@ def create_trajectory_plot(
     else:
         ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
 
-    # Annotate significance levels
+    # Annotate significance levels (only red asterisks, no p-values)
     if permutation_results is not None and ball_scent in permutation_results:
         perm_result = permutation_results[ball_scent]
 
         # Position for annotations (slightly above the top of data)
         y_annotation_stars = y_max_shifted + 0.02 * y_range
-        y_annotation_pval = y_max_shifted + 0.05 * y_range
 
         for idx in perm_result["significant_timepoints"]:
             bin_center = (bin_edges[idx] + bin_edges[idx + 1]) / 2
@@ -575,7 +597,7 @@ def create_trajectory_plot(
             else:
                 continue
 
-            # Add significance stars
+            # Add significance stars only
             ax.text(
                 bin_center,
                 y_annotation_stars,
@@ -587,24 +609,10 @@ def create_trajectory_plot(
                 color="red",
             )
 
-            # Add p-value below the stars
-            ax.text(
-                bin_center,
-                y_annotation_pval,
-                f"p={p_val:.3f}",
-                ha="center",
-                va="center",
-                fontsize=8,
-                color="darkgray",
-            )
-
     # Formatting
-    ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (mm)", fontsize=14)
-    ax.set_title(
-        f"Ball Trajectory: {ball_scent} vs {control_scent}\n(FDR-corrected permutation test)",
-        fontsize=16,
-    )
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    ax.tick_params(axis="both", labelsize=10)
     ax.legend(fontsize=12, loc="upper left")
     ax.grid(False)
 
@@ -656,6 +664,12 @@ def create_combined_trajectory_plot(
         print(f"Warning: No data for combined plot")
         return
 
+    # Pixel to mm conversion factor (500 pixels = 30 mm)
+    PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+    data = data.copy()
+    data[f"{value_col}_mm"] = data[value_col] / PIXELS_PER_MM
+    value_col_plot = f"{value_col}_mm"
+
     # Create figure
     fig, ax = plt.subplots(figsize=(14, 8))
 
@@ -672,36 +686,71 @@ def create_combined_trajectory_plot(
                 fly_data = scent_data[scent_data[subject_col] == fly]
                 ax.plot(
                     fly_data[time_col],
-                    fly_data[value_col],
+                    fly_data[value_col_plot],
                     color=color_map[scent],
                     alpha=0.15,
                     linewidth=0.8,
                 )
 
-    # Plot mean trajectories with error bands
+    # Compute baseline for relative distance
+    all_means = []
+    for scent in ball_scents:
+        scent_data = data[data[group_col] == scent]
+        time_grouped = scent_data.groupby(time_col)[value_col_plot].agg(["mean"]).reset_index()
+        all_means.extend(time_grouped["mean"].values)
+
+    y_baseline = min(all_means) if all_means else 0.0
+
+    # Plot mean trajectories with bootstrapped confidence intervals
     for scent in ball_scents:
         scent_data = data[data[group_col] == scent]
 
-        # Group by time to compute mean and SEM
-        time_grouped = scent_data.groupby(time_col)[value_col].agg(["mean", "sem"]).reset_index()
+        fly_aggregated = scent_data.groupby([subject_col, time_col])[value_col_plot].mean().reset_index()
+        time_points = sorted(fly_aggregated[time_col].unique())
+        means = []
+        ci_lower = []
+        ci_upper = []
 
-        # Plot mean line
+        for time_point in time_points:
+            fly_values = fly_aggregated[fly_aggregated[time_col] == time_point][value_col_plot].values
+
+            if len(fly_values) > 0:
+                mean_val = np.mean(fly_values)
+                means.append(mean_val)
+
+                if len(fly_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_flies))
+
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_grouped = pd.DataFrame({time_col: time_points, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper})
+
         ax.plot(
             time_grouped[time_col],
-            time_grouped["mean"],
+            time_grouped["mean"] - y_baseline,
             color=color_map[scent],
             linewidth=3,
             label=scent,
             zorder=10,
         )
 
-        # Plot error band (SEM)
         ax.fill_between(
             time_grouped[time_col],
-            time_grouped["mean"] - time_grouped["sem"],
-            time_grouped["mean"] + time_grouped["sem"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
             color=color_map[scent],
-            alpha=0.25,
+            alpha=0.2,
             zorder=5,
         )
 
@@ -718,7 +767,8 @@ def create_combined_trajectory_plot(
         # Get test scents (non-control)
         test_scents = [s for s in ball_scents if s != control_scent]
 
-        y_max = data[value_col].max()
+        y_max_shifted = max(all_means) - y_baseline if all_means else 0.0
+        y_range = y_max_shifted if y_max_shifted > 0 else 1.0
 
         # Offset annotations vertically for different comparisons
         for test_idx, test_scent in enumerate(test_scents):
@@ -728,8 +778,8 @@ def create_combined_trajectory_plot(
             perm_result = permutation_results[test_scent]
 
             # Vertical offset for this comparison (to avoid overlap)
-            y_offset = 0.05 + (test_idx * 0.06)
-            y_annotation = y_max * (1.0 + y_offset)
+            y_offset = 0.06 + (test_idx * 0.06)
+            y_annotation = y_max_shifted + y_offset * y_range
 
             for idx in perm_result["significant_timepoints"]:
                 bin_start = bin_edges[idx]
@@ -755,55 +805,17 @@ def create_combined_trajectory_plot(
                         ha="center",
                         va="bottom",
                         fontsize=14,
-                        color=color_map[test_scent],
+                        color="red",
                         fontweight="bold",
                         zorder=15,
                     )
 
     # Formatting
-    ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (px)", fontsize=14)
-    ax.set_title(
-        f"Ball Trajectory: All Conditions Combined\n(FDR-corrected permutation test vs {control_scent})", fontsize=16
-    )
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    ax.tick_params(axis="both", labelsize=10)
     ax.legend(fontsize=12, loc="best", framealpha=0.9)
-    ax.grid(True, alpha=0.3)
-
-    # Add sample sizes
-    sample_sizes = []
-    for scent in ball_scents:
-        n = data[data[group_col] == scent][subject_col].nunique()
-        sample_sizes.append(f"n({scent})={n}")
-
-    sample_text = ", ".join(sample_sizes)
-    ax.text(
-        0.02,
-        0.98,
-        sample_text,
-        transform=ax.transAxes,
-        fontsize=10,
-        verticalalignment="top",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.6),
-    )
-
-    # Add legend for significance annotations if there are any
-    if permutation_results:
-        test_scents = [s for s in ball_scents if s != control_scent and s in permutation_results]
-        if test_scents:
-            sig_text = "Significance markers:\n"
-            for test_scent in test_scents:
-                sig_text += f"  {test_scent} vs {control_scent} (color coded)\n"
-
-            ax.text(
-                0.98,
-                0.98,
-                sig_text.strip(),
-                transform=ax.transAxes,
-                fontsize=9,
-                verticalalignment="top",
-                horizontalalignment="right",
-                bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.6),
-            )
+    ax.grid(False)
 
     plt.tight_layout()
 
@@ -905,9 +917,18 @@ def generate_all_trajectory_plots(
     for test_scent in sorted(test_scents):
         subset = data[data["BallScent"].isin([control_scent, test_scent])].copy()
         subset["distance_mm"] = subset["distance_ball_0"] / PIXELS_PER_MM
-        max_val = subset["distance_mm"].max()
-        if max_val > global_y_max:
-            global_y_max = max_val
+
+        all_means = []
+        for scent in [control_scent, test_scent]:
+            scent_data = subset[subset["BallScent"] == scent]
+            if len(scent_data) > 0:
+                time_grouped = scent_data.groupby("time")["distance_mm"].agg(["mean"]).reset_index()
+                all_means.extend(time_grouped["mean"].values)
+
+        if all_means:
+            y_baseline = min(all_means)
+            y_max_shifted = max(all_means) - y_baseline
+            global_y_max = max(global_y_max, y_max_shifted)
 
     # Add space for annotations
     global_ylim = (0, global_y_max + 0.08 * global_y_max)

@@ -586,11 +586,22 @@ def perform_permutation_continuous_analysis(df, condition_col, condition_values,
     Perform permutation test analysis on continuous metrics.
     Tests for differences between groups using permutation-based p-values.
     Uses mean difference as the test statistic.
+    Applies FDR correction when comparing more than 2 conditions.
     """
     if metrics is None:
         metrics = auto_detect_continuous_metrics(df)
 
     results = {}
+
+    # Determine if FDR correction is needed (only when more than 2 conditions)
+    apply_fdr = len(condition_values) > 2
+
+    if apply_fdr:
+        print(f"\n🔀 Performing permutation tests with FDR correction for {len(condition_values)} conditions...")
+
+    # Collect all p-values for FDR correction
+    all_p_values = []
+    p_value_map = {}  # Map to track which p-values correspond to which comparisons
 
     for metric in tqdm(metrics, desc="Permutation tests"):
         if metric not in df.columns:
@@ -639,15 +650,55 @@ def perform_permutation_continuous_analysis(df, condition_col, condition_values,
                 # Two-tailed p-value
                 p_value = np.sum(np.abs(perm_diffs) >= np.abs(observed_diff)) / N_PERMUTATIONS
 
+                # Calculate Cohen's d effect size
+                cohens_d = calculate_cohens_d(group1, group2)
+
+                # Calculate bootstrapped confidence interval for difference
+                ci_lower, ci_upper = bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95)
+
+                # Calculate percentage change (relative to group1 as baseline)
+                mean1 = np.mean(group1)
+                mean2 = np.mean(group2)
+
+                if mean1 != 0:
+                    pct_change = ((mean2 - mean1) / mean1) * 100
+                    pct_ci_lower = (ci_lower / mean1) * 100
+                    pct_ci_upper = (ci_upper / mean1) * 100
+                else:
+                    pct_change = np.nan
+                    pct_ci_lower = np.nan
+                    pct_ci_upper = np.nan
+
                 comparison_key = f"{cond1}_vs_{cond2}"
                 results[metric]["pairwise"][comparison_key] = {
                     "p_value": p_value,
                     "observed_diff": observed_diff,
-                    "significance": significance_label(p_value),
+                    "cohens_d": cohens_d,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "pct_change": pct_change,
+                    "pct_ci_lower": pct_ci_lower,
+                    "pct_ci_upper": pct_ci_upper,
+                    "significance": significance_label(p_value),  # Will update after FDR correction
                 }
+
+                # Track p-values for FDR correction
+                if apply_fdr:
+                    all_p_values.append(p_value)
+                    p_value_map[len(all_p_values) - 1] = (metric, comparison_key)
 
         except Exception as e:
             print(f"  Warning: Could not analyze {metric} with permutation test: {e}")
+
+    # Apply FDR correction if multiple conditions
+    if apply_fdr and all_p_values:
+        _, p_corrected, _, _ = multipletests(all_p_values, alpha=ALPHA, method="fdr_bh")
+
+        # Update results with corrected p-values
+        for idx, (metric, comparison_key) in p_value_map.items():
+            p_corr = p_corrected[idx]
+            results[metric]["pairwise"][comparison_key]["p_value_corrected"] = p_corr
+            results[metric]["pairwise"][comparison_key]["significance"] = significance_label(p_corr)
 
     return results
 
@@ -710,7 +761,7 @@ def plot_binary_metric_single(
     if stats_results and metric in stats_results:
         p_val = stats_results[metric].get("p_value")
         if p_val is not None:
-            sig_str = f"{significance_label(p_val)} (p={p_val:.3g})"
+            sig_str = f"{significance_label(p_val)} (p={format_p_value(p_val, N_PERMUTATIONS)})"
             ax.text(
                 0.5,
                 0.98,
@@ -835,7 +886,9 @@ def plot_continuous_metric_single(
             if cond1 in condition_values and cond2 in condition_values:
                 idx1 = condition_values.index(cond1)
                 idx2 = condition_values.index(cond2)
-                label = significance_label(result.get("p_value"))
+                # Use corrected p-value if available, otherwise use uncorrected
+                p_val = result.get("p_value_corrected", result.get("p_value"))
+                label = significance_label(p_val)
                 ax.plot([idx1, idx2], [y_position, y_position], "k-", linewidth=1)
                 ax.text((idx1 + idx2) / 2, y_position, label, ha="center", va="bottom", fontsize=12, fontweight="bold")
                 y_position -= y_step  # Move down for next annotation
@@ -888,15 +941,104 @@ def plot_continuous_metrics(
 # ============================================================================
 
 
-def format_p_value(p_value):
-    """Format p-value for display with appropriate precision"""
+def format_p_value(p_value, n_permutations=10000):
+    """Format p-value for display with appropriate precision
+
+    Uses scientific notation for very small p-values, with minimum precision
+    based on permutation test resolution (1/n_permutations).
+
+    Parameters:
+    -----------
+    p_value : float
+        The p-value to format
+    n_permutations : int
+        Number of permutations used (determines precision floor)
+    """
     if p_value is None or np.isnan(p_value):
         return "n/a"
+
+    # Minimum detectable p-value from permutation test
+    min_p = 1 / n_permutations
+
+    # If p-value equals the minimum from permutation test precision, show it directly
+    if p_value <= min_p:
+        return f"p ≤ 1e-{len(str(int(1/min_p)))-1}"
+
     # Use scientific notation for very small p-values
     if p_value < 1e-4:
-        return f"{p_value:.3e}"
+        return f"{p_value:.2e}"
+
     # For larger p-values, use fixed notation with 6 decimal places
     return f"{p_value:.6f}"
+
+
+def calculate_cohens_d(group1_data, group2_data):
+    """Calculate Cohen's d effect size between two groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+
+    Returns:
+    --------
+    float : Cohen's d effect size
+    """
+    n1 = len(group1_data)
+    n2 = len(group2_data)
+
+    mean1 = np.mean(group1_data)
+    mean2 = np.mean(group2_data)
+
+    var1 = np.var(group1_data, ddof=1)
+    var2 = np.var(group2_data, ddof=1)
+
+    # Pooled standard deviation
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return np.nan
+
+    return (mean2 - mean1) / pooled_std
+
+
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
+    """Calculate bootstrapped confidence interval for difference between groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+    n_bootstrap : int
+        Number of bootstrap samples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+
+    Returns:
+    --------
+    tuple : (lower_bound, upper_bound) of the CI
+    """
+    bootstrap_diffs = []
+
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample1 = np.random.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = np.random.choice(group2_data, size=len(group2_data), replace=True)
+
+        # Calculate difference in means
+        diff = np.mean(sample2) - np.mean(sample1)
+        bootstrap_diffs.append(diff)
+
+    # Calculate CI
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return lower, upper
 
 
 def save_statistical_results_table(
@@ -945,32 +1087,55 @@ def save_statistical_results_table(
             std2 = group2_converted.std()
 
             p_value = result.get("p_value", np.nan)
+            p_value_corrected = result.get("p_value_corrected")  # None if no FDR correction applied
             significance = result.get("significance", "n/a")
             observed_diff = result.get("observed_diff", np.nan)
+            cohens_d = result.get("cohens_d", np.nan)
+            ci_lower = result.get("ci_lower", np.nan)
+            ci_upper = result.get("ci_upper", np.nan)
+            pct_change = result.get("pct_change", np.nan)
+            pct_ci_lower = result.get("pct_ci_lower", np.nan)
+            pct_ci_upper = result.get("pct_ci_upper", np.nan)
 
             # Convert observed difference to appropriate units
             if is_distance_metric(metric):
                 observed_diff_converted = observed_diff / PIXELS_PER_MM
+                ci_lower_converted = ci_lower / PIXELS_PER_MM
+                ci_upper_converted = ci_upper / PIXELS_PER_MM
             elif is_time_metric(metric):
                 observed_diff_converted = observed_diff / 60.0
+                ci_lower_converted = ci_lower / 60.0
+                ci_upper_converted = ci_upper / 60.0
             else:
                 observed_diff_converted = observed_diff
+                ci_lower_converted = ci_lower
+                ci_upper_converted = ci_upper
 
-            table_rows.append(
-                {
-                    "Metric": metric_label,
-                    "Comparison": f"{cond1} vs {cond2}",
-                    "N1": n1,
-                    "N2": n2,
-                    "Mean1": mean1,
-                    "SD1": std1,
-                    "Mean2": mean2,
-                    "SD2": std2,
-                    "Difference": observed_diff_converted,
-                    "P-value": p_value,
-                    "Significance": significance,
-                }
-            )
+            row = {
+                "Metric": metric_label,
+                "Comparison": f"{cond1} vs {cond2}",
+                "N1": n1,
+                "N2": n2,
+                "Mean1": mean1,
+                "SD1": std1,
+                "Mean2": mean2,
+                "SD2": std2,
+                "Difference": observed_diff_converted,
+                "% Change": pct_change,
+                "CI Lower": ci_lower_converted,
+                "CI Upper": ci_upper_converted,
+                "CI % Lower": pct_ci_lower,
+                "CI % Upper": pct_ci_upper,
+                "Cohen's D": cohens_d,
+                "P-value": p_value,
+                "Significance": significance,
+            }
+
+            # Add corrected p-value if available
+            if p_value_corrected is not None:
+                row["P-value (FDR corrected)"] = p_value_corrected
+
+            table_rows.append(row)
 
     # Convert to DataFrame and save
     if table_rows:
@@ -994,17 +1159,44 @@ def save_statistical_results_table(
             f.write("---\n\n")
 
             # Format the table
-            f.write("| Metric | Comparison | N₁ | N₂ | Mean₁ ± SD₁ | Mean₂ ± SD₂ | Difference | P-value | Sig. |\n")
-            f.write("|--------|------------|----|----|--------------|--------------|------------|---------|------|\n")
+            f.write(
+                "| Metric | Comparison | N₁ | N₂ | Mean₁ ± SD₁ | Mean₂ ± SD₂ | Difference | % Change | 95% CI Lower | 95% CI Upper | 95% CI % Lower | 95% CI % Upper | Cohen's D | P-value | Sig. |\n"
+            )
+            f.write(
+                "|--------|------------|----|----|-------------|-------------|------------|----------|-------------|-------------|---------------|---------------|-----------|---------|-------|\n"
+            )
 
             for _, row in df_results.iterrows():
+                # Extract values first to avoid escaping issues in f-strings
+                cohens_d_val = row.get("Cohen's D", np.nan)
+                ci_lower_val = row.get("CI Lower", np.nan)
+                ci_upper_val = row.get("CI Upper", np.nan)
+                pct_change_val = row.get("% Change", np.nan)
+                pct_ci_lower_val = row.get("CI % Lower", np.nan)
+                pct_ci_upper_val = row.get("CI % Upper", np.nan)
+
+                cohens_d_str = f"{cohens_d_val:.3f}" if not np.isnan(cohens_d_val) else "n/a"
+                ci_lower_str = f"{ci_lower_val:.3f}" if not np.isnan(ci_lower_val) else "n/a"
+                cohens_d_str = f"{cohens_d_val:.3f}" if not np.isnan(cohens_d_val) else "n/a"
+                ci_lower_str = f"{ci_lower_val:.3f}" if not np.isnan(ci_lower_val) else "n/a"
+                ci_upper_str = f"{ci_upper_val:.3f}" if not np.isnan(ci_upper_val) else "n/a"
+                pct_change_str = f"{pct_change_val:.1f}%" if not np.isnan(pct_change_val) else "n/a"
+                pct_ci_lower_str = f"{pct_ci_lower_val:.1f}%" if not np.isnan(pct_ci_lower_val) else "n/a"
+                pct_ci_upper_str = f"{pct_ci_upper_val:.1f}%" if not np.isnan(pct_ci_upper_val) else "n/a"
+
                 f.write(
                     f"| {row['Metric']} | {row['Comparison']} | "
                     f"{row['N1']} | {row['N2']} | "
                     f"{row['Mean1']:.3f} ± {row['SD1']:.3f} | "
                     f"{row['Mean2']:.3f} ± {row['SD2']:.3f} | "
                     f"{row['Difference']:.3f} | "
-                    f"{format_p_value(row['P-value'])} | {row['Significance']} |\n"
+                    f"{pct_change_str} | "
+                    f"{ci_lower_str} | "
+                    f"{ci_upper_str} | "
+                    f"{pct_ci_lower_str} | "
+                    f"{pct_ci_upper_str} | "
+                    f"{cohens_d_str} | "
+                    f"{format_p_value(row['P-value'], N_PERMUTATIONS)} | {row['Significance']} |\n"
                 )
 
         # Also save as CSV for easy import into other tools
@@ -1070,9 +1262,11 @@ def main():
 
         # Select condition column and values
         if analysis_type == "f1_condition":
+            print("Running F1 condition analysis...")
             condition_col = f1_condition_col
             condition_values = SELECTED_F1_CONDITIONS
         else:  # pretraining
+            print("Running pretraining analysis...")
             condition_col = pretraining_col
             condition_values = ["n", "y"]
 

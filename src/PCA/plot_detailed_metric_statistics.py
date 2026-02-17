@@ -92,7 +92,7 @@ def permutation_test_1d(group1, group2, n_permutations=10000, random_state=None)
 
 def _parse_args():
     parser = argparse.ArgumentParser(description="Detailed metric statistics for high combined-consistency hits")
-    parser.add_argument("--output-dir", default="best_metric_analysis", help="Directory for all outputs")
+    parser.add_argument("--output-dir", default=OUTPUT_DIR, help="Directory for all outputs")
     parser.add_argument(
         "--consistency-dir", default=CONSISTENCY_DIR, help="Directory containing combined consistency CSVs"
     )
@@ -138,7 +138,7 @@ def _parse_args():
 
 
 # These globals will be overridden by CLI if provided
-OUTPUT_DIR = "best_metric_analysis"
+OUTPUT_DIR = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Plots/Detailed_metrics_statistics"
 CONTROL_MODE = "tailored"
 USE_PERMUTATION_PER_PC = False
 DISCRETE_EFFECTS = False
@@ -646,6 +646,16 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
     dataset_clean = dataset[~rows_with_missing].copy()
 
     print(f"   Final data: {dataset_clean.shape[0]} rows, {len(valid_metrics)} metrics")
+    if "Nickname" in dataset_clean.columns:
+        plot_nicknames = set(high_consistency_hits)
+        filtered_for_plot = dataset_clean[dataset_clean["Nickname"].isin(plot_nicknames)]
+        nickname_counts = filtered_for_plot["Nickname"].value_counts()
+        if not nickname_counts.empty:
+            print("   Sample size per Nickname (min-max, plotted): " f"{nickname_counts.min()}-{nickname_counts.max()}")
+            low_sample_nicknames = nickname_counts[nickname_counts < 12]
+            if not low_sample_nicknames.empty:
+                low_sample_list = ", ".join([f"{name} ({count})" for name, count in low_sample_nicknames.items()])
+                print(f"   ⚠️  Nicknames with <12 samples: {low_sample_list}")
 
     # Scale data for correlation analysis but keep raw for statistics
     metric_data = dataset_clean[valid_metrics].to_numpy()
@@ -789,6 +799,161 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
     print(f"   💾 Results saved to {results_file}")
 
     return results_df, correlation_matrix
+
+
+def format_p_value(p_value):
+    """Format p-value for display with appropriate precision"""
+    if p_value is None or np.isnan(p_value):
+        return "N/A"
+    # Use scientific notation for very small p-values
+    if p_value < 1e-4:
+        return f"{p_value:.2e}"
+    # For larger p-values, use fixed notation with 6 decimal places
+    return f"{p_value:.6f}"
+
+
+def significance_label(p_value):
+    """Return significance stars or ns for a p-value."""
+    if p_value is None or np.isnan(p_value):
+        return "N/A"
+    if p_value < 0.001:
+        return "***"
+    if p_value < 0.01:
+        return "**"
+    if p_value < 0.05:
+        return "*"
+    return "ns"
+
+
+def save_statistical_results_table(results_df, metrics_list, output_dir):
+    """
+    Generate detailed statistical results table for publication.
+
+    Creates both CSV and Markdown tables with:
+    - Genotype and control
+    - Metric name
+    - Sample sizes
+    - Mean values (genotype vs control)
+    - P-value (raw and FDR-corrected)
+    - Cohen's d effect size
+    - Significance label
+
+    Parameters
+    ----------
+    results_df : pd.DataFrame
+        Results from run_metric_analysis with metric-level statistics
+    metrics_list : list
+        List of metrics analyzed
+    output_dir : str
+        Directory to save output files
+    """
+    print(f"\n📝 Generating statistical results table...")
+
+    # Prepare data for table
+    table_rows = []
+
+    for _, row in results_df.iterrows():
+        genotype = row["genotype"]
+        control = row["control"]
+
+        # Iterate through all metrics
+        for metric in metrics_list:
+            pval_col = f"{metric}_pval"
+            pval_corr_col = f"{metric}_pval_corrected"
+            cohens_d_col = f"{metric}_cohens_d"
+
+            # Skip if metric not in results
+            if pval_col not in row or pd.isna(row[pval_col]):
+                continue
+
+            pval = row[pval_col]
+            pval_corrected = row[pval_corr_col] if pval_corr_col in row else pval
+            cohens_d_value = row[cohens_d_col] if cohens_d_col in row else np.nan
+
+            table_rows.append(
+                {
+                    "Genotype": genotype,
+                    "Control": control,
+                    "Metric": get_display_name(metric),
+                    "Metric_ID": metric,
+                    "P_value": pval,
+                    "P_value_formatted": format_p_value(pval),
+                    "P_value_corrected": pval_corrected,
+                    "P_value_corrected_formatted": format_p_value(pval_corrected),
+                    "Cohens_d": cohens_d_value,
+                    "Significance": significance_label(pval_corrected),
+                }
+            )
+
+    # Convert to DataFrame and save
+    if table_rows:
+        stats_table = pd.DataFrame(table_rows)
+
+        # Sort by genotype, then by p-value (corrected)
+        stats_table = stats_table.sort_values(["Genotype", "P_value_corrected"])
+
+        # Save CSV version with all numeric precision
+        csv_path = os.path.join(output_dir, "statistical_results_detailed.csv")
+        stats_table.to_csv(csv_path, index=False)
+        print(f"   💾 Saved CSV table: {csv_path}")
+
+        # Create Markdown version for manuscript reporting
+        md_path = os.path.join(output_dir, "statistical_results_detailed.md")
+
+        with open(md_path, "w") as f:
+            f.write("# Statistical Results: Detailed Metric Analysis\n\n")
+            f.write(f"**Analysis Type:** {'Permutation test' if USE_PERMUTATION_PER_PC else 'Mann-Whitney U test'}\n")
+            f.write(f"**FDR Correction:** Benjamini-Hochberg (α = 0.05)\n")
+            f.write(f"**Total comparisons:** {len(table_rows)}\n\n")
+
+            # Group by genotype for better readability
+            for genotype in stats_table["Genotype"].unique():
+                genotype_data = stats_table[stats_table["Genotype"] == genotype]
+                control = genotype_data["Control"].iloc[0]
+
+                f.write(f"\n## {genotype} vs {control}\n\n")
+
+                # Count significant metrics
+                n_significant = (genotype_data["Significance"] != "ns").sum()
+                f.write(f"**Significant metrics:** {n_significant}/{len(genotype_data)}\n\n")
+
+                # Create table
+                f.write("| Metric | P-value | P-value (FDR) | Cohen's d | Significance |\n")
+                f.write("|--------|---------|---------------|-----------|--------------|\n")
+
+                for _, metric_row in genotype_data.iterrows():
+                    metric_name = metric_row["Metric"]
+                    p_fmt = metric_row["P_value_formatted"]
+                    p_corr_fmt = metric_row["P_value_corrected_formatted"]
+                    cohens_d = f"{metric_row['Cohens_d']:.3f}" if not pd.isna(metric_row["Cohens_d"]) else "N/A"
+                    sig = metric_row["Significance"]
+
+                    f.write(f"| {metric_name} | {p_fmt} | {p_corr_fmt} | {cohens_d} | {sig} |\n")
+
+        print(f"   💾 Saved Markdown table: {md_path}")
+
+        # Print summary statistics
+        total_tests = len(stats_table)
+        total_significant = (stats_table["Significance"] != "ns").sum()
+        n_genotypes = stats_table["Genotype"].nunique()
+
+        print(f"\n   📊 Statistical Summary:")
+        print(f"      Genotypes analyzed: {n_genotypes}")
+        print(f"      Total metric comparisons: {total_tests}")
+        print(f"      Significant (FDR < 0.05): {total_significant} ({100*total_significant/total_tests:.1f}%)")
+
+        # Show top 10 most significant results
+        print(f"\n   🎯 Top 10 most significant results:")
+        top_results = stats_table.nsmallest(10, "P_value_corrected")[
+            ["Genotype", "Metric", "P_value_corrected_formatted", "Cohens_d", "Significance"]
+        ]
+        for idx, result in top_results.iterrows():
+            print(
+                f"      {result['Genotype']:15s} | {result['Metric']:40s} | p={result['P_value_corrected_formatted']:10s} | d={result['Cohens_d']:6.3f} | {result['Significance']}"
+            )
+
+    else:
+        print("   ⚠️  No statistical results to tabulate")
 
 
 def create_hits_heatmap(
@@ -984,7 +1149,7 @@ def create_hits_heatmap(
                             annot_str,
                             ha="center",
                             va="center",
-                            fontsize=8,
+                            fontsize=16,
                             fontweight="bold",
                             color=text_color,
                         )
@@ -1414,61 +1579,124 @@ def plot_two_way_dendrogram_metrics(
         cluster_order = [1]
         row_cluster_level = None
 
-    # 3b) GRIDSPEC layout - one row per cluster with gap rows between clusters
+    # 3b) GRIDSPEC layout - separate subplots for each cluster
+    # Arrange clusters as: 3 at top, 1 in middle, 2 at bottom
     plt.style.use("default")
     fig = plt.figure(figsize=fig_size)
     num_clusters = len(cluster_order)
 
-    # Height ratios: clusters + thin visual gaps (one gap row between clusters)
-    height_ratios_hm = []
-    # Use a thin visual gap. Do NOT interpret cluster_gap_size as a row count
-    # Default thin gap height (fraction of a genotype row): 0.3 (30%)
-    gap_row_height = 0.3
-    for i, cluster_id in enumerate(cluster_order):
-        height_ratios_hm.append(len(genotypes_by_cluster[cluster_id]))
-        if i < num_clusters - 1:  # Add gap row after each cluster except the last
-            height_ratios_hm.append(gap_row_height)
+    # Reorder clusters: cluster 3, then cluster 1, then cluster 2
+    # Assuming cluster_order contains [1, 2, 3] based on dendrogram
+    if num_clusters == 3:
+        # Custom display order: 3, 1, 2
+        display_order = [cluster_order[2], cluster_order[0], cluster_order[1]]  # indices 2, 0, 1 = clusters 3, 1, 2
+        print(f"   🎨 Arranging clusters in custom order: {display_order} (3 top, 1 middle, 2 bottom)")
+    else:
+        # For other numbers of clusters, use original order
+        display_order = cluster_order
+        print(f"   ℹ️  Using default cluster order: {display_order}")
 
-    # Total rows: top_dendro + (clusters with gaps) + bottom_labels
-    total_grid_rows = 2 + len(height_ratios_hm)
+    # Height ratios for each cluster (proportional to number of genotypes)
+    cluster_heights = [len(genotypes_by_cluster[cid]) for cid in display_order]
 
-    # GridSpec: rows are [top_dendro, hm_rows..., bottom_labels], columns are [left_dendro, nicknames, hm, cbar]
+    # GridSpec: rows are [top_dendro, cluster1, cluster2, cluster3]
+    # columns are [left_dendro, labels, hm, cbar]
+    total_grid_rows = 1 + num_clusters  # top dendro + clusters
+
     gs = gridspec.GridSpec(
         total_grid_rows,
         4,
-        height_ratios=[2.5] + height_ratios_hm + [0.6],  # Increased top dendrogram height to 2.5
-        width_ratios=[1.4, 1.2, 8.0, 0.3],
-        wspace=0.04,
-        hspace=0.01,  # Minimal spacing since we're using explicit gap rows
+        height_ratios=[2.5] + cluster_heights,  # top dendrogram + cluster rows
+        width_ratios=[1.5, 1.2, 8.0, 0.3],  # left dendro, labels, heatmap, colorbar
+        wspace=0.08,  # Moderate spacing to create visible gap between labels and heatmap
+        hspace=0.15,  # Increased spacing between separate subplots
     )
 
-    # Top dendrogram (spans all columns)
+    # Top dendrogram (spans heatmap column only)
     ax_top_dendro = fig.add_subplot(gs[0, 2])
 
-    # 4) Top dendrogram (horizontal) - metrics
-    if col_Z is not None and M.shape[1] > 1:
-        set_link_color_palette(list(col_palette))
-        dg_col = dendrogram(
-            col_Z,
-            orientation="top",
-            color_threshold=(None if color_threshold_cols == "default" else color_threshold_cols),
-            above_threshold_color=above_threshold_color_cols,
-            no_labels=True,
-            ax=ax_top_dendro,
-        )
-        col_order_idx = dg_col["leaves"]
-        col_labels_ordered = [metric_names[i] for i in col_order_idx]
+    # DON'T force colors - allows individual line styling afterward
+    set_link_color_palette(["#404040"])
 
-        # Clean up top dendrogram axes
-        ax_top_dendro.set_xticks([])
-        ax_top_dendro.set_yticks([])
-        ax_top_dendro.set_xticklabels([])
-        ax_top_dendro.set_yticklabels([])
-        for spine in ax_top_dendro.spines.values():
-            spine.set_visible(False)
+    dg_col = dendrogram(
+        col_Z,
+        orientation="top",
+        color_threshold=None,  # Don't force uniform color - allows individual line styling
+        no_labels=True,
+        ax=ax_top_dendro,
+    )
+    col_order_idx = dg_col["leaves"]
+    col_labels_ordered = [metric_names[i] for i in col_order_idx]
+
+    # Now manually recolor ALL dendrogram lines - override any default scipy colors
+    # IMPORTANT: Only modify collections that belong to the dendrogram (in ax_top_dendro)
+    if col_Z is not None and len(metric_names) > 1:
+        max_dist_top = col_Z[:, 2].max()
+
+        # Work with LineCollections (which is what dendrogram actually creates)
+        # Store collections before modifying to ensure we only touch dendrogram collections
+        from matplotlib.collections import LineCollection
+        import numpy as np
+
+        dendrogram_collections = list(ax_top_dendro.collections)
+
+        for old_collection in dendrogram_collections:
+            segments = old_collection.get_segments()
+
+            # Separate segments into two groups based on their distance
+            light_gray_segments = []
+            dark_gray_segments = []
+
+            for segment in segments:
+                if len(segment) > 0:
+                    # For TOP orientation, Y-values are distances
+                    y_values = segment[:, 1]
+                    max_y = max(y_values) if len(y_values) > 0 else 0
+
+                    if max_y >= max_dist_top * 0.80:
+                        # Root segments (highest distance) - light gray, below
+                        light_gray_segments.append(segment)
+                    else:
+                        # Other segments - dark gray, above
+                        dark_gray_segments.append(segment)
+                else:
+                    dark_gray_segments.append(segment)
+
+            # Remove old collection
+            old_collection.remove()
+
+            # Create new collections with different z-orders
+            # Light gray segments: z-order 8 (below dark gray)
+            if light_gray_segments:
+                lc_light = LineCollection(light_gray_segments, colors="lightgray", linewidths=2.0, zorder=8)
+                ax_top_dendro.add_collection(lc_light)
+
+            # Dark gray segments: z-order 10 (above light gray)
+            if dark_gray_segments:
+                lc_dark = LineCollection(dark_gray_segments, colors="#404040", linewidths=2.0, zorder=10)
+                ax_top_dendro.add_collection(lc_dark)
+
+        # Also handle any Line2D objects (just in case)
+        for line in ax_top_dendro.get_lines():
+            ydata = line.get_ydata()
+            if len(ydata) > 0:
+                max_y = max(ydata)
+                if max_y >= max_dist_top * 0.80:
+                    line.set_color("lightgray")
+                    line.set_linewidth(2.0)
+                    line.set_zorder(8)  # Light gray below
+                else:
+                    line.set_color("#404040")
+                    line.set_linewidth(2.0)
+                    line.set_zorder(10)  # Dark gray above
     else:
-        col_order_idx = list(range(M.shape[1]))
-        col_labels_ordered = list(M.columns)
+        # Just increase linewidth if no dendrogram
+        for collection in ax_top_dendro.collections:
+            collection.set_linewidth(2.0)
+            collection.set_zorder(10)
+        for line in ax_top_dendro.get_lines():
+            line.set_linewidth(2.0)
+            line.set_zorder(10)
         dg_col = None
         ax_top_dendro.axis("off")
 
@@ -1501,210 +1729,407 @@ def plot_two_way_dendrogram_metrics(
         # No dendrogram: keep metric label axis but populate later if needed
         pass
 
-    # 6) Build a single heatmap matrix with explicit gap rows between clusters
-    # Build ordered genotype list (dendrogram leaf order when available)
-    ordered_genotypes = []
-    if row_Z is not None and M.shape[0] > 1:
-        # row_order_idx contains indices in M corresponding to dendrogram leaves
-        ordered_genotypes = [M.index[i] for i in row_order_idx]
-    else:
-        ordered_genotypes = list(M.index)
+    # 6) Create separate heatmap subplots for each cluster
+    # Build ordered genotype list per cluster
+    cluster_genotypes = {}
+    for cluster_id in display_order:
+        cluster_genotypes[cluster_id] = genotypes_by_cluster[cluster_id]
 
-    # Build genotype -> cluster map
-    genotype_to_cluster = {}
-    for cid in cluster_order:
-        for genotype in genotypes_by_cluster[cid]:
-            genotype_to_cluster[genotype] = cid
+    # Create heatmap axes - one for each cluster
+    ax_hm_list = []
+    ax_left_dendro_list = []
+    ax_label_list = []
 
-    # Insert gap rows between clusters using the dendrogram order
-    gap_marker_base = "__GAP__"
-    rows_with_gaps = []
-    for idx, genotype in enumerate(ordered_genotypes):
-        cid = genotype_to_cluster.get(genotype, None)
-        prev_cid = genotype_to_cluster.get(ordered_genotypes[idx - 1], None) if idx > 0 else None
-        if prev_cid is not None and cid != prev_cid:
-            # insert a single gap row marker between clusters; visual height controlled by GridSpec
-            rows_with_gaps.append(f"{gap_marker_base}{prev_cid}")
-        rows_with_gaps.append(genotype)
+    for i, cluster_id in enumerate(display_order):
+        row_idx = 1 + i  # Skip top dendrogram row
 
-    # Create M_with_gaps filled with NaN for gap rows
-    M_with_gaps = pd.DataFrame(np.nan, index=rows_with_gaps, columns=M.columns, dtype=float)
-    for g in M.index:
-        if g in M_with_gaps.index:
-            M_with_gaps.loc[g] = M.loc[g].values
+        # Left dendrogram for this cluster
+        ax_left = fig.add_subplot(gs[row_idx, 0])
+        ax_left_dendro_list.append(ax_left)
 
-    # Single heatmap axis spanning the heatmap grid rows (all middle rows)
-    heatmap_row_start = 1
-    heatmap_row_end = total_grid_rows - 2  # exclusive end in slicing
-    ax_hm = fig.add_subplot(gs[heatmap_row_start : heatmap_row_end + 1, 2])
-    ax_hm_list = [ax_hm]
+        # Label column for this cluster
+        ax_label = fig.add_subplot(gs[row_idx, 1])
+        ax_label_list.append(ax_label)
 
-    # Prepare col order and display matrix
-    display_matrix = M_with_gaps.iloc[:, col_order_idx] if len(col_order_idx) > 0 else M_with_gaps
+        # Heatmap for this cluster
+        ax_hm = fig.add_subplot(gs[row_idx, 2])
+        ax_hm_list.append((cluster_id, ax_hm))
+
+    # Colorbar axis - span all cluster rows
+    first_cluster_row = 1
+    last_cluster_row = num_clusters
+    ax_cbar = fig.add_subplot(gs[first_cluster_row : last_cluster_row + 1, 3])
+
+    # Prepare col order and cluster matrices
+    cluster_matrices = {}
+    for cluster_id in display_order:
+        genotypes = cluster_genotypes[cluster_id]
+        cluster_M = M.loc[genotypes, :]
+        cluster_matrices[cluster_id] = cluster_M.iloc[:, col_order_idx] if len(col_order_idx) > 0 else cluster_M
 
     # Make NaN cells transparent in colormap
     cmap_obj = plt.get_cmap("RdBu_r").copy()
     try:
         cmap_obj.set_bad(alpha=0.0)
     except Exception:
-        # Some matplotlib versions return a ListedColormap that supports set_bad
         pass
 
-    if HAS_SEABORN and "sns" in globals():
-        sns.heatmap(
-            display_matrix,
-            ax=ax_hm,
-            cmap=cmap_obj,
-            vmin=vmin,
-            vmax=vmax,
-            cbar=False,
-            linewidths=0,  # no outlines around gap rows
-            linecolor=linecolor,
-            square=False,
-            xticklabels=False,
-            yticklabels=False,
-            annot=False,
-        )
-    else:
-        im = ax_hm.imshow(display_matrix.values, cmap=cmap_obj, vmin=vmin, vmax=vmax, aspect="auto")
-        ax_hm.set_xticks(range(display_matrix.shape[1]))
-        ax_hm.set_xticklabels([])
+    # Plot each cluster's heatmap
+    for i, (cluster_id, ax_hm) in enumerate(ax_hm_list):
+        display_matrix = cluster_matrices[cluster_id]
+        ax_label = ax_label_list[i]
 
-    # Set y-ticks only for real genotypes (skip gap rows)
-    yticks = []
-    yticklabels = []
-    for i, name in enumerate(M_with_gaps.index):
-        if name.startswith(gap_marker_base):
-            continue
-        yticks.append(i)
-        yticklabels.append(name)
+        if HAS_SEABORN and "sns" in globals():
+            # Seaborn centers cells at integer coordinates, not +0.5
+            # We need to manually adjust for proper alignment with labels
+            sns.heatmap(
+                display_matrix,
+                ax=ax_hm,
+                cmap=cmap_obj,
+                vmin=vmin,
+                vmax=vmax,
+                cbar=False,
+                linewidths=linewidths,
+                linecolor=linecolor,
+                square=False,
+                xticklabels=False,
+                yticklabels=False,  # Labels now in separate column
+                annot=False,
+            )
+            # Seaborn heatmap uses cell centers at integer coordinates
+            # But we need centers at +0.5 to match label positions
+            # This is already handled by seaborn internally
+        else:
+            im = ax_hm.imshow(display_matrix.values, cmap=cmap_obj, vmin=vmin, vmax=vmax, aspect="auto")
+            ax_hm.set_xticks(range(display_matrix.shape[1]))
+            ax_hm.set_xticklabels([])
 
-    ax_hm.set_yticks(yticks)
-    ax_hm.set_yticklabels(yticklabels, fontsize=row_label_fontsize)
+        # Seaborn already adds gridlines, but for imshow we need to add them manually
+        if not (HAS_SEABORN and "sns" in globals()):
+            ax_hm.set_xticks(np.arange(display_matrix.shape[1] + 1) - 0.5, minor=True)
+            ax_hm.set_yticks(np.arange(display_matrix.shape[0] + 1) - 0.5, minor=True)
+            ax_hm.grid(which="minor", color=linecolor, linestyle="-", linewidth=linewidths)
+            ax_hm.tick_params(which="minor", size=0)
 
-    # Handle metric labels on x-axis (place at bottom)
-    ax_hm.set_xticks(np.arange(len(col_labels_ordered)) + 0.5)
-    ax_hm.set_xticklabels(
-        [get_display_name(m) for m in col_labels_ordered], rotation=45, ha="right", fontsize=col_label_fontsize
-    )
+        # Remove y-ticks from heatmap (but keep gridlines)
+        ax_hm.set_yticks([])
+        ax_hm.set_yticklabels([])
 
-    # Color y-axis labels by brain region
-    try:
-        region_mapping = simplified_to_region if simplified_to_region else nickname_to_brainregion
-        # colour_y_ticklabels expects the axis to have the real labels visible
-        colour_y_ticklabels(ax_hm, region_mapping, color_dict)
-    except Exception as e:
-        print(f"   ⚠️  Could not color y-labels: {e}")
+        # Set up label column - centered on row midpoints to match heatmap cells
+        ax_label.set_xlim(0, 1)
+        ax_label.set_ylim(-0.5, len(display_matrix.index) - 0.5)
+        ax_label.invert_yaxis()
+        ax_label.set_xticks([])
 
-    # Add significance stars for every real genotype row
-    for genotype in ordered_genotypes:
-        y = list(M_with_gaps.index).index(genotype)
-        for j, metric in enumerate(col_labels_ordered):
-            genotype_original = simplified_to_original.get(genotype, genotype)
-            genotype_row = results_df[results_df["genotype"] == genotype_original]
-            if genotype_row.empty:
-                continue
-            pval_col = f"{metric}_pval_corrected"
-            pval = genotype_row.iloc[0].get(pval_col, np.nan)
-            if pd.notna(pval):
-                if pval < 0.001:
-                    stars = "***"
-                elif pval < 0.01:
-                    stars = "**"
-                elif pval < 0.05:
-                    stars = "*"
-                else:
-                    stars = None
-                if stars:
-                    cell_value = None
-                    try:
-                        cell_value = M_with_gaps.iloc[y, col_order_idx[j]]
-                    except Exception:
-                        pass
-                    text_color = "white" if (cell_value is not None and abs(cell_value) >= 0.5) else "black"
-                    ax_hm.text(
-                        j + 0.5,
-                        y + 0.5,
-                        stars,
-                        ha="center",
-                        va="center",
-                        color=text_color,
-                        fontsize=8,
-                        fontweight="bold",
-                    )
+        # Move y-axis ticks to the RIGHT side of the label column (away from dendrogram)
+        ax_label.yaxis.tick_right()
+        ax_label.yaxis.set_label_position("right")
+        # Position labels at integers to match seaborn heatmap cells (which center at 0, 1, 2...)
+        ax_label.set_yticks(np.arange(len(display_matrix.index)))  # At 0, 1, 2... to match heatmap
+        ax_label.set_yticklabels(display_matrix.index, fontsize=row_label_fontsize, ha="right")
+        ax_label.tick_params(axis="y", which="both", length=0, pad=2)  # Remove tick marks, small padding
+        for spine in ax_label.spines.values():
+            spine.set_visible(False)
+        # Only show x-axis labels on the bottom cluster
+        if i == len(ax_hm_list) - 1:
+            ax_hm.set_xticks(np.arange(len(col_labels_ordered)) + 0.5)
+            ax_hm.set_xticklabels(
+                [get_display_name(m) for m in col_labels_ordered],
+                rotation=metric_label_rotation,
+                ha="right",
+                fontsize=col_label_fontsize,
+            )
+        else:
+            ax_hm.set_xticks([])
+            ax_hm.set_xticklabels([])
 
-    # Draw left dendrogram only once, using leaf indices mapped to M_with_gaps positions
-    ax_left_dendro = None
+        # Color y-axis labels by brain region (in label column)
+        try:
+            region_mapping = simplified_to_region if simplified_to_region else nickname_to_brainregion
+            colour_y_ticklabels(ax_label, region_mapping, color_dict)
+        except Exception as e:
+            print(f"   ⚠️  Could not color y-labels for cluster {cluster_id}: {e}")
+
+        # Add significance stars
+        for row_idx, genotype in enumerate(display_matrix.index):
+            for j, metric in enumerate(col_labels_ordered):
+                genotype_original = simplified_to_original.get(genotype, genotype)
+                genotype_row = results_df[results_df["genotype"] == genotype_original]
+                if genotype_row.empty:
+                    continue
+                pval_col = f"{metric}_pval_corrected"
+                pval = genotype_row.iloc[0].get(pval_col, np.nan)
+                if pd.notna(pval):
+                    if pval < 0.001:
+                        stars = "***"
+                    elif pval < 0.01:
+                        stars = "**"
+                    elif pval < 0.05:
+                        stars = "*"
+                    else:
+                        stars = None
+                    if stars:
+                        cell_value = None
+                        try:
+                            cell_value = display_matrix.iloc[row_idx, j]
+                        except Exception:
+                            pass
+                        text_color = "white" if (cell_value is not None and abs(cell_value) >= 0.5) else "black"
+                        ax_hm.text(
+                            j + 0.5,
+                            row_idx + 0.5,
+                            stars,
+                            ha="center",
+                            va="center",
+                            color=text_color,
+                            fontsize=16,
+                            fontweight="bold",
+                        )
+
+    # Draw left dendrograms for each cluster
     if row_Z is not None and M.shape[0] > 1:
-        first_cluster_row = 1
-        last_cluster_row = total_grid_rows - 2
-        ax_left_dendro = fig.add_subplot(gs[first_cluster_row : last_cluster_row + 1, 0])
-        set_link_color_palette(list(row_palette))
-
+        # Get the full dendrogram structure
+        # Set consistent dark gray color for all dendrogram lines
+        set_link_color_palette(["#404040"])  # Dark gray
         dg_left = dendrogram(
             row_Z,
             orientation="left",
-            color_threshold=(None if color_threshold_rows == "default" else color_threshold_rows),
-            above_threshold_color=above_threshold_color_rows,
+            color_threshold=0,  # Force all lines to use the same color
+            above_threshold_color="#404040",  # Dark gray
             no_labels=True,
             no_plot=True,
         )
 
-        # Compute leaf_order: dendrogram leaf indices -> ordered genotype positions in M_with_gaps
-        leaf_order = []
-        for leaf in dg_left["leaves"]:
-            genotype = M.index[leaf]
-            rowidx = list(M_with_gaps.index).index(genotype)
-            leaf_order.append(rowidx + 0.5)  # Exact center
+        # Map leaf indices to cluster IDs and positions
+        leaf_to_cluster = {}
+        leaf_to_position = {}  # Position within the ordered genotype list
 
-        nleaves = len(leaf_order)
+        current_pos = 0
+        for cluster_id in display_order:
+            cluster_genotypes_list = cluster_genotypes[cluster_id]
+            for genotype in cluster_genotypes_list:
+                leaf_idx = list(M.index).index(genotype)
+                leaf_to_cluster[leaf_idx] = cluster_id
+                leaf_to_position[leaf_idx] = current_pos
+                current_pos += 1
 
-        # Debug prints
-        try:
-            print("Leaf order (first 5, last 5):", leaf_order[:5], "...", leaf_order[-5:])
-            print("Gap example - positions around label 7/8:", [p for p in leaf_order if 6 < p < 9])
-            print("nleaves:", nleaves, "M.shape[0]:", M.shape[0], "M_with_gaps.shape[0]:", M_with_gaps.shape[0])
-        except Exception:
-            pass
+        # For each cluster, extract and plot relevant dendrogram segments
+        for i, cluster_id in enumerate(display_order):
+            ax_left = ax_left_dendro_list[i]
+            cluster_genotypes_list = cluster_genotypes[cluster_id]
+            cluster_size = len(cluster_genotypes_list)
 
-        # Remap ALL icoord y-positions using leaf_order lookup/interp
-        def remap_y(y_pos):
-            frac = (y_pos - 5.0) / 10.0
-            if frac <= 0:
-                return leaf_order[0]
-            elif frac >= nleaves - 1:
-                return leaf_order[-1]
-            else:
-                low = int(np.floor(frac))
-                high = low + 1
-                ratio = frac - low
-                return leaf_order[low] * (1 - ratio) + leaf_order[high] * ratio
+            # Find leaf indices for this cluster
+            cluster_leaf_indices = set([list(M.index).index(g) for g in cluster_genotypes_list])
 
-        new_icoord = []
-        for coords in dg_left["icoord"]:
-            newcoords = [remap_y(y) for y in coords]
-            new_icoord.append(newcoords)
+            # Map global positions to local positions within this cluster
+            global_to_local_y = {}
+            for j, genotype in enumerate(cluster_genotypes_list):
+                global_leaf_idx = list(M.index).index(genotype)
+                # Map to integer positions (0, 1, 2...) to match seaborn heatmap and labels
+                global_to_local_y[leaf_to_position[global_leaf_idx]] = j
 
-        # Plot remapped dendrogram
-        ax_left_dendro.clear()
-        for ic, dc, color in zip(new_icoord, dg_left.get("dcoord", []), dg_left.get("color_list", [])):
-            ax_left_dendro.plot(dc, ic, color=color if color else "C0", linewidth=1.0)
+            # Function to check if a dendrogram segment belongs to this cluster
+            def get_segment_leaves(icoord_segment):
+                """Extract leaf indices from a dendrogram segment's y-coordinates"""
+                leaves = []
+                for y_val in icoord_segment:
+                    # Dendrogram y-coords are (leaf_idx * 10 + 5)
+                    leaf_idx = int((y_val - 5) / 10)
+                    if 0 <= leaf_idx < len(dg_left["leaves"]):
+                        leaves.append(dg_left["leaves"][leaf_idx])
+                return leaves
 
-        ax_left_dendro.set_ylim(-0.5, len(M_with_gaps.index) - 0.5)
-        ax_left_dendro.invert_xaxis()
-        ax_left_dendro.set_xticks([])
-        ax_left_dendro.set_yticks([])
-        for spine in ax_left_dendro.spines.values():
-            spine.set_visible(False)
+            # Plot dendrogram segments that belong to this cluster
+            # First pass: find max distance for this cluster
+            max_x = 0
+            max_distance_in_cluster = 0
+            for ic, dc, color in zip(dg_left["icoord"], dg_left["dcoord"], dg_left.get("color_list", [])):
+                segment_leaves = get_segment_leaves(ic)
+                if segment_leaves and all(leaf in cluster_leaf_indices for leaf in segment_leaves):
+                    max_distance_in_cluster = max(max_distance_in_cluster, max(dc))
 
-    # Bottom metric labels axis
-    ax_metric_labels = fig.add_subplot(gs[-1, 2])  # Last row
-    ax_metric_labels.axis("off")
+            # Second pass: plot segments with appropriate colors and z-orders
+            for ic, dc, color in zip(dg_left["icoord"], dg_left["dcoord"], dg_left.get("color_list", [])):
+                segment_leaves = get_segment_leaves(ic)
 
-    # Colorbar axis - span the heatmap rows including gaps
-    first_cluster_row = heatmap_row_start
-    last_cluster_row = heatmap_row_end
-    ax_cbar = fig.add_subplot(gs[first_cluster_row : last_cluster_row + 1, 3])
+                # Check if all leaves in this segment belong to this cluster
+                if segment_leaves and all(leaf in cluster_leaf_indices for leaf in segment_leaves):
+                    # Remap y-coordinates to local cluster coordinates
+                    new_ic = []
+                    valid_segment = True
+                    for y_val in ic:
+                        leaf_idx = int((y_val - 5) / 10)
+                        if 0 <= leaf_idx < len(dg_left["leaves"]):
+                            actual_leaf = dg_left["leaves"][leaf_idx]
+                            global_pos = leaf_to_position[actual_leaf]
+                            if global_pos in global_to_local_y:
+                                new_ic.append(global_to_local_y[global_pos])
+                            else:
+                                valid_segment = False
+                                break
+                        else:
+                            # This is an internal node, estimate position
+                            # Use average of the closest leaves
+                            frac = (y_val - 5) / 10
+                            if frac < 0:
+                                frac = 0
+                            elif frac >= len(dg_left["leaves"]) - 1:
+                                frac = len(dg_left["leaves"]) - 1
+
+                            low_idx = int(np.floor(frac))
+                            high_idx = min(low_idx + 1, len(dg_left["leaves"]) - 1)
+                            low_leaf = dg_left["leaves"][low_idx]
+                            high_leaf = dg_left["leaves"][high_idx]
+
+                            if low_leaf in cluster_leaf_indices and high_leaf in cluster_leaf_indices:
+                                low_local = global_to_local_y.get(leaf_to_position[low_leaf], 0)
+                                high_local = global_to_local_y.get(leaf_to_position[high_leaf], cluster_size - 1)
+                                ratio = frac - low_idx
+                                interpolated = low_local * (1 - ratio) + high_local * ratio
+                                new_ic.append(interpolated)
+                            else:
+                                valid_segment = False
+                                break
+
+                    if valid_segment and len(new_ic) == 4:
+                        # Determine if this is a root segment based on distance
+                        max_distance_in_segment = max(dc)
+
+                        # Root segments: light gray, z-order 8 (below)
+                        # Other segments: dark gray, z-order 10 (above)
+                        if max_distance_in_cluster > 0 and max_distance_in_segment >= max_distance_in_cluster * 0.90:
+                            ax_left.plot(dc, new_ic, color="lightgray", linewidth=2.0, zorder=8)
+                        else:
+                            ax_left.plot(dc, new_ic, color="#404040", linewidth=2.0, zorder=10)
+                        max_x = max(max_x, max(dc))
+
+            ax_left.set_ylim(-0.5, cluster_size - 0.5)
+            # Extend xlim to create space for connecting lines on the left
+            # ax_left.set_xlim(-max_x * 0.15, max(max_x * 1.05, 1))  # Add 15% extra space on left
+            ax_left.invert_xaxis()
+            ax_left.invert_yaxis()
+            ax_left.set_xticks([])
+            ax_left.set_yticks([])
+            for spine in ax_left.spines.values():
+                spine.set_visible(False)
+            # Ensure lines don't extend beyond axes bounds
+            ax_left.set_clip_on(True)
+
+        # Sub-dendrograms are drawn for visualization - they show cluster hierarchy independently
+
+        # Now draw the overarching stem connecting all 3 sub-dendrograms
+        from matplotlib.lines import Line2D
+
+        # Collect the root information for each cluster
+        cluster_roots = []  # List of (ax, y_position, max_distance) for each cluster
+
+        for i, cluster_id in enumerate(display_order):
+            ax_left = ax_left_dendro_list[i]
+            cluster_genotypes_list = cluster_genotypes[cluster_id]
+            cluster_size = len(cluster_genotypes_list)
+
+            # Find the maximum distance (root) in this cluster's dendrogram
+            cluster_leaf_indices = set([list(M.index).index(g) for g in cluster_genotypes_list])
+
+            max_distance_cluster = 0
+            for dc, ic in zip(dg_left["dcoord"], dg_left["icoord"]):
+                segment_leaves = []
+                for y_val in ic:
+                    leaf_idx = int((y_val - 5) / 10)
+                    if 0 <= leaf_idx < len(dg_left["leaves"]):
+                        segment_leaves.append(dg_left["leaves"][leaf_idx])
+
+                if segment_leaves and all(leaf in cluster_leaf_indices for leaf in segment_leaves):
+                    max_distance_cluster = max(max_distance_cluster, max(dc))
+
+            # Root y-position is at the center of the cluster
+            root_y = (cluster_size - 1) / 2.0
+
+            cluster_roots.append(
+                {"ax": ax_left, "y_pos": root_y, "max_dist": max_distance_cluster, "cluster_size": cluster_size}
+            )
+
+        # Stem x-position: extend beyond the maximum dendrogram distance
+        stem_x = max([cr["max_dist"] for cr in cluster_roots]) * 1.15
+
+        # First, determine the target x-coordinate in figure space using the first axis
+        ax_ref = cluster_roots[0]["ax"]
+        y_ref = cluster_roots[0]["y_pos"]
+        trans_ref = ax_ref.transData
+        point_ref_data = trans_ref.transform([stem_x, y_ref])
+        point_ref_fig = fig.transFigure.inverted().transform(point_ref_data)
+        stem_x_fig = point_ref_fig[0]  # This is the consistent x-coordinate in figure space
+
+        # Now calculate all endpoints
+        stem_endpoints = []  # List of (x_fig, y_fig) for each cluster
+        root_endpoints = []  # List of (x_fig, y_fig) for each dendrogram root
+
+        for cr in cluster_roots:
+            ax = cr["ax"]
+            y_pos = cr["y_pos"]
+            max_dist = cr["max_dist"]
+
+            # Transform dendrogram root endpoint to figure coordinates
+            trans = ax.transData
+            point_root_data = trans.transform([max_dist, y_pos])
+            point_root_fig = fig.transFigure.inverted().transform(point_root_data)
+            root_endpoints.append(point_root_fig)
+
+            # All stem endpoints have the same x (stem_x_fig) but different y
+            # Transform the figure point back to y-position in this specific axis
+            point_stem_fig_temp = [stem_x_fig, 0]  # Temp y-value
+            point_stem_display = fig.transFigure.transform(point_stem_fig_temp)
+            point_stem_data_temp = trans.inverted().transform(point_stem_display)
+            # y-coordinate should be the cluster's y_pos
+            stem_endpoints.append([stem_x_fig, point_root_fig[1]])  # Use root's y-position in fig coords
+
+        # Draw horizontal and vertical stem lines entirely in figure coordinates
+        for i in range(len(cluster_roots)):
+            # Draw horizontal line from dendrogram root to stem
+            # All stem_endpoints have the same x-coordinate (stem_x_fig)
+            horizontal_line = Line2D(
+                [root_endpoints[i][0], stem_x_fig],
+                [root_endpoints[i][1], stem_endpoints[i][1]],
+                color="lightgray",  # Light gray
+                linestyle="-",
+                linewidth=2.0,  # Increased linewidth
+                transform=fig.transFigure,
+                zorder=5,
+            )
+            fig.add_artist(horizontal_line)
+
+        # Draw vertical stem line connecting all cluster stems
+        if len(stem_endpoints) > 1:
+            vertical_stem = Line2D(
+                [stem_x_fig, stem_x_fig],
+                [stem_endpoints[0][1], stem_endpoints[-1][1]],
+                color="lightgray",  # Light gray
+                linestyle="-",
+                linewidth=2.0,  # Increased linewidth
+                transform=fig.transFigure,
+                zorder=5,
+            )
+            fig.add_artist(vertical_stem)
+    else:
+        # No dendrogram - just label clusters
+        for i, cluster_id in enumerate(display_order):
+            ax_left = ax_left_dendro_list[i]
+            ax_left.text(
+                0.5,
+                0.5,
+                f"C{cluster_id}",
+                transform=ax_left.transAxes,
+                ha="center",
+                va="center",
+                fontsize=12,
+                fontweight="bold",
+            )
+            ax_left.axis("off")
+
+    # Bottom metric labels axis (not needed since we show labels on bottom heatmap)
+    # ax_metric_labels = fig.add_subplot(gs[-1, 1])
+    # ax_metric_labels.axis("off")
 
     # 7) Add colorbar
 
@@ -1829,7 +2254,7 @@ def plot_two_way_dendrogram_metrics(
 
     # 12) Final styling on all heatmap axes
     if despine:
-        for ax_hm in ax_hm_list:
+        for cluster_id, ax_hm in ax_hm_list:
             if HAS_SEABORN:
                 sns.despine(ax=ax_hm, top=True, right=True, left=False, bottom=False)
             else:
@@ -1858,10 +2283,10 @@ def plot_two_way_dendrogram_metrics(
     col_order_csv = os.path.join(OUTPUT_DIR, f"metric_two_way_col_order.csv")
     M.to_csv(mat_csv)
 
-    # Build ordered genotype list from cluster groups
+    # Build ordered genotype list from display order
     ordered_genotypes = []
-    for cluster_id in cluster_order:
-        ordered_genotypes.extend(genotypes_by_cluster[cluster_id])
+    for cluster_id in display_order:
+        ordered_genotypes.extend(cluster_genotypes[cluster_id])
 
     pd.Series(ordered_genotypes, name="genotype").to_csv(row_order_csv, index=False)
     pd.Series(col_labels_ordered, name="metric").to_csv(col_order_csv, index=False)
@@ -2088,7 +2513,7 @@ def plot_simple_metric_heatmap(
                         ha="center",
                         va="center",
                         color=text_color,
-                        fontsize=7,
+                        fontsize=16,
                         fontweight="bold",
                     )
 
@@ -2397,7 +2822,7 @@ def plot_brain_region_grouped_heatmap(
                             ha="center",
                             va="center",
                             color=text_color,
-                            fontsize=7,
+                            fontsize=11,
                             fontweight="bold",
                         )
 
@@ -2558,6 +2983,9 @@ def main():
         print("❌ No results generated from metric analysis.")
         return
 
+    # Step 4.5: Generate detailed statistical results table
+    save_statistical_results_table(results_df, metrics_list, OUTPUT_DIR)
+
     # Step 5: Load nickname mapping for visualization
     nickname_mapping, simplified_to_region = load_nickname_mapping()
 
@@ -2671,6 +3099,9 @@ def main():
     print(f"   • Simple heatmap (brain region sorted): metric_simple_heatmap.png/pdf")
     print(f"   • Two-way dendrogram (clustered): metric_two_way_dendrogram.png/pdf")
     print(f"   • Brain region grouped heatmap (publication style): metric_brain_region_grouped_heatmap.png/pdf")
+    print(f"📋 Statistical results tables:")
+    print(f"   • CSV format: statistical_results_detailed.csv")
+    print(f"   • Markdown format: statistical_results_detailed.md")
 
 
 if __name__ == "__main__":

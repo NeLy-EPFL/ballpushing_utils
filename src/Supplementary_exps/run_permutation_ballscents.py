@@ -43,6 +43,63 @@ import time
 import argparse
 
 
+# Pixel to mm conversion factor (500 pixels = 30 mm)
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
+def mm_to_inches(mm_value):
+    return mm_value / 25.4
+
+
+def is_distance_metric(metric_name):
+    """Check if a metric represents distance (in pixels)"""
+    distance_keywords = [
+        "distance",
+        "dist",
+        "head_ball",
+        "fly_distance_moved",
+        "max_distance",
+        "distance_moved",
+        "distance_ratio",
+    ]
+    return any(keyword in metric_name.lower() for keyword in distance_keywords)
+
+
+def is_time_metric(metric_name):
+    """Check if a metric represents time (in seconds)"""
+    time_keywords = ["time", "duration", "pause", "stop", "freeze", "chamber_exit_time", "time_chamber_beginning"]
+    # Exclude ratio metrics
+    if "ratio" in metric_name.lower():
+        return False
+    return any(keyword in metric_name.lower() for keyword in time_keywords)
+
+
+def convert_metric_data(data, metric_name):
+    """Convert metric data from pixels to mm or seconds to minutes"""
+    if is_distance_metric(metric_name):
+        return data / PIXELS_PER_MM  # Convert pixels to mm
+    if is_time_metric(metric_name):
+        return data / 60.0  # Convert seconds to minutes
+    return data
+
+
+def get_metric_unit(metric_name):
+    """Get the display unit for a metric"""
+    if is_distance_metric(metric_name):
+        return "(mm)"
+    if is_time_metric(metric_name):
+        return "(min)"
+    return ""
+
+
+def format_metric_label(metric_name):
+    """Format metric name with appropriate unit"""
+    unit = get_metric_unit(metric_name)
+    if unit:
+        return f"{metric_name} {unit}"
+    return metric_name
+
+
 # Fixed color mapping for ball scents - ensures consistent colors across all plots
 # Colors chosen to distinguish different experimental conditions
 BALLSCENT_COLORS = {
@@ -165,12 +222,16 @@ def generate_BallScent_permutation_plots(
     control_BallScent="New",  # New ball as control
     hue=None,
     palette="Set2",
-    figsize=(15, 10),
+    fig_width_mm=64,
+    fig_height_mm=89,
+    font_size_ticks=9,
+    font_size_labels=11,
+    font_size_legend=10,
+    font_size_annotations=12,
     output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
     n_permutations=10000,
-    scatter_size=50,
 ):
     """
     Generates jitterboxplots for each metric with permutation tests between each ball scent and control.
@@ -184,12 +245,16 @@ def generate_BallScent_permutation_plots(
         control_BallScent (str): Name of the control ball scent. Default is "New".
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
-        figsize (tuple, optional): Size of each figure. Default is (15, 10).
+        fig_width_mm (float): Figure width in mm. Default is 64.
+        fig_height_mm (float): Figure height in mm. Default is 89.
+        font_size_ticks (float): Font size for tick labels. Default is 9.
+        font_size_labels (float): Font size for axis labels. Default is 11.
+        font_size_legend (float): Font size for legend. Default is 10.
+        font_size_annotations (float): Font size for statistical annotations. Default is 12.
         output_dir: Directory to save the plots. Default is "permutation_plots".
         fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
         alpha (float): Significance level after FDR correction. Default is 0.05.
         n_permutations (int): Number of permutations for permutation tests. Default is 10000.
-        scatter_size (int): Size of scatter points. Default is 50.
 
     Returns:
         pd.DataFrame: Statistics table with permutation test results and FDR correction.
@@ -226,6 +291,8 @@ def generate_BallScent_permutation_plots(
         print(f"Generating permutation test jitterboxplot for metric {metric_idx+1}/{len(metrics)}: {metric}")
 
         plot_data = data.dropna(subset=[metric, y])
+        plot_data = plot_data.copy()
+        plot_data[metric] = convert_metric_data(plot_data[metric], metric)
 
         # Get all ball scents except control
         ball_scents = [bs for bs in plot_data[y].unique() if bs != control_BallScent]
@@ -363,13 +430,13 @@ def generate_BallScent_permutation_plots(
         for result in test_results:  # Exclude control from final stats
             all_stats.append(result)
 
-        # Calculate appropriate figure height and width for vertical plot
+        # Calculate figure size based on mm parameters
         n_categories = len(sorted_ball_scents)
-        fig_width_vert = max(10, n_categories * 1.2 + 2)  # Width based on number of categories
-        fig_height_vert = 10  # Fixed height for vertical plots
+        fig_width_inches = mm_to_inches(fig_width_mm)
+        fig_height_inches = mm_to_inches(fig_height_mm)
 
-        # Create the plot with adjusted size (vertical orientation)
-        fig, ax = plt.subplots(figsize=(fig_width_vert, fig_height_vert))
+        # Create the plot with specified size (vertical orientation)
+        fig, ax = plt.subplots(figsize=(fig_width_inches, fig_height_inches))
 
         # Set up colors matching trajectory plots using fixed mapping
         # This ensures the same ball scent always gets the same color
@@ -381,24 +448,18 @@ def generate_BallScent_permutation_plots(
 
         x_positions = range(len(sorted_ball_scents))
 
-        # Draw vertical boxplots with colors matching trajectory plots
+        # Draw vertical boxplots with black outlines and no fill
         bp = ax.boxplot(
             [plot_data_clipped[plot_data_clipped[y] == bs][metric].dropna().values for bs in sorted_ball_scents],
             positions=x_positions,
             widths=0.6,
             patch_artist=True,
             showfliers=False,
-            boxprops=dict(linewidth=1.5),
-            whiskerprops=dict(linewidth=1.5),
-            capprops=dict(linewidth=1.5),
+            boxprops=dict(linewidth=1.5, facecolor="none", edgecolor="black"),
+            whiskerprops=dict(linewidth=1.5, color="black"),
+            capprops=dict(linewidth=1.5, color="black"),
             medianprops=dict(linewidth=2, color="black"),
         )
-
-        # Color the boxes
-        for patch, color in zip(bp["boxes"], colors):
-            patch.set_facecolor(color)
-            patch.set_alpha(0.7)
-            patch.set_edgecolor("black")
 
         # Overlay stripplot for individual points with matching colors
         for i, ball_scent in enumerate(sorted_ball_scents):
@@ -411,8 +472,8 @@ def generate_BallScent_permutation_plots(
             ax.scatter(
                 x_jitter,
                 ball_scent_data.values,
-                s=scatter_size,
-                c=[color_mapping[ball_scent]],
+                s=20,
+                c=color_mapping[ball_scent],
                 alpha=0.5,
                 edgecolors="none",
                 zorder=3,
@@ -428,7 +489,7 @@ def generate_BallScent_permutation_plots(
 
         # Add brackets for significant comparisons
         bracket_height = y_max + 0.05 * y_range
-        bracket_offset = 0.08 * y_range  # Vertical spacing between brackets
+        bracket_offset = 0.12 * y_range  # Vertical spacing between brackets
 
         significant_comparisons = []
         for i, ball_scent in enumerate(sorted_ball_scents):
@@ -458,49 +519,31 @@ def generate_BallScent_permutation_plots(
             mid_x = (x1 + x2) / 2
             ax.text(
                 mid_x,
-                current_height + 0.01 * y_range,
+                current_height + 0.015 * y_range,
                 result["sig_level"],
                 ha="center",
                 va="bottom",
-                fontsize=16,
+                fontsize=font_size_annotations,
                 color="red",
                 fontweight="bold",
             )
 
-            # Add p-value in gray next to stars
-            ax.text(
-                mid_x + 0.3,
-                current_height + 0.01 * y_range,
-                f'p={result["pval_fdr"]:.3g}',
-                ha="left",
-                va="bottom",
-                fontsize=12,
-                color="gray",
-            )
-
         # Formatting
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(sorted_ball_scents, rotation=45, ha="right", fontsize=14)
-        ax.set_ylabel(metric, fontsize=18)
-        ax.set_xlabel("Ball Scent", fontsize=18)
-        ax.set_title(f"Permutation Test: {metric} by Ball Scent", fontsize=20, fontweight="bold")
-        ax.grid(axis="y", alpha=0.3)
+        ax.set_xticklabels(sorted_ball_scents, rotation=45, ha="right", fontsize=font_size_ticks)
+        ax.set_ylabel(format_metric_label(metric), fontsize=font_size_labels)
+        ax.tick_params(axis="both", labelsize=font_size_ticks)
+        ax.grid(axis="y", alpha=0.3, linestyle="--", linewidth=0.5)
 
         # Use tight_layout with padding
         plt.tight_layout()
 
         # Adjust y-axis limits to accommodate brackets (AFTER formatting and tight_layout)
         if significant_comparisons:
-            # Calculate maximum bracket height with all comparisons
-            max_bracket_height = bracket_height + (len(significant_comparisons) - 1) * bracket_offset
-            # Add substantial top margin for brackets and annotations
-            y_top = max_bracket_height + 0.15 * y_range
+            max_bracket_height = bracket_height + len(significant_comparisons) * bracket_offset + 0.08 * y_range
+            ax.set_ylim(bottom=y_min - 0.05 * y_range, top=max_bracket_height)
         else:
-            # No significant comparisons, but still add margin above data
-            y_top = y_max + 0.15 * y_range
-
-        # Set y-axis limits with proper margins (AFTER tight_layout to prevent reset)
-        ax.set_ylim(y_min - 0.1 * y_range, y_top)
+            ax.set_ylim(bottom=y_min - 0.05 * y_range, top=y_max + 0.1 * y_range)
 
         # Save plot
         output_file = output_dir / f"{metric}_BallScent_permutation.pdf"
@@ -1350,6 +1393,10 @@ def main(overwrite=True, test_mode=False):
 
     print(f"✅ BallScent column found")
     print(f"Ball types in dataset: {sorted(dataset['BallScent'].unique())}")
+    print("Sample sizes per BallScent:")
+    ball_scent_counts = dataset["BallScent"].value_counts()
+    for ball_scent, count in ball_scent_counts.items():
+        print(f"  {ball_scent}: {count} samples")
 
     # Define core metrics to analyze (simplified approach)
     print(f"🎯 Using predefined core metrics for simplified analysis...")
@@ -1634,10 +1681,15 @@ def main(overwrite=True, test_mode=False):
                 control_BallScent=control_BallScent,
                 hue="BallScent",
                 palette="Set2",  # Palette not used (we use fixed colors)
+                fig_width_mm=64,
+                fig_height_mm=89,
+                font_size_ticks=9,
+                font_size_labels=11,
+                font_size_legend=10,
+                font_size_annotations=12,
                 output_dir=str(output_dir),
                 alpha=0.05,  # Significance level after FDR correction
                 n_permutations=10000,  # Number of permutations
-                scatter_size=50,  # Match ball types scatter size
             )
 
             end_time = time.time()

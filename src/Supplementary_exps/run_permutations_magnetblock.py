@@ -55,6 +55,10 @@ import time
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
 
 
+def mm_to_inches(mm_value):
+    return mm_value / 25.4
+
+
 def is_distance_metric(metric_name):
     """Check if a metric represents distance (in pixels)"""
     distance_keywords = [
@@ -94,6 +98,106 @@ def get_metric_unit(metric_name):
     elif is_time_metric(metric_name):
         return "(min)"
     return ""
+
+
+def format_p_value(p_value, n_permutations=10000):
+    """Format p-value for display with appropriate precision
+
+    Uses scientific notation for very small p-values, with minimum precision
+    based on permutation test resolution (1/n_permutations).
+
+    Parameters:
+    -----------
+    p_value : float
+        The p-value to format
+    n_permutations : int
+        Number of permutations used (determines precision floor)
+    """
+    if p_value is None or (isinstance(p_value, float) and np.isnan(p_value)):
+        return "n/a"
+
+    # Minimum detectable p-value from permutation test
+    min_p = 1 / n_permutations
+
+    # If p-value equals the minimum from permutation test precision, show it directly
+    if p_value <= min_p:
+        return f"p ≤ 1e-{len(str(int(1/min_p)))-1}"
+
+    # Use scientific notation for very small p-values
+    if p_value < 1e-4:
+        return f"{p_value:.2e}"
+
+    # For larger p-values, use fixed notation with 6 decimal places
+    return f"{p_value:.6f}"
+
+
+def calculate_cohens_d(group1_data, group2_data):
+    """Calculate Cohen's d effect size between two groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+
+    Returns:
+    --------
+    float : Cohen's d effect size
+    """
+    n1 = len(group1_data)
+    n2 = len(group2_data)
+
+    mean1 = np.mean(group1_data)
+    mean2 = np.mean(group2_data)
+
+    var1 = np.var(group1_data, ddof=1)
+    var2 = np.var(group2_data, ddof=1)
+
+    # Pooled standard deviation
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return np.nan
+
+    return (mean2 - mean1) / pooled_std
+
+
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
+    """Calculate bootstrapped confidence interval for difference between groups
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group
+    group2_data : array-like
+        Data from second group
+    n_bootstrap : int
+        Number of bootstrap samples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+
+    Returns:
+    --------
+    tuple : (lower_bound, upper_bound) of the CI
+    """
+    bootstrap_diffs = []
+
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        sample1 = np.random.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = np.random.choice(group2_data, size=len(group2_data), replace=True)
+
+        # Calculate difference in means
+        diff = np.mean(sample2) - np.mean(sample1)
+        bootstrap_diffs.append(diff)
+
+    # Calculate CI
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return lower, upper
 
 
 def get_elegant_metric_name(metric_name):
@@ -183,7 +287,12 @@ def generate_magnet_permutation_plots(
     control_group="y",
     hue=None,
     palette="Set2",
-    figsize=(12, 8),
+    fig_width_mm=64,
+    fig_height_mm=89,
+    font_size_ticks=9,
+    font_size_labels=11,
+    font_size_legend=10,
+    font_size_annotations=12,
     output_dir="permutation_plots",
     fdr_method="fdr_bh",
     alpha=0.05,
@@ -200,7 +309,12 @@ def generate_magnet_permutation_plots(
         control_group (str): Name of the control group. Default is "non-Magnet".
         hue (str, optional): The name of the column for color grouping. Default is None.
         palette: Color palette for the plots (str or dict). Default is "Set2".
-        figsize (tuple, optional): Size of each figure. Default is (12, 8).
+        fig_width_mm (float, optional): Figure width in mm. Default is 64.
+        fig_height_mm (float, optional): Figure height in mm. Default is 89.
+        font_size_ticks (float, optional): Font size for tick labels. Default is 9.
+        font_size_labels (float, optional): Font size for axis labels. Default is 11.
+        font_size_legend (float, optional): Font size for legend. Default is 10.
+        font_size_annotations (float, optional): Font size for statistical annotations. Default is 12.
         output_dir: Directory to save the plots. Default is "mann_whitney_plots".
         fdr_method (str): Method for FDR correction. Default is "fdr_bh" (Benjamini-Hochberg).
         alpha (float): Significance level after FDR correction. Default is 0.05.
@@ -273,7 +387,27 @@ def generate_magnet_permutation_plots(
 
         p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_stat)))
 
-        # Calculate effect size (Cohen's d using converted data)
+        # Calculate effect size (Cohen's d using converted data with means)
+        cohens_d = calculate_cohens_d(control_data.values, test_data.values)
+
+        # Calculate bootstrapped confidence interval for mean difference
+        ci_lower, ci_upper = bootstrap_ci_difference(control_data.values, test_data.values, n_bootstrap=10000, ci=95)
+
+        # Calculate percentage change and CI as percentages (relative to control)
+        control_mean = np.mean(control_data.values)
+        test_mean = np.mean(test_data.values)
+        mean_diff = test_mean - control_mean
+
+        if control_mean != 0:
+            pct_change = (mean_diff / control_mean) * 100
+            pct_ci_lower = (ci_lower / control_mean) * 100
+            pct_ci_upper = (ci_upper / control_mean) * 100
+        else:
+            pct_change = np.nan
+            pct_ci_lower = np.nan
+            pct_ci_upper = np.nan
+
+        # Also compute median-based effect size for reference
         s1 = control_data.std(ddof=1)
         s2 = test_data.std(ddof=1)
         pooled_sd = np.sqrt(((n1 - 1) * s1**2 + (n2 - 1) * s2**2) / max(1, (n1 + n2 - 2)))
@@ -289,26 +423,33 @@ def generate_magnet_permutation_plots(
             "Control_median": control_median,
             "Test_median": test_median,
             "Median_diff": median_diff,
+            "Mean_diff": mean_diff,
+            "Pct_change": pct_change,
             "U_statistic": np.nan,
             "p_value": p_value,
+            "cohens_d": cohens_d,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+            "pct_ci_lower": pct_ci_lower,
+            "pct_ci_upper": pct_ci_upper,
             "effect_size": effect_size,
             "n_permutations": n_permutations,
         }
         all_stats.append(stat_result)
 
-        # Create plot with smaller figure size for publication-quality layout
-        fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
+        # Create plot with publication-quality layout
+        fig, ax = plt.subplots(1, 1, figsize=(mm_to_inches(fig_width_mm), mm_to_inches(fig_height_mm)))
 
-        # Map to intuitive labels with sample sizes: "n" -> "Control", "y" -> "Magnet block"
+        # Map to intuitive labels with sample sizes: "n" -> "No access to ball", "y" -> "Access to immobile ball"
         if control_group == "n" and test_group == "y":
-            control_label = f"Control\n(n={n1})"
-            test_label = f"Magnet block\n(n={n2})"
+            control_label = f"No access\nto ball\n(n={n1})"
+            test_label = f"Access to\nimmobile ball\n(n={n2})"
         else:
             control_label = f"{control_group}\n(n={n1})"
             test_label = f"{test_group}\n(n={n2})"
 
         # Create color palette (matching F1 style)
-        colors = {control_group: "#ff7f0e", test_group: "#1f77b4"}  # Orange for control, blue for test
+        colors = {control_group: "#faa41a", test_group: "#3953A4"}  # Orange for control, blue for test
 
         # Determine significance level
         if p_value < 0.001:
@@ -340,13 +481,11 @@ def generate_magnet_permutation_plots(
             showfliers=False,  # Don't show outliers since we're plotting all points
         )
 
-        # Color the boxes consistently with black outlines
-        bp["boxes"][0].set_facecolor(colors[control_group])
-        bp["boxes"][0].set_alpha(0.7)
+        # Style the boxes with no fill and black outlines
+        bp["boxes"][0].set_facecolor("none")
         bp["boxes"][0].set_edgecolor("black")
         bp["boxes"][0].set_linewidth(1.5)
-        bp["boxes"][1].set_facecolor(colors[test_group])
-        bp["boxes"][1].set_alpha(0.7)
+        bp["boxes"][1].set_facecolor("none")
         bp["boxes"][1].set_edgecolor("black")
         bp["boxes"][1].set_linewidth(1.5)
 
@@ -371,19 +510,21 @@ def generate_magnet_permutation_plots(
         y_min = min(control_data.min(), test_data.min())
         y_range = y_max - y_min
 
-        # Draw significance bar and asterisks (only if significant)
-        if sig_symbol != "ns":
-            bar_height = y_max + 0.08 * y_range
-            ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
-            ax.text(
-                0.5, bar_height + 0.02 * y_range, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial"
-            )
+        # Draw significance bar and asterisks (always show, including ns)
+        bar_height = y_max + 0.08 * y_range
+        ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
+        ax.text(
+            0.5,
+            bar_height + 0.02 * y_range,
+            sig_symbol,
+            ha="center",
+            va="bottom",
+            fontsize=font_size_annotations,
+            fontname="Arial",
+        )
 
         # Always add p-value text in top-left corner (for both significant and non-significant)
-        if p_value < 0.001:
-            p_text = f"p < 0.001"
-        else:
-            p_text = f"p = {p_value:.3f}"
+        p_text = f"p = {format_p_value(p_value, n_permutations)}"
 
         ax.text(
             0.02,
@@ -403,20 +544,24 @@ def generate_magnet_permutation_plots(
         ax.grid(False)
 
         # Add tick marks pointing outward
-        ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+        ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5, labelsize=font_size_ticks)
 
         # Set x-axis labels with intuitive labels and sample sizes
         ax.set_xticks(positions)
-        ax.set_xticklabels([control_label, test_label], fontsize=10, fontname="Arial")
+        ax.set_xticklabels([control_label, test_label], fontsize=font_size_ticks, fontname="Arial")
 
         # Set y-axis label with units
         ylabel = format_metric_label(metric)
-        ax.set_ylabel(ylabel, fontsize=11, fontname="Arial")
+        ax.set_ylabel(ylabel, fontsize=font_size_labels, fontname="Arial")
 
         # Format y-axis tick labels
-        ax.tick_params(axis="y", labelsize=9)
+        ax.tick_params(axis="y", labelsize=font_size_ticks)
         for label in ax.get_yticklabels():
             label.set_fontname("Arial")
+
+        legend = ax.get_legend()
+        if legend is not None:
+            legend.set_fontsize(font_size_legend)
 
         # Remove top and right spines for cleaner look
         ax.spines["top"].set_visible(False)
@@ -444,11 +589,8 @@ def generate_magnet_permutation_plots(
 
     stats_df = pd.DataFrame(all_stats)
 
-    # Apply FDR correction
     if len(stats_df) > 0:
-        _, p_corrected, _, _ = multipletests(stats_df["p_value"], alpha=alpha, method=fdr_method)
-        stats_df["p_corrected"] = p_corrected
-        stats_df["significant"] = p_corrected < alpha
+        stats_df["significant"] = stats_df["p_value"] < alpha
 
         # Sort by significance and median difference
         stats_df = stats_df.sort_values(["significant", "Median_diff"], ascending=[False, False])
@@ -458,10 +600,10 @@ def generate_magnet_permutation_plots(
     stats_df.to_csv(stats_path, index=False)
     print(f"\n✅ Statistics saved to: {stats_path}")
 
-    # Generate text report
-    report_file = output_dir / "magnetblock_statistics_report.txt"
+    # Generate markdown report
+    report_file = output_dir / "magnetblock_statistics_report.md"
     generate_text_report(stats_df, data, report_file)
-    print(f"✅ Text report saved to: {report_file}")
+    print(f"✅ Markdown report saved to: {report_file}")
 
     return stats_df
 
@@ -481,14 +623,12 @@ def generate_text_report(stats_df, data, report_file):
     """
     report_lines = []
 
-    report_lines.append("=" * 80)
-    report_lines.append("MAGNETBLOCK PERMUTATION TEST RESULTS")
-    report_lines.append("=" * 80)
+    report_lines.append("# MAGNETBLOCK PERMUTATION TEST RESULTS")
     report_lines.append("")
 
     # Overall summary
-    report_lines.append("OVERALL SUMMARY")
-    report_lines.append("-" * 80)
+    report_lines.append("## OVERALL SUMMARY")
+    report_lines.append("")
 
     total_comparisons = len(stats_df)
     total_significant = stats_df["significant"].sum()
@@ -503,49 +643,55 @@ def generate_text_report(stats_df, data, report_file):
 
     # Significant results
     if total_significant > 0:
-        report_lines.append("SIGNIFICANT RESULTS (p_corrected < 0.05)")
-        report_lines.append("-" * 80)
+        report_lines.append("## SIGNIFICANT RESULTS (p < 0.05)")
+        report_lines.append("")
+        report_lines.append(
+            "|Metric|Difference|% Change|95% CI Lower|95% CI Upper|95% CI % Lower|95% CI % Upper|Cohen's D|P-value|"
+        )
+        report_lines.append("|---|---|---|---|---|---|---|---|---|")
 
         sig_df = stats_df[stats_df["significant"]].copy()
 
         for _, row in sig_df.iterrows():
-            report_lines.append(f"\n**{row['Metric']}**")
-            report_lines.append(
-                f"  Control ({row['Control']}): median = {row['Control_median']:.3f}, n = {row['Control_n']}"
+            p_text = format_p_value(row["p_value"], n_permutations=row.get("n_permutations", 10000))
+            cohens_d_text = f"{row['cohens_d']:.3f}" if not np.isnan(row.get("cohens_d", np.nan)) else "n/a"
+            ci_lower_text = f"{row['ci_lower']:.3f}" if not np.isnan(row.get("ci_lower", np.nan)) else "n/a"
+            ci_upper_text = f"{row['ci_upper']:.3f}" if not np.isnan(row.get("ci_upper", np.nan)) else "n/a"
+            pct_change_text = f"{row['Pct_change']:.1f}%" if not np.isnan(row.get("Pct_change", np.nan)) else "n/a"
+            pct_ci_lower_text = (
+                f"{row['pct_ci_lower']:.1f}%" if not np.isnan(row.get("pct_ci_lower", np.nan)) else "n/a"
             )
-            report_lines.append(f"  Test ({row['Test']}): median = {row['Test_median']:.3f}, n = {row['Test_n']}")
-            report_lines.append(f"  Median difference: {row['Median_diff']:.3f}")
-            report_lines.append(f"  U statistic: {row['U_statistic']:.1f}")
-            report_lines.append(f"  P-value: {row['p_value']:.6f}")
-            report_lines.append(f"  Corrected p-value: {row['p_corrected']:.6f}")
-            report_lines.append(f"  Effect size: {row['effect_size']:.3f}")
+            pct_ci_upper_text = (
+                f"{row['pct_ci_upper']:.1f}%" if not np.isnan(row.get("pct_ci_upper", np.nan)) else "n/a"
+            )
 
-            if row["p_corrected"] < 0.001:
-                sig_level = "***"
-            elif row["p_corrected"] < 0.01:
-                sig_level = "**"
-            elif row["p_corrected"] < 0.05:
-                sig_level = "*"
-            else:
-                sig_level = ""
+            # Use Mean_diff instead of Median_diff for consistency with CI
+            diff_text = f"{row['Mean_diff']:.3f}" if not np.isnan(row.get("Mean_diff", np.nan)) else "n/a"
 
-            direction = "increased" if row["Median_diff"] > 0 else "decreased"
-            report_lines.append(f"  → {row['Test']} {direction} compared to {row['Control']} {sig_level}")
+            report_lines.append(
+                f"|{row['Metric']}|{diff_text}|{pct_change_text}|{ci_lower_text}|{ci_upper_text}|{pct_ci_lower_text}|{pct_ci_upper_text}|{cohens_d_text}|{p_text}|"
+            )
 
         report_lines.append("")
 
     # Non-significant results
     non_sig_count = total_comparisons - total_significant
     if non_sig_count > 0:
-        report_lines.append(f"\nNON-SIGNIFICANT RESULTS: {non_sig_count} metrics")
-        report_lines.append("-" * 80)
+        report_lines.append(f"## NON-SIGNIFICANT RESULTS ({non_sig_count} metrics)")
+        report_lines.append("")
+        report_lines.append("|Metric|Difference|% Change|Cohen's D|P-value|")
+        report_lines.append("|---|---|---|---|---|")
 
         non_sig_df = stats_df[~stats_df["significant"]].copy()
         for _, row in non_sig_df.iterrows():
-            report_lines.append(f"  {row['Metric']}: p_corrected = {row['p_corrected']:.4f}")
+            p_text = format_p_value(row["p_value"], n_permutations=row.get("n_permutations", 10000))
+            cohens_d_text = f"{row['cohens_d']:.3f}" if not np.isnan(row.get("cohens_d", np.nan)) else "n/a"
+            diff_text = f"{row['Mean_diff']:.3f}" if not np.isnan(row.get("Mean_diff", np.nan)) else "n/a"
+            pct_change_text = f"{row['Pct_change']:.1f}%" if not np.isnan(row.get("Pct_change", np.nan)) else "n/a"
+            report_lines.append(f"|{row['Metric']}|{diff_text}|{pct_change_text}|{cohens_d_text}|{p_text}|")
 
     report_lines.append("")
-    report_lines.append("=" * 80)
+    report_lines.append("-" * 80)
 
     # Write to file
     with open(report_file, "w") as f:
@@ -688,7 +834,18 @@ def should_skip_metric(metric, output_dir, overwrite=True):
 
 
 def analyze_binary_metrics(
-    data, binary_metrics, y="Magnet", output_dir=None, overwrite=True, control_group="non-Magnet"
+    data,
+    binary_metrics,
+    y="Magnet",
+    output_dir=None,
+    overwrite=True,
+    control_group="non-Magnet",
+    fig_width_mm=64,
+    fig_height_mm=89,
+    font_size_ticks=9,
+    font_size_labels=11,
+    font_size_legend=10,
+    font_size_annotations=12,
 ):
     """
     Analyze binary metrics using Fisher's exact test or Chi-square test.
@@ -799,7 +956,19 @@ def analyze_binary_metrics(
         all_stats.append(stat_result)
 
         # Create plot
-        create_binary_metric_plot(data, metric, y, output_dir, control_group)
+        create_binary_metric_plot(
+            data,
+            metric,
+            y,
+            output_dir,
+            control_group,
+            fig_width_mm=fig_width_mm,
+            fig_height_mm=fig_height_mm,
+            font_size_ticks=font_size_ticks,
+            font_size_labels=font_size_labels,
+            font_size_legend=font_size_legend,
+            font_size_annotations=font_size_annotations,
+        )
 
     if not all_stats:
         print("⚠️  No binary statistics computed")
@@ -808,11 +977,8 @@ def analyze_binary_metrics(
     # Convert to DataFrame
     stats_df = pd.DataFrame(all_stats)
 
-    # Apply FDR correction
     if len(stats_df) > 0:
-        _, p_corrected, _, _ = multipletests(stats_df["p_value"], alpha=0.05, method="fdr_bh")
-        stats_df["p_corrected"] = p_corrected
-        stats_df["significant"] = p_corrected < 0.05
+        stats_df["significant"] = stats_df["p_value"] < 0.05
 
     # Save statistics
     stats_path = output_dir / "binary_metrics_statistics.csv"
@@ -822,7 +988,19 @@ def analyze_binary_metrics(
     return stats_df
 
 
-def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
+def create_binary_metric_plot(
+    data,
+    metric,
+    y,
+    output_dir,
+    control_group=None,
+    fig_width_mm=64,
+    fig_height_mm=89,
+    font_size_ticks=9,
+    font_size_labels=11,
+    font_size_legend=10,
+    font_size_annotations=12,
+):
     """
     Create a bar plot for a binary metric with confidence intervals.
 
@@ -895,25 +1073,25 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
         p_value = 1.0
         sig_symbol = "ns"
 
-    # Create plot with smaller figure size matching F1 style
-    fig, ax = plt.subplots(1, 1, figsize=(2.5, 3.5))
+    # Create plot with publication-quality layout
+    fig, ax = plt.subplots(1, 1, figsize=(mm_to_inches(fig_width_mm), mm_to_inches(fig_height_mm)))
 
-    # Map to intuitive labels with sample sizes: "n" -> "Control", "y" -> "Magnet block"
+    # Map to intuitive labels with sample sizes: "n" -> "No access to ball", "y" -> "Access to immobile ball"
     display_labels = []
     for i, group in enumerate(groups):
         n = n_totals[i]
         if group == "n":
-            display_labels.append(f"Control\n(n={n})")
+            display_labels.append(f"No access\nto ball\n(n={n})")
         elif group == "y":
-            display_labels.append(f"Magnet block\n(n={n})")
+            display_labels.append(f"Access to\nimmobile ball\n(n={n})")
         else:
             display_labels.append(f"{group}\n(n={n})")
 
     # Use F1-style colors
-    colors = {control_group: "#ff7f0e"}  # Orange for control
+    colors = {control_group: "#faa41a"}  # Orange for control
     if len(groups) == 2:
         test_group = [g for g in groups if g != control_group][0]
-        colors[test_group] = "#1f77b4"  # Blue for test
+        colors[test_group] = "#3953A4"  # Blue for test
 
     bar_colors = [colors.get(g, "#95a5a6") for g in groups]
 
@@ -939,18 +1117,23 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
             color="white" if prop > 0.3 else "black",
         )
 
-    # Add significance annotation if there are exactly 2 groups and result is significant
-    if len(groups) == 2 and sig_symbol != "ns":
+    # Add significance annotation if there are exactly 2 groups (always show, including ns)
+    if len(groups) == 2:
         y_max = max(proportions) + max([ci[1] for ci in cis])
         bar_height = y_max + 0.05
         ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.5)
-        ax.text(0.5, bar_height + 0.02, sig_symbol, ha="center", va="bottom", fontsize=12, fontname="Arial")
+        ax.text(
+            0.5,
+            bar_height + 0.02,
+            sig_symbol,
+            ha="center",
+            va="bottom",
+            fontsize=font_size_annotations,
+            fontname="Arial",
+        )
 
     # Always add p-value text in top-left corner (for both significant and non-significant)
-    if p_value < 0.001:
-        p_text = f"p < 0.001"
-    else:
-        p_text = f"p = {p_value:.3f}"
+    p_text = f"p = {format_p_value(p_value)}"
 
     ax.text(
         0.02,
@@ -970,17 +1153,21 @@ def create_binary_metric_plot(data, metric, y, output_dir, control_group=None):
     ax.grid(False)
 
     # Add tick marks pointing outward
-    ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5)
+    ax.tick_params(axis="both", which="major", direction="out", length=4, width=1.5, labelsize=font_size_ticks)
 
     ax.set_xticks(x_pos)
-    ax.set_xticklabels(display_labels, fontsize=10, fontname="Arial")
-    ax.set_ylabel(f"Proportion\n{metric}", fontsize=11, fontname="Arial")
+    ax.set_xticklabels(display_labels, fontsize=font_size_ticks, fontname="Arial")
+    ax.set_ylabel(f"Proportion\n{metric}", fontsize=font_size_labels, fontname="Arial")
     ax.set_ylim(0, 1.0 if sig_symbol == "ns" else 1.15)
 
     # Format y-axis tick labels
-    ax.tick_params(axis="y", labelsize=9)
+    ax.tick_params(axis="y", labelsize=font_size_ticks)
     for label in ax.get_yticklabels():
         label.set_fontname("Arial")
+
+    legend = ax.get_legend()
+    if legend is not None:
+        legend.set_fontsize(font_size_legend)
 
     # Remove top and right spines for cleaner look
     ax.spines["top"].set_visible(False)
@@ -1076,13 +1263,25 @@ def main(overwrite=True, test_mode=False, metrics_file=None):
 
     start_time = time.time()
 
+    fig_width_mm = 72
+    fig_height_mm = 104
+    font_size_ticks = 10
+    font_size_labels = 14
+    font_size_legend = 12
+    font_size_annotations = 11
+
     stats_df = generate_magnet_permutation_plots(
         data=dataset,
         metrics=metrics,
         y="Magnet",
         control_group="n",
         output_dir=output_dir,
-        figsize=(12, 8),
+        fig_width_mm=fig_width_mm,
+        fig_height_mm=fig_height_mm,
+        font_size_ticks=font_size_ticks,
+        font_size_labels=font_size_labels,
+        font_size_legend=font_size_legend,
+        font_size_annotations=font_size_annotations,
         alpha=0.05,
     )
 
@@ -1109,6 +1308,12 @@ def main(overwrite=True, test_mode=False, metrics_file=None):
             output_dir=output_dir,
             overwrite=overwrite,
             control_group="non-Magnet",
+            fig_width_mm=fig_width_mm,
+            fig_height_mm=fig_height_mm,
+            font_size_ticks=font_size_ticks,
+            font_size_labels=font_size_labels,
+            font_size_legend=font_size_legend,
+            font_size_annotations=font_size_annotations,
         )
 
     print(f"\n{'='*80}")

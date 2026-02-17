@@ -42,6 +42,7 @@ matplotlib.rcParams["font.family"] = "Arial"
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
@@ -362,6 +363,15 @@ def create_velocity_plot(
     time_window=None,
     ax=None,
     add_title=True,
+    figsize_mm=(245, 120),
+    font_size_labels=14,
+    font_size_title=18,
+    font_size_pval=11,
+    font_size_legend=12,
+    show_pvalues=False,
+    asterisk_scale=1.0,
+    bootstrap_n=1000,
+    ci_level=95,
 ):
     """
     Create a velocity plot comparing Magnet to non-Magnet conditions.
@@ -386,6 +396,24 @@ def create_velocity_plot(
         Results from permutation test
     output_path : Path or str
         Where to save the plot
+    figsize_mm : tuple
+        Figure size in millimeters (width, height)
+    font_size_labels : float
+        Font size for axis labels in points
+    font_size_title : float
+        Font size for title in points
+    font_size_pval : float
+        Font size for p-values and asterisks in points
+    font_size_legend : float
+        Font size for legend in points
+    show_pvalues : bool
+        Whether to show p-values in annotations (default: False)
+    asterisk_scale : float
+        Scaling factor for asterisk font size relative to font_size_pval (default: 1.0)
+    bootstrap_n : int
+        Number of bootstrap samples for confidence intervals (default: 1000)
+    ci_level : float
+        Confidence interval level (default: 95)
     """
     # Filter out NaN velocities
     data = data.dropna(subset=[velocity_col])
@@ -419,26 +447,43 @@ def create_velocity_plot(
 
     # Create figure or use provided axis
     if ax is None:
-        fig, ax = plt.subplots(figsize=(12, 6))
+        # Convert figsize from mm to inches (1 inch = 25.4 mm)
+        figsize_inches = (figsize_mm[0] / 25.4, figsize_mm[1] / 25.4)
+        fig, ax = plt.subplots(figsize=figsize_inches)
 
     # Colors for each group (matching trajectory plot)
-    colors = {control_group: "orange", test_group: "blue"}
-    labels = {control_group: f"Control (n = {n_control})", test_group: f"Magnet block (n = {n_test})"}
+    colors = {control_group: "#faa41a", test_group: "#3953A4"}
+    labels = {
+        control_group: f"No access to ball (n = {n_control})",
+        test_group: f"Access to immobile ball (n = {n_test})",
+    }
+
+    def bootstrap_ci(values, n_samples, ci):
+        values = np.asarray(values)
+        if values.size == 0:
+            return np.nan, np.nan
+        rng = np.random.default_rng()
+        boot_means = rng.choice(values, size=(n_samples, values.size), replace=True).mean(axis=1)
+        alpha = (100 - ci) / 2
+        lower = np.percentile(boot_means, alpha)
+        upper = np.percentile(boot_means, 100 - alpha)
+        return lower, upper
 
     # Process each group
     for group in groups:
         group_data = data[data[group_col] == group]
 
-        # Group by time and calculate mean and SEM
-        grouped = group_data.groupby(time_col)[velocity_col].agg(["mean", "sem"]).reset_index()
+        # Group by time and calculate mean and bootstrap CI
+        grouped = group_data.groupby(time_col)[velocity_col].apply(list).reset_index(name="values")
+        grouped["mean"] = grouped["values"].apply(np.mean)
+        grouped[["ci_lower", "ci_upper"]] = grouped["values"].apply(
+            lambda vals: pd.Series(bootstrap_ci(vals, bootstrap_n, ci_level))
+        )
 
-        time = grouped[time_col].values
+        time = grouped[time_col].values / 60.0
         mean_speed = grouped["mean"].values
-        sem_speed = grouped["sem"].values
-
-        # Calculate confidence bounds
-        lower_bound = mean_speed - sem_speed
-        upper_bound = mean_speed + sem_speed
+        lower_bound = grouped["ci_lower"].values
+        upper_bound = grouped["ci_upper"].values
 
         # Plot the mean line
         ax.plot(time, mean_speed, color=colors[group], linewidth=1, label=labels[group])
@@ -448,12 +493,14 @@ def create_velocity_plot(
 
     # Add vertical line at start point (60 minutes) if in range
     start = 60 * 60
+    start_min = start / 60.0
     if (time_window is None) or (start >= data[time_col].min() and start <= data[time_col].max()):
-        ax.axvline(start, color="red", linestyle="dashed", linewidth=3, label="Start Point", zorder=5)
+        ax.axvline(start_min, color="red", linestyle="dashed", linewidth=3, label="Start Point", zorder=5)
 
     # Set x-axis limits
     if time_window is not None:
-        ax.set_xlim(*time_window)
+        time_window_min = (time_window[0] / 60.0, time_window[1] / 60.0)
+        ax.set_xlim(*time_window_min)
 
     # Get current y-axis limits and extend them to make room for significance annotations
     y_min, y_max = ax.get_ylim()
@@ -474,10 +521,12 @@ def create_velocity_plot(
         for time_bin in range(n_bins):
             bin_start = time_min + time_bin * bin_width
             bin_end = bin_start + bin_width
+            bin_start_min = bin_start / 60.0
+            bin_end_min = bin_end / 60.0
 
             # Draw faint dotted lines for bins
-            ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
-            ax.axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
+            ax.axvline(bin_start_min, color="gray", linestyle="dotted", alpha=0.5)
+            ax.axvline(bin_end_min, color="gray", linestyle="dotted", alpha=0.5)
 
             # Annotate significance levels and p-values for all bins
             p_value = permutation_results["p_values"][time_bin]
@@ -496,42 +545,53 @@ def create_velocity_plot(
                 # Position stars at top of plot
                 y_star = y_max + 0.05 * y_range
                 ax.text(
-                    bin_start + bin_width / 2,
+                    (bin_start_min + bin_end_min) / 2,
                     y_star,
                     significance,
                     ha="center",
                     va="bottom",
-                    fontsize=16,
+                    fontsize=font_size_pval * asterisk_scale,
                     color="red",
                     fontweight="bold",
                 )
 
-            # Add p-value for all bins (significant and non-significant)
-            y_pval = y_max + 0.11 * y_range
-            p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
-            p_color = "red" if time_bin in significant_bins else "gray"
-            ax.text(
-                bin_start + bin_width / 2,
-                y_pval,
-                p_text,
-                ha="center",
-                va="bottom",
-                fontsize=8,
-                color=p_color,
-            )
+            # Add p-value for all bins (only if show_pvalues is True)
+            if show_pvalues:
+                y_pval = y_max + 0.11 * y_range
+                p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
+                p_color = "red" if time_bin in significant_bins else "gray"
+                ax.text(
+                    (bin_start_min + bin_end_min) / 2,
+                    y_pval,
+                    p_text,
+                    ha="center",
+                    va="bottom",
+                    fontsize=font_size_pval,
+                    color=p_color,
+                )
 
     # Formatting
-    ax.set_xlabel("Time", fontsize=12)
-    ax.set_ylabel("Average Speed (mm/s)", fontsize=12)
+    # Custom formatter to display time as MM:SS instead of decimal minutes
+    def format_time_mmss(x, pos):
+        """Convert decimal minutes to MM:SS format"""
+        minutes = int(x)
+        seconds = int((x - minutes) * 60)
+        return f"{minutes}:{seconds:02d}"
+
+    ax.xaxis.set_major_formatter(FuncFormatter(format_time_mmss))
+    ax.set_xlabel("Time (min)", fontsize=font_size_labels)
+    ax.set_ylabel("Average Speed (mm/s)", fontsize=font_size_labels)
     if add_title:
-        ax.set_title("Average Speed Across Flies Grouped by Magnet Positions", fontsize=14)
-    ax.grid(True, alpha=0.3)
+        ax.set_title("Average Speed Across Flies Grouped by Magnet Positions", fontsize=font_size_title)
 
-    # Set legend position to right
-    # ax.legend(loc="right", fontsize=12)
+    # Remove gridlines for cleaner look
+    ax.grid(False)
 
-    # Set legend outside the plot top right
-    ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1), fontsize=12)
+    # Set legend with configured font size (only if showing labels)
+    if time_window is None:
+        # Full plot - show legend
+        ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1), fontsize=font_size_legend)
+    # Window plot - no legend since already in full plot
 
     if output_path is not None and ax is None:
         plt.tight_layout()
@@ -665,23 +725,48 @@ def generate_velocity_plot(
         subject_col="fly",
         output_path=None,
         change_results=None,
-        pre_label="3400-3600s",
-        post_label="3800-4000s",
+        pre_label=None,
+        post_label=None,
+        pre_window=(3400, 3600),
+        post_window=(3800, 4000),
+        figsize_mm=(245, 120),
+        font_size_labels=14,
+        font_size_title=18,
+        font_size_pval=11,
+        font_size_legend=12,
     ):
         """Create two-subplot figure (one per group) showing pre/post medians per fly.
 
         Each fly is a line connecting its pre and post median.
         """
+        if pre_label is None:
+            # Convert seconds to MM:SS format
+            pre_start_min = int(pre_window[0] // 60)
+            pre_start_sec = int(pre_window[0] % 60)
+            pre_end_min = int(pre_window[1] // 60)
+            pre_end_sec = int(pre_window[1] % 60)
+            pre_label = f"{pre_start_min}:{pre_start_sec:02d}-{pre_end_min}:{pre_end_sec:02d} min"
+        if post_label is None:
+            # Convert seconds to MM:SS format
+            post_start_min = int(post_window[0] // 60)
+            post_start_sec = int(post_window[0] % 60)
+            post_end_min = int(post_window[1] // 60)
+            post_end_sec = int(post_window[1] % 60)
+            post_label = f"{post_start_min}:{post_start_sec:02d}-{post_end_min}:{post_end_sec:02d} min"
+
         groups = sorted(merged_df[group_col].unique())
         if len(groups) == 0:
             print("No flies found for pre/post comparison")
             return
 
-        fig, axes = plt.subplots(1, len(groups), figsize=(6 * len(groups), 6), sharey=True)
+        # Convert figsize from mm to inches (1 inch = 25.4 mm)
+        # For multiple subplots, the width applies to each subplot, so divide by number of groups
+        figsize_inches = (figsize_mm[0] / 25.4, figsize_mm[1] / 25.4)
+        fig, axes = plt.subplots(1, len(groups), figsize=figsize_inches, sharey=True)
         if len(groups) == 1:
             axes = [axes]
 
-        colors = {groups[0]: "orange"} if len(groups) == 1 else {g: c for g, c in zip(groups, ["orange", "blue"])}
+        colors = {groups[0]: "#faa41a"} if len(groups) == 1 else {g: c for g, c in zip(groups, ["#faa41a", "#3953A4"])}
 
         for ax, grp in zip(axes, groups):
             dfg = merged_df[merged_df[group_col] == grp]
@@ -701,9 +786,16 @@ def generate_velocity_plot(
             ax.plot(x, [med_pre, med_post], marker=None, color="k", linewidth=2)
 
             ax.set_xticks(x)
-            ax.set_xticklabels([pre_label, post_label])
-            ax.set_title(f"Magnet = {grp} (n={dfg.shape[0]})")
-            ax.set_ylabel("Median Average Speed (mm/s)")
+            ax.set_xticklabels([pre_label, post_label], fontsize=font_size_labels)
+            if grp == "n":
+                title_label = "No access to ball"
+            elif grp == "y":
+                title_label = "Access to immobile ball"
+            else:
+                title_label = str(grp)
+            ax.set_title(f"{title_label} (n={dfg.shape[0]})", fontsize=font_size_title)
+            ax.set_ylabel("Median Average Speed (mm/s)", fontsize=font_size_labels)
+            ax.tick_params(axis="y", labelsize=font_size_labels)
             ax.grid(True, alpha=0.3)
             # (group-level annotation moved to figure-level to avoid duplicate labels)
 
@@ -725,7 +817,10 @@ def generate_velocity_plot(
                 sig = "ns"
 
             fig.suptitle(
-                f"Between-group absolute-change: {sig} (p_adj={p_val_adj:.3f})", y=1.02, fontsize=12, color="red"
+                f"Between-group absolute-change: {sig} (p_adj={p_val_adj:.3f})",
+                y=1.02,
+                fontsize=font_size_pval,
+                color="red",
             )
 
         if output_path is not None:
@@ -927,7 +1022,7 @@ def generate_velocity_plot(
 
     # Generate and save full range plot
     print(f"\nGenerating full range velocity plot...")
-    fig_full, ax_full = plt.subplots(figsize=(12, 6))
+    fig_full, ax_full = plt.subplots(figsize=((245 / 25.4), (120 / 25.4)))
     create_velocity_plot(
         data_with_velocities,
         time_col="time",
@@ -939,7 +1034,14 @@ def generate_velocity_plot(
         output_path=None,
         time_window=None,
         ax=ax_full,
-        add_title=True,
+        add_title=False,
+        figsize_mm=(245, 120),
+        font_size_labels=14,
+        font_size_title=18,
+        font_size_pval=11,
+        font_size_legend=12,
+        show_pvalues=False,
+        asterisk_scale=1.5,
     )
     pdf_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.pdf"
     png_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.png"
@@ -957,7 +1059,39 @@ def generate_velocity_plot(
     print(f"\nGenerating windowed velocity plot...")
     start = 60 * 60
     window = 10 * 60
-    fig_window, ax_window = plt.subplots(figsize=(12, 6))
+    time_window = (start - window, start + window)
+
+    # For the windowed plot, compute separate permutation statistics on the windowed data
+    permutation_results_window = None
+    if compute_stats:
+        print(f"  Computing permutation test for windowed data ({time_window[0]}s - {time_window[1]}s)...")
+        # Subset data to time window
+        data_windowed = data_with_velocities[
+            (data_with_velocities["time"] >= time_window[0]) & (data_with_velocities["time"] <= time_window[1])
+        ].copy()
+
+        # Preprocess windowed data
+        processed_window = preprocess_velocity_data(
+            data_windowed,
+            time_col="time",
+            velocity_col="speed_mm_s_smooth",
+            group_col="Magnet",
+            subject_col="fly",
+            n_bins=n_bins,
+        )
+
+        # Compute permutation test on windowed data
+        permutation_results_window = compute_permutation_test(
+            processed_window,
+            metric="avg_speed_mm_s_smooth",
+            group_col="Magnet",
+            control_group=control_group,
+            n_permutations=n_permutations,
+            alpha=0.05,
+            progress=show_progress,
+        )
+
+    fig_window, ax_window = plt.subplots(figsize=((163.33 / 25.4), (80 / 25.4)))
     create_velocity_plot(
         data_with_velocities,
         time_col="time",
@@ -965,11 +1099,18 @@ def generate_velocity_plot(
         group_col="Magnet",
         subject_col="fly",
         n_bins=n_bins,
-        permutation_results=permutation_results,
+        permutation_results=permutation_results_window,  # Use windowed-specific statistics
         output_path=None,
-        time_window=(start - window, start + window),
+        time_window=time_window,
         ax=ax_window,
-        add_title=True,
+        add_title=False,
+        figsize_mm=(163.33, 80),
+        font_size_labels=9,
+        font_size_title=12,
+        font_size_pval=7,
+        font_size_legend=8,
+        show_pvalues=False,
+        asterisk_scale=1.5,
     )
     pdf_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.pdf"
     png_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.png"
@@ -985,9 +1126,22 @@ def generate_velocity_plot(
 
     # Now plot pre/post per-fly comparisons and annotate with permutation test results
     try:
-        merged_pre_post = compute_pre_post_median(data_with_velocities)
+        pre_window = (3400, 3600)
+        post_window = (3800, 4000)
+        merged_pre_post = compute_pre_post_median(data_with_velocities, pre_window=pre_window, post_window=post_window)
         prepost_out = output_dir / f"velocity_pre_post_by_fly_{test_group}_vs_{control_group}"
-        plot_pre_post_by_group(merged_pre_post, change_results=change_results, output_path=prepost_out)
+        plot_pre_post_by_group(
+            merged_pre_post,
+            change_results=change_results,
+            output_path=prepost_out,
+            pre_window=pre_window,
+            post_window=post_window,
+            figsize_mm=(180, 95),
+            font_size_labels=14,
+            font_size_title=18,
+            font_size_pval=11,
+            font_size_legend=12,
+        )
     except Exception as e:
         print(f"Warning: failed to compute/plot pre/post medians after change comparison: {e}")
 

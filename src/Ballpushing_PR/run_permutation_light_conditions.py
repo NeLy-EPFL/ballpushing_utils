@@ -11,7 +11,7 @@ This script generates comprehensive permutation-test visualizations with:
 - Proper spacing between boxplots
 
 Usage:
-    python run_mannwhitney_light_conditions.py [--overwrite]
+    python run_permutation_light_conditions.py [--overwrite]
 
 Arguments:
     --overwrite: If specified, overwrite existing plots. If not specified, skip metrics that already have plots.
@@ -74,6 +74,16 @@ def generate_light_condition_permutation_plots(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    time_metrics = {
+        "max_event_time",
+        "final_event_time",
+        "first_significant_event_time",
+        "first_major_event_time",
+        "chamber_exit_time",
+        "chamber_time",
+        "time_chamber_beginning",
+    }
 
     # Match font and PDF settings to magnetblock script for consistency
     matplotlib.rcParams["pdf.fonttype"] = 42
@@ -315,9 +325,17 @@ def generate_light_condition_permutation_plots(
         # For light conditions (few categories), use minimum width but allow expansion
         fig_width = max(8, n_categories * 1.0 + 4)  # +4 for margins and title
         fig_height = figsize[1]  # Use requested height (matches magnetblock style)
+        fig_width = 100 / 25.4
+        fig_height = 125 / 25.4
 
         # Create the plot with adjusted size (vertical orientation)
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+        # Define font sizes for consistency
+        font_size_ticks = 10
+        font_size_labels = 14
+        font_size_legend = 12
+        font_size_annotations = 16
 
         # No background shading for significance (clean styling per request)
 
@@ -354,9 +372,27 @@ def generate_light_condition_permutation_plots(
             x_jitter = np.random.normal(idx, 0.08, size=len(vals))
             # Light OFF: no fill, black outline; Light ON: filled black
             if lc == "off":
-                ax.scatter(x_jitter, vals, s=40, facecolors="none", edgecolors="black", linewidths=0.8, zorder=3)
+                ax.scatter(
+                    x_jitter,
+                    vals,
+                    s=40,
+                    facecolors="none",
+                    edgecolors="black",
+                    linewidths=0.8,
+                    alpha=0.6,
+                    zorder=3,
+                )
             else:
-                ax.scatter(x_jitter, vals, s=40, facecolors="black", edgecolors="black", linewidths=0.5, zorder=3)
+                ax.scatter(
+                    x_jitter,
+                    vals,
+                    s=40,
+                    facecolors="black",
+                    edgecolors="black",
+                    linewidths=0.5,
+                    alpha=0.6,
+                    zorder=3,
+                )
 
         # Explicitly set x-tick labels to show ON/OFF and sample sizes (n)
         counts = [len(plot_data[plot_data[y] == lc]) for lc in sorted_light_conditions]
@@ -408,53 +444,23 @@ def generate_light_condition_permutation_plots(
                     y_pos,
                     ann_text,
                     color="red",
-                    fontsize=24,
+                    fontsize=font_size_annotations,
                     fontweight="bold",
                     va="bottom",
                     ha="center",
                     clip_on=False,
                 )
 
-        # Also add p-value summary in the top-left similar to magnetblock plots
-        if test_results:
-            p_texts = [
-                f"{r['LightCondition']}: p={r.get('pval_corrected', r.get('pval_raw', 1.0)):.3f}" for r in test_results
-            ]
-            p_text = ", ".join(p_texts)
-            ax.text(
-                0.02,
-                0.98,
-                p_text,
-                transform=ax.transAxes,
-                fontsize=10,
-                verticalalignment="top",
-                horizontalalignment="left",
-                bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=1),
-            )
+        display_metric = metric.replace("_", " ")
+        if metric in time_metrics:
+            display_metric = f"{display_metric} (min)"
 
-        # Formatting with increased font sizes
-        plt.xticks(fontsize=18)
-        plt.yticks(fontsize=18)
-        plt.xlabel(metric, fontsize=22)
-        plt.ylabel("Light Condition", fontsize=22)
-        plt.title(f"Permutation test: {metric} by Light Condition", fontsize=24)
+        # Formatting
+        plt.xticks(fontsize=font_size_ticks)
+        plt.yticks(fontsize=font_size_ticks)
+        plt.xlabel("Light Condition", fontsize=font_size_labels)
+        plt.ylabel(display_metric, fontsize=font_size_labels)
         ax.grid(axis="x", alpha=0.3)
-
-        # Create custom legend with line styles
-        from matplotlib.lines import Line2D
-
-        legend_elements = [
-            Line2D([0], [0], color="black", linewidth=2.5, linestyle="solid", label="Light ON (Control)"),
-            Line2D([0], [0], color="black", linewidth=2.5, linestyle="dashed", label="Light OFF (Test)"),
-        ]
-
-        ax.legend(
-            legend_elements,
-            [str(elem.get_label()) for elem in legend_elements],
-            fontsize=16,
-            bbox_to_anchor=(1.05, 1),
-            loc="upper left",
-        )
 
         # Use tight_layout with padding to accommodate external legend
         plt.tight_layout()
@@ -904,9 +910,7 @@ def main(overwrite=True, test_mode=False, metrics_file="src/PCA/metrics_lists/fi
         print("🧪 TEST MODE: Only processing first 3 metrics for debugging")
 
     # Define output directories
-    base_output_dir = Path(
-        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/Summary_metrics/260104_Light_Conditions_Mannwhitney"
-    )
+    base_output_dir = Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/Summary_metrics/Permutation")
 
     # Ensure the base output directory exists
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -914,7 +918,7 @@ def main(overwrite=True, test_mode=False, metrics_file="src/PCA/metrics_lists/fi
 
     # Clean up any potential old outputs to avoid confusion
     print("Ensuring clean output directory structure...")
-    condition_subdir = "mannwhitney_light_conditions"
+    condition_subdir = "permutation_light_conditions"
     condition_dir = base_output_dir / condition_subdir
     condition_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Created/verified: {condition_dir}")
@@ -925,6 +929,24 @@ def main(overwrite=True, test_mode=False, metrics_file="src/PCA/metrics_lists/fi
     # Load the dataset
     print("Loading exploration dataset...")
     dataset = load_and_clean_exploration_dataset(test_mode=test_mode, test_sample_size=200)
+
+    # Convert time-related metrics from seconds to minutes
+    time_metrics = [
+        "max_event_time",
+        "final_event_time",
+        "first_significant_event_time",
+        "first_major_event_time",
+        "chamber_exit_time",
+        "chamber_time",
+        "time_chamber_beginning",
+    ]
+    print("\nConverting time metrics from seconds to minutes...")
+    for metric in time_metrics:
+        if metric in dataset.columns:
+            dataset[metric] = dataset[metric] / 60.0
+            print(f"  Converted {metric} to minutes")
+        else:
+            print(f"  Skipping {metric} (not in dataset)")
 
     # Get only the data where FeedingState is "starved_noWater"
 
@@ -1176,7 +1198,7 @@ def main(overwrite=True, test_mode=False, metrics_file="src/PCA/metrics_lists/fi
     print(f"Light conditions in dataset: {sorted(filtered_data['Light'].unique())}")
     print(f"Using simplified color palette for visualization")
 
-    # 1. Process continuous metrics with Mann-Whitney U tests
+    # 1. Process continuous metrics with permutation tests
     if continuous_metrics:
         print(f"\n--- CONTINUOUS METRICS ANALYSIS (permutation tests) ---")
         # Filter to only continuous metrics + required columns
@@ -1263,8 +1285,8 @@ if __name__ == "__main__":
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run_mannwhitney_light_conditions.py                    # Overwrite existing plots
-  python run_mannwhitney_light_conditions.py --no-overwrite     # Skip existing plots
+  python run_permutation_light_conditions.py                    # Overwrite existing plots
+  python run_permutation_light_conditions.py --no-overwrite     # Skip existing plots
         """,
     )
     parser.add_argument(

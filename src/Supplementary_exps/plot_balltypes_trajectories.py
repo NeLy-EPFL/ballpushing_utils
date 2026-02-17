@@ -88,8 +88,13 @@ def load_dark_olfaction_data(coordinates_path, test_mode=False):
     print(f"  Total flies: {df['fly'].nunique()}")
     print(f"  Time range: {df['time'].min():.2f}s to {df['time'].max():.2f}s")
 
+    # Rename ball types for clarity
+    print(f"\nRenaming ball types...")
+    balltype_mapping = {"ctrl": "control", "sand": "sandpaper"}
+    df["BallType"] = df["BallType"].map(balltype_mapping).fillna(df["BallType"])
+
     # Downsample to 1 datapoint per second per fly (align to integer seconds)
-    print(f"\nDownsampling data to 1 datapoint per second per fly...")
+    print(f"Downsampling data to 1 datapoint per second per fly...")
     df = df.sort_values(["fly", "time"]).copy()
     df["time_rounded"] = df["time"].round(0).astype(int)
 
@@ -103,6 +108,10 @@ def load_dark_olfaction_data(coordinates_path, test_mode=False):
 
     # Rename time_rounded back to time for consistency
     downsampled = downsampled.rename(columns={"time_rounded": "time"})
+
+    # Convert time to minutes
+    print(f"Converting time to minutes...")
+    downsampled["time"] = downsampled["time"] / 60.0
 
     print(f"✅ Downsampled shape: {downsampled.shape}")
     for balltype in sorted(downsampled["BallType"].unique()):
@@ -371,55 +380,89 @@ def create_trajectory_plot(
         control_condition: color_mapping.get(control_condition, "#7f7f7f"),
         balltype_condition: color_mapping.get(balltype_condition, "#1f77b4"),
     }
-    line_styles = {control_condition: "solid", balltype_condition: "dashed"}
-
-    # Error band transparency
-    error_alphas = {control_condition: 0.25, balltype_condition: 0.15}
 
     # Get sample sizes for labels
     n_control = subset_data[subset_data[group_col] == control_condition][subject_col].nunique()
     n_test = subset_data[subset_data[group_col] == balltype_condition][subject_col].nunique()
 
     labels = {
-        control_condition: f"{control_condition} (n={n_control})",
-        balltype_condition: f"{balltype_condition} (n={n_test})",
+        control_condition: control_condition,
+        balltype_condition: balltype_condition,
     }
 
     # Compute mean trajectories to find baseline for y-axis shift
     all_means = []
     for balltype in [control_condition, balltype_condition]:
         balltype_data = subset_data[subset_data[group_col] == balltype]
-        time_grouped = balltype_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
+        time_grouped = balltype_data.groupby(time_col)[value_col_plot].agg(["mean"]).reset_index()
         all_means.extend(time_grouped["mean"].values)
 
     # Find the minimum mean value to use as y-axis baseline
     y_baseline = min(all_means)
 
-    # Plot mean trajectories with error bands
+    # Plot mean trajectories with bootstrapped confidence intervals
     for balltype in [control_condition, balltype_condition]:
         balltype_data = subset_data[subset_data[group_col] == balltype]
 
-        # Group by time to compute mean and SEM
-        time_grouped = balltype_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
+        # First, aggregate per fly within each time bin to get one value per fly per time
+        fly_aggregated = balltype_data.groupby([subject_col, time_col])[value_col_plot].mean().reset_index()
 
-        # Plot mean line with appropriate line style
+        # Get unique time points
+        time_points = sorted(fly_aggregated[time_col].unique())
+
+        means = []
+        ci_lower = []
+        ci_upper = []
+
+        for time_point in time_points:
+            # Get fly-level values for this time point
+            fly_values = fly_aggregated[fly_aggregated[time_col] == time_point][value_col_plot].values
+
+            if len(fly_values) > 0:
+                # Calculate mean across flies
+                mean_val = np.mean(fly_values)
+                means.append(mean_val)
+
+                # Bootstrap confidence intervals by resampling flies
+                if len(fly_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        # Resample flies with replacement
+                        bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_flies))
+
+                    # 95% CI: 2.5th and 97.5th percentiles
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    # Single fly: no CI
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_grouped = pd.DataFrame({time_col: time_points, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper})
+
+        # Plot mean line with solid line for both
         ax.plot(
             time_grouped[time_col],
             time_grouped["mean"] - y_baseline,
             color=colors[balltype],
-            linestyle=line_styles[balltype],
+            linestyle="solid",
             linewidth=2.5,
             label=labels[balltype],
             zorder=10,
         )
 
-        # Plot error band (SEM)
+        # Plot bootstrapped 95% CI band
         ax.fill_between(
             time_grouped[time_col],
-            time_grouped["mean"] - y_baseline - time_grouped["sem"],
-            time_grouped["mean"] - y_baseline + time_grouped["sem"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
             color=colors[balltype],
-            alpha=error_alphas[balltype],
+            alpha=0.2,
             zorder=5,
         )
 
@@ -444,13 +487,12 @@ def create_trajectory_plot(
     else:
         ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
 
-    # Annotate significance levels
+    # Annotate significance levels (only red asterisks, no p-values)
     if permutation_results is not None and balltype_condition in permutation_results:
         perm_result = permutation_results[balltype_condition]
 
         # Position for annotations (slightly above the top of data)
         y_annotation_stars = y_max_shifted + 0.02 * y_range
-        y_annotation_pval = y_max_shifted + 0.05 * y_range
 
         for idx in perm_result["significant_timepoints"]:
             bin_center = (bin_edges[idx] + bin_edges[idx + 1]) / 2
@@ -466,7 +508,7 @@ def create_trajectory_plot(
             else:
                 continue
 
-            # Add significance stars
+            # Add significance stars only
             ax.text(
                 bin_center,
                 y_annotation_stars,
@@ -478,24 +520,10 @@ def create_trajectory_plot(
                 color="red",
             )
 
-            # Add p-value below the stars
-            ax.text(
-                bin_center,
-                y_annotation_pval,
-                f"p={p_val:.3f}",
-                ha="center",
-                va="center",
-                fontsize=8,
-                color="darkgray",
-            )
-
     # Formatting
-    ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (mm)", fontsize=14)
-    ax.set_title(
-        f"Ball Trajectory: {balltype_condition} vs {control_condition}\n(FDR-corrected permutation test)",
-        fontsize=16,
-    )
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    ax.tick_params(axis="both", labelsize=10)
     ax.legend(fontsize=12, loc="upper left")
     ax.grid(False)
 
@@ -767,7 +795,7 @@ Examples:
         help="Path to dark olfaction coordinates feather file",
     )
 
-    parser.add_argument("--control", type=str, default="ctrl", help="Control ball type name (default: ctrl)")
+    parser.add_argument("--control", type=str, default="control", help="Control ball type name (default: control)")
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
 

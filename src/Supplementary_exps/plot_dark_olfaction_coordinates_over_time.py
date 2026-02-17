@@ -63,7 +63,6 @@ def create_line_plot(data, x_col, y_col, hue_col, title, ax, color_mapping=None,
 
     if filtered_data.empty:
         ax.text(0.5, 0.5, "No data available", ha="center", va="center", transform=ax.transAxes)
-        ax.set_title(title, fontsize=14, fontweight="bold")
         return ax
 
     # Create color mapping if not provided
@@ -146,10 +145,10 @@ def create_line_plot(data, x_col, y_col, hue_col, title, ax, color_mapping=None,
     # ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0%)")
 
     # Set labels and title
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.set_xlabel("Adjusted Time (%)", fontsize=12)
-    ax.set_ylabel("Distance to Ball (pixels)", fontsize=12)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax.set_xlabel("Adjusted Time (%)", fontsize=14)
+    ax.set_ylabel("Distance to Ball (pixels)", fontsize=14)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=12)
+    ax.tick_params(axis="both", labelsize=10)
     ax.grid(True, alpha=0.3)
 
     # Add sample size annotation
@@ -256,7 +255,6 @@ def create_line_plot_trimmed_time(
 
     if data.empty:
         ax.text(0.5, 0.5, "No data available", ha="center", va="center", transform=ax.transAxes)
-        ax.set_title(title, fontsize=14, fontweight="bold")
         return ax
 
     # Create time bins for averaging
@@ -301,17 +299,42 @@ def create_line_plot_trimmed_time(
         if hue_data.empty:
             continue
 
-        # Calculate statistics for each time bin
-        time_stats = (
-            hue_data.groupby("time_bin_center")[f"{y_col}_median"].agg(["mean", "std", "count", "sem"]).reset_index()
-        )
+        # Calculate statistics for each time bin using bootstrap for 95% CI
+        time_bin_centers = sorted(hue_data["time_bin_center"].unique())
 
-        # Calculate 95% confidence intervals
-        confidence_level = 0.95
-        alpha = 1 - confidence_level
-        time_stats["ci"] = time_stats.apply(
-            lambda row: scipy_stats.t.ppf(1 - alpha / 2, row["count"] - 1) * row["sem"] if row["count"] > 1 else 0,
-            axis=1,
+        means = []
+        ci_lower = []
+        ci_upper = []
+
+        for time_bin in time_bin_centers:
+            bin_values = hue_data[hue_data["time_bin_center"] == time_bin][f"{y_col}_median"].values
+
+            if len(bin_values) > 0:
+                # Calculate mean
+                mean_val = np.mean(bin_values)
+                means.append(mean_val)
+
+                # Bootstrap confidence intervals (1000 iterations)
+                if len(bin_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        bootstrap_sample = np.random.choice(bin_values, size=len(bin_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_sample))
+
+                    # 95% CI: 2.5th and 97.5th percentiles
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    # Single data point: no CI
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_stats = pd.DataFrame(
+            {"time_bin_center": time_bin_centers, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper}
         )
 
         # Plot settings
@@ -330,11 +353,11 @@ def create_line_plot_trimmed_time(
             alpha=0.8,
         )
 
-        # Add confidence intervals
+        # Add bootstrapped 95% confidence intervals
         ax.fill_between(
             time_stats["time_bin_center"],
-            time_stats["mean"] - time_stats["ci"],
-            time_stats["mean"] + time_stats["ci"],
+            time_stats["ci_lower"],
+            time_stats["ci_upper"],
             color=color,
             alpha=0.2,
         )
@@ -342,11 +365,11 @@ def create_line_plot_trimmed_time(
     # Add vertical line at time 0
     # ax.axvline(x=0, color="black", linestyle=":", alpha=0.7, label="Exit time (0s)")
 
-    ax.set_xlabel(x_label, fontsize=12)
-    ax.set_ylabel(y_label, fontsize=12)
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel(y_label, fontsize=14)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=12)
     ax.grid(True, alpha=0.3)
+    ax.tick_params(axis="both", labelsize=10)
 
     # Add sample size annotation
     n_flies = len(data["fly"].unique()) if "fly" in data.columns else len(data)
@@ -576,7 +599,6 @@ def create_trajectory_plot_with_permutation(
 
     if data.empty:
         ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-        ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14)
         return
 
     # Get groups
@@ -584,7 +606,6 @@ def create_trajectory_plot_with_permutation(
 
     if len(groups) != 2:
         ax.text(0.5, 0.5, f"Expected 2 groups, found {len(groups)}", ha="center", va="center", transform=ax.transAxes)
-        ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14)
         return
 
     # Determine control and test groups
@@ -624,36 +645,74 @@ def create_trajectory_plot_with_permutation(
     for group in groups:
         group_data = data_copy[data_copy[group_col] == group]
 
-        # Group by time bin centers to compute mean and SEM
-        # Same approach as light trajectories script
-        time_grouped = group_data.groupby("time_bin_center")[value_col_plot].agg(["mean", "sem"]).reset_index()
+        # First, aggregate per fly within each time bin to get one value per fly per bin
+        fly_binned = group_data.groupby([subject_col, "time_bin_center"])[value_col_plot].mean().reset_index()
+
+        # Bootstrap approach: resample flies with replacement to compute confidence intervals
+        time_bin_centers = sorted(fly_binned["time_bin_center"].unique())
+
+        means = []
+        ci_lower = []
+        ci_upper = []
+
+        for time_bin in time_bin_centers:
+            # Get one value per fly for this time bin
+            fly_values = fly_binned[fly_binned["time_bin_center"] == time_bin][value_col_plot].values
+
+            if len(fly_values) > 0:
+                # Calculate mean across flies
+                mean_val = np.mean(fly_values)
+                means.append(mean_val)
+
+                # Bootstrap confidence intervals by resampling flies (1000 iterations)
+                if len(fly_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        # Resample flies with replacement
+                        bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_flies))
+
+                    # 95% CI: 2.5th and 97.5th percentiles
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    # Single fly: no CI
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_grouped = pd.DataFrame(
+            {"time_bin_center": time_bin_centers, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper}
+        )
 
         # Determine line style and color (IR8a purple, Empty grey)
-        linestyle = "dashed" if group == test_group else "solid"
+        # Use solid lines for both genotypes (color distinguishes them)
         if color_mapping is not None:
             color = color_mapping.get(group, "gray")
         else:
             color = "#9467bd" if group == test_group else "#7f7f7f"
-        alpha_band = 0.15 if group == test_group else 0.25
 
         # Plot mean trajectory - shift by baseline
         ax.plot(
             time_grouped["time_bin_center"],
             time_grouped["mean"] - y_baseline,
-            linestyle=linestyle,
+            linestyle="solid",
             color=color,
             linewidth=2.5,
-            label=f"{group} (n={n_control if group == control_group else n_test})",
+            label=group,
             zorder=10,
         )
 
-        # Error band (SEM)
+        # Error band (bootstrapped 95% CI)
         ax.fill_between(
             time_grouped["time_bin_center"],
-            time_grouped["mean"] - y_baseline - time_grouped["sem"],
-            time_grouped["mean"] - y_baseline + time_grouped["sem"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
             color=color,
-            alpha=alpha_band,
+            alpha=0.2,
             zorder=5,
         )
 
@@ -677,7 +736,6 @@ def create_trajectory_plot_with_permutation(
     if permutation_results is not None and bin_edges is not None:
         # Position for annotations (slightly above the top of data)
         y_annotation_stars = y_max_shifted + 0.02 * y_range
-        y_annotation_pval = y_max_shifted + 0.05 * y_range
 
         for idx in permutation_results["significant_timepoints"]:
             if idx >= len(bin_edges) - 1:
@@ -699,7 +757,7 @@ def create_trajectory_plot_with_permutation(
                 significance = ""
 
             if significance:
-                # Add significance stars
+                # Add significance stars only (remove p-value annotation)
                 ax.text(
                     x_pos,
                     y_annotation_stars,
@@ -712,27 +770,11 @@ def create_trajectory_plot_with_permutation(
                     zorder=15,
                 )
 
-                # Add p-value below the stars
-                ax.text(
-                    x_pos,
-                    y_annotation_pval,
-                    f"p={p_value:.3f}",
-                    ha="center",
-                    va="center",
-                    fontsize=8,
-                    color="darkgray",
-                    zorder=15,
-                )
-
     # Formatting
-    ax.set_xlabel(
-        "Adjusted Time (%)" if "%" in str(data[time_col].max()) or data[time_col].max() > 100 else "Adjusted Time (s)",
-        fontsize=12,
-    )
-    ax.set_ylabel("Relative ball distance (mm)", fontsize=12)
-    ax.set_title(f"Light: {light_val}", fontweight="bold", fontsize=14, pad=10)
-    # Legend outside plot window, top right
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=10)
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    # No legend - will be added separately only to the first subplot
+    ax.tick_params(axis="both", labelsize=10)
     # Remove background grid - only keep the time bin vertical lines
     ax.grid(False)
 
@@ -847,17 +889,17 @@ def main():
     print(f"\nDataset shape after downsampling: {df_aligned.shape}")
     print(f"Time range after downsampling: {df_aligned[time_col].min():.2f}s to {df_aligned[time_col].max():.2f}s")
 
+    # Convert time from seconds to minutes
+    df_aligned[time_col] = df_aligned[time_col] / 60.0
+    print(
+        f"Time range after conversion to minutes: {df_aligned[time_col].min():.2f}min to {df_aligned[time_col].max():.2f}min"
+    )
+
     # Define color mappings for consistent styling
     genotype_colors = {"TNTxEmptyGal4": "#7f7f7f", "TNTxIR8a": "#9467bd"}
     balltype_colors = {"ctrl": "green", "sand": "brown"}
-    # =============================================================================
-    # IMPLEMENTATION 1: TRIMMED TIME APPROACH (ACTUAL SECONDS)
-    # =============================================================================
-    print(f"\n{'='*60}")
-    print("IMPLEMENTATION 1: TRIMMED TIME APPROACH")
-    print(f"{'='*60}")
 
-    # Use downsampled data
+    # Use downsampled data for trimmed time approach
     original_df_clean = df_aligned.copy()
 
     print(f"Original data shape for trimmed approach: {original_df_clean.shape}")
@@ -870,126 +912,6 @@ def main():
 
     # Trim data to shared time
     df_trimmed = trim_data_to_shared_time(original_df_clean, max_shared_time, time_col)
-
-    # Add combined group column - convert categorical columns to strings first
-    df_trimmed["Combined_Group"] = (
-        df_trimmed[light_col].astype(str)
-        + "_"
-        + df_trimmed[genotype_col].astype(str)
-        + "_"
-        + df_trimmed[balltype_col].astype(str)
-    )
-
-    # Create color mapping for combined groups
-    combined_colors = {}
-    for group in df_trimmed["Combined_Group"].unique():
-        _, genotype, _ = group.split("_", 2)
-        combined_colors[group] = genotype_colors.get(genotype, "gray")
-
-    # Create linestyle mapping based on balltype
-    combined_linestyles = {}
-    for group in df_trimmed["Combined_Group"].unique():
-        _, _, balltype = group.split("_", 2)
-        combined_linestyles[group] = ":" if balltype == "sand" else "-"
-
-    # Plot 4: Ball distance by Genotype (trimmed time) - SIDE-BY-SIDE BY LIGHT
-    # Get unique light conditions
-    light_conditions_trimmed = sorted(df_trimmed[light_col].unique())
-
-    # Create side-by-side subplots for light conditions
-    fig4, axes4 = plt.subplots(1, len(light_conditions_trimmed), figsize=(12 * len(light_conditions_trimmed) / 2, 6))
-    if len(light_conditions_trimmed) == 1:
-        axes4 = [axes4]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions_trimmed):
-        # Filter data for this light condition
-        df_light = df_trimmed[df_trimmed[light_col] == light_condition].copy()
-
-        create_line_plot_trimmed_time(
-            data=df_light,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col=genotype_col,
-            title=f"Light: {light_condition}",
-            ax=axes4[idx],
-            color_mapping=genotype_colors,
-            x_label="Adjusted Time (seconds)",
-            time_bins=0.1,
-        )
-
-    # Add overall title
-    fig4.suptitle("", fontsize=16, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    output_path_trimmed_genotype = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_genotype.png"
-    plt.savefig(output_path_trimmed_genotype, dpi=300, bbox_inches="tight")
-    print(f"Trimmed time plots (Genotype, side-by-side) saved to: {output_path_trimmed_genotype}")
-
-    # Plot 5: Ball distance by BallType (trimmed time) - SIDE-BY-SIDE BY LIGHT
-    # Create side-by-side subplots for light conditions
-    fig5, axes5 = plt.subplots(1, len(light_conditions_trimmed), figsize=(12 * len(light_conditions_trimmed) / 2, 6))
-    if len(light_conditions_trimmed) == 1:
-        axes5 = [axes5]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions_trimmed):
-        # Filter data for this light condition
-        df_light = df_trimmed[df_trimmed[light_col] == light_condition].copy()
-
-        create_line_plot_trimmed_time(
-            data=df_light,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col=balltype_col,
-            title=f"Light: {light_condition}",
-            ax=axes5[idx],
-            color_mapping=balltype_colors,
-            x_label="Adjusted Time (seconds)",
-            time_bins=0.1,
-        )
-
-    # Add overall title
-    fig5.suptitle("", fontsize=16, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    output_path_trimmed_balltype = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_balltype.png"
-    plt.savefig(output_path_trimmed_balltype, dpi=300, bbox_inches="tight")
-    print(f"Trimmed time plots (BallType, side-by-side) saved to: {output_path_trimmed_balltype}")
-    plt.savefig(output_path_trimmed_balltype, dpi=300, bbox_inches="tight")
-    print(f"Trimmed time plots (BallType) saved to: {output_path_trimmed_balltype}")
-
-    # Plot 6: Ball distance by combined grouping (trimmed time) - SIDE-BY-SIDE BY LIGHT
-    # Get unique light conditions
-    light_conditions_trimmed = sorted(df_trimmed[light_col].unique())
-
-    # Create side-by-side subplots for light conditions
-    fig6, axes6 = plt.subplots(1, len(light_conditions_trimmed), figsize=(14 * len(light_conditions_trimmed) / 2, 6))
-    if len(light_conditions_trimmed) == 1:
-        axes6 = [axes6]  # Make it iterable if only one subplot
-
-    for idx, light_condition in enumerate(light_conditions_trimmed):
-        # Filter data for this light condition
-        df_light_trimmed = df_trimmed[df_trimmed[light_col] == light_condition].copy()
-
-        create_line_plot_trimmed_time(
-            data=df_light_trimmed,
-            x_col=time_col,
-            y_col=ball_distance_col,
-            hue_col="Combined_Group",
-            title=f"Light: {light_condition}",
-            ax=axes6[idx],
-            color_mapping=combined_colors,
-            linestyle_mapping=combined_linestyles,
-            x_label="Adjusted Time (seconds)",
-            time_bins=0.1,
-        )
-
-    # Add overall title
-    fig6.suptitle("", fontsize=16, fontweight="bold", y=1.02)
-
-    plt.tight_layout()
-    output_path_trimmed_combined = Path(__file__).parent / "dark_olfaction_coordinates_trimmed_time_combined.png"
-    plt.savefig(output_path_trimmed_combined, dpi=300, bbox_inches="tight")
-    print(f"Trimmed time plots (Combined, side-by-side) saved to: {output_path_trimmed_combined}")
 
     # =============================================================================
     # IMPLEMENTATION 2: POOLED BALLTYPES WITH PERMUTATION TESTS (GENOTYPE EFFECT)
@@ -1008,7 +930,9 @@ def main():
     n_permutation_bins = 12
     n_permutations = 10000
 
-    light_conditions_pooled = sorted(pooled_data_trimmed[light_col].unique())
+    # Sort light conditions with 'on' first, then 'off'
+    all_light_conditions = sorted(pooled_data_trimmed[light_col].unique())
+    light_conditions_pooled = sorted(all_light_conditions, key=lambda x: (x != "on", x))
 
     # Create side-by-side subplots
     fig7, axes7 = plt.subplots(1, len(light_conditions_pooled), figsize=(10 * len(light_conditions_pooled), 6))
@@ -1023,6 +947,11 @@ def main():
 
         print(f"  Data shape: {light_data.shape}")
         print(f"  Genotypes: {sorted(light_data[genotype_col].unique())}")
+
+        # Print sample sizes for each genotype
+        for genotype in sorted(light_data[genotype_col].unique()):
+            n_flies = light_data[light_data[genotype_col] == genotype]["fly"].nunique()
+            print(f"    {genotype}: n={n_flies} flies")
 
         # Preprocess for permutation test
         print(f"  Preprocessing data into {n_permutation_bins} time bins...")
@@ -1062,6 +991,41 @@ def main():
             bin_edges=bin_edges,
         )
 
+        # Add light condition text box to bottom right of subplot
+        ax = axes7[idx]
+        # Get axis limits
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        # Position text box in bottom right corner
+        x_pos = xlim[1] - 0.15 * (xlim[1] - xlim[0])
+        y_pos = ylim[0] + 0.08 * (ylim[1] - ylim[0])
+        # Add text with black box
+        bbox_props = dict(boxstyle="round,pad=0.5", facecolor="white", edgecolor="black", linewidth=1.5)
+        ax.text(
+            x_pos,
+            y_pos,
+            f"Light: {light_condition}",
+            fontsize=14,
+            ha="center",
+            va="bottom",
+            bbox=bbox_props,
+            zorder=20,
+        )
+
+    # Add legend only on the far right (after all subplots)
+    if len(light_conditions_pooled) > 0:
+        ax_last = axes7[-1]
+        # Get current handles and labels
+        handles, labels = ax_last.get_legend_handles_labels()
+        if handles:
+            ax_last.legend(
+                handles,
+                labels,
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1),
+                fontsize=12,
+            )
+
     fig7.suptitle(
         "",
         fontsize=16,
@@ -1082,158 +1046,26 @@ def main():
     print(f"\nPooled BallTypes plots (Genotype with permutation tests) saved to: {output_path_pooled_genotype}")
 
     # =============================================================================
-    # IMPLEMENTATION 3: CTRL BALLTYPE ONLY WITH PERMUTATION TESTS
-    # =============================================================================
-    print(f"\n{'='*60}")
-    print("IMPLEMENTATION 3: CTRL BALLTYPE ONLY (with Permutation Tests)")
-    print(f"{'='*60}")
-
-    # Filter to only ctrl BallType
-    ctrl_data_trimmed = df_trimmed[df_trimmed[balltype_col] == "ctrl"][
-        [time_col, ball_distance_col, light_col, genotype_col, "fly"]
-    ].copy()
-
-    print(f"Ctrl BallType only dataset shape: {ctrl_data_trimmed.shape}")
-    print(f"Unique genotypes: {sorted(ctrl_data_trimmed[genotype_col].unique())}")
-
-    light_conditions_ctrl = sorted(ctrl_data_trimmed[light_col].unique())
-
-    # Create side-by-side subplots
-    fig8, axes8 = plt.subplots(1, len(light_conditions_ctrl), figsize=(10 * len(light_conditions_ctrl), 6))
-    if len(light_conditions_ctrl) == 1:
-        axes8 = [axes8]
-
-    for idx, light_condition in enumerate(light_conditions_ctrl):
-        print(f"\nProcessing Light condition: {light_condition}")
-
-        # Filter data for this light condition
-        light_data = ctrl_data_trimmed[ctrl_data_trimmed[light_col] == light_condition].copy()
-
-        print(f"  Data shape: {light_data.shape}")
-        print(f"  Genotypes: {sorted(light_data[genotype_col].unique())}")
-
-        # Preprocess for permutation test
-        print(f"  Preprocessing data into {n_permutation_bins} time bins...")
-        processed, bin_edges = preprocess_data_for_permutation(
-            light_data,
-            time_col=time_col,
-            value_col=ball_distance_col,
-            group_col=genotype_col,
-            subject_col="fly",
-            n_bins=n_permutation_bins,
-        )
-
-        # Compute permutation test
-        print(f"  Computing permutation test ({n_permutations} permutations)...")
-        perm_results = compute_permutation_test_genotype(
-            processed,
-            metric=f"avg_{ball_distance_col}",
-            group_col=genotype_col,
-            control_group="TNTxEmptyGal4",
-            n_permutations=n_permutations,
-            alpha=0.05,
-            progress=True,
-        )
-
-        # Create trajectory plot with permutation annotations
-        create_trajectory_plot_with_permutation(
-            light_data,
-            time_col=time_col,
-            value_col=ball_distance_col,
-            group_col=genotype_col,
-            subject_col="fly",
-            light_val=light_condition,
-            n_bins=n_permutation_bins,
-            permutation_results=perm_results,
-            color_mapping=genotype_colors,
-            ax=axes8[idx],
-            bin_edges=bin_edges,
-        )
-
-    fig8.suptitle(
-        "",
-        fontsize=16,
-        fontweight="bold",
-        y=1.02,
-    )
-
-    plt.tight_layout()
-    output_dir = Path("/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Plots/Trajectories")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path_ctrl_genotype = output_dir / "dark_olfaction_coordinates_ctrl_genotype_permutation.png"
-    plt.savefig(output_path_ctrl_genotype, dpi=300, bbox_inches="tight")
-    # Also save as PDF and SVG
-    pdf_path = output_path_ctrl_genotype.with_suffix(".pdf")
-    svg_path = output_path_ctrl_genotype.with_suffix(".svg")
-    plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
-    plt.savefig(svg_path, dpi=300, bbox_inches="tight")
-    print(f"\nCtrl BallType only plots (Genotype with permutation tests) saved to: {output_path_ctrl_genotype}")
-
-    # =============================================================================
-    # SUMMARY STATISTICS
+    # SUMMARY
     # =============================================================================
     print("\n" + "=" * 80)
-    print("SUMMARY STATISTICS")
+    print("SUMMARY")
     print("=" * 80)
 
-    print(f"\nTrimmed time approach:")
-    print(f"  - Maximum shared time: {max_shared_time:.2f} seconds")
-    print(f"  - Final dataset: {df_trimmed.shape[0]} data points from {df_trimmed['fly'].nunique()} flies")
-    print(f"  - Time range: {df_trimmed[time_col].min():.2f}s to {df_trimmed[time_col].max():.2f}s")
-
-    # Statistics for different time windows (using trimmed data)
-    time_windows = [(-5, 0), (0, 5), (5, 15), (15, max_shared_time)]
-    window_names = [
-        "Pre-exit (-5 to 0s)",
-        "Early post-exit (0 to 5s)",
-        "Mid post-exit (5 to 15s)",
-        f"Late post-exit (15 to {max_shared_time:.1f}s)",
-    ]
-
-    print(f"\nTime window analysis (using trimmed time data):")
-    for (start, end), window_name in zip(time_windows, window_names):
-        print(f"\n{window_name}:")
-        window_data = filter_data_by_time_window(df_trimmed, time_col, start, end)
-
-        if not window_data.empty:
-            # Ball distance statistics by genotype
-            genotype_stats = (
-                window_data.groupby(genotype_col)[ball_distance_col].agg(["count", "mean", "std", "median"]).round(3)
-            )
-            print(f"Ball distance by {genotype_col}:")
-            print(genotype_stats)
-
-            # Ball distance statistics by balltype
-            balltype_stats = (
-                window_data.groupby(balltype_col)[ball_distance_col].agg(["count", "mean", "std", "median"]).round(3)
-            )
-            print(f"\nBall distance by {balltype_col}:")
-            print(balltype_stats)
-        else:
-            print(f"  No data in this window")
-
-    print(f"\n{'='*80}")
-    print("SUMMARY")
-    print(f"{'='*80}")
-    print("Three visualization approaches created:")
-    print("1. Trimmed time: Uses actual seconds but only up to maximum shared time, preserves absolute timing")
-    print("2. Pooled BallTypes: Focus on genotype effect across all ball types with permutation tests")
-    print("3. Ctrl BallType only: Focus on standard ball condition with permutation tests")
+    print(f"\nDataset summary:")
+    print(f"  - Maximum shared time: {max_shared_time:.2f} seconds ({max_shared_time/60.0:.2f} minutes)")
+    print(f"  - Total data points: {df_trimmed.shape[0]}")
+    print(f"  - Total flies: {df_trimmed['fly'].nunique()}")
+    print(f"  - Time range: {df_trimmed[time_col].min():.2f} to {df_trimmed[time_col].max():.2f} minutes")
 
     print(f"\nGrouping factors:")
-    print(f"  - Light: {sorted(df_clean[light_col].unique())}")
-    print(f"  - Genotype: {sorted(df_clean[genotype_col].unique())}")
-    print(f"  - BallType: {sorted(df_clean[balltype_col].unique())}")
+    print(f"  - Light conditions: {sorted(df_clean[light_col].unique())}")
+    print(f"  - Genotypes: {sorted(df_clean[genotype_col].unique())}")
+    print(f"  - BallTypes (pooled in main plot): {sorted(df_clean[balltype_col].unique())}")
 
-    print(f"\nFiles saved:")
-    print(f"  Trimmed time:")
-    print(f"    - {output_path_trimmed_genotype}")
-    print(f"    - {output_path_trimmed_balltype}")
-    print(f"    - {output_path_trimmed_combined} (side-by-side comparison)")
-    print(f"  Pooled BallTypes with permutation tests:")
-    print(f"    - {output_path_pooled_genotype}")
-    print(f"  Ctrl BallType only with permutation tests:")
-    print(f"    - {output_path_ctrl_genotype}")
+    print(f"\nGenerated plots:")
+    print(f"  - Pooled BallTypes with permutation tests (side-by-side by Light condition)")
+    print(f"    Saved as PNG, PDF, and SVG in: {output_dir}")
 
     print(f"\n✅ All plots generated successfully!")
 

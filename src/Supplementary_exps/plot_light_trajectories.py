@@ -415,6 +415,12 @@ def create_trajectory_plot(
     # Create figure
     fig, ax = plt.subplots(figsize=(12, 7))
 
+    # Define font sizes for consistency
+    font_size_ticks = 10
+    font_size_labels = 14
+    font_size_legend = 12
+    font_size_annotations = 11
+
     # Color palette and line styles - matching permutation test plots
     colors = {control_condition: "black", light_condition: "black"}
     line_styles = {control_condition: "solid", light_condition: "dashed"}  # solid for ON, dashed for OFF
@@ -439,18 +445,49 @@ def create_trajectory_plot(
     all_means = []
     for light in [control_condition, light_condition]:
         light_data = subset_data[subset_data[group_col] == light]
-        time_grouped = light_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
-        all_means.extend(time_grouped["mean"].values)
+        time_grouped = light_data.groupby(time_col)[value_col_plot].mean().reset_index()
+        all_means.extend(time_grouped[value_col_plot].values)
 
     # Find the minimum mean value to use as y-axis baseline
     y_baseline = min(all_means)
 
-    # Plot mean trajectories with error bands
+    # Plot mean trajectories with bootstrapped 95% confidence intervals
     for light in [control_condition, light_condition]:
         light_data = subset_data[subset_data[group_col] == light]
 
-        # Group by time to compute mean and SEM
-        time_grouped = light_data.groupby(time_col)[value_col_plot].agg(["mean", "sem"]).reset_index()
+        # First aggregate per fly at each time point (should already be 1 per fly, but make it explicit)
+        fly_aggregated = light_data.groupby([subject_col, time_col])[value_col_plot].mean().reset_index()
+
+        # Compute mean and bootstrapped 95% CI for each time point
+        time_stats = []
+        for t in sorted(fly_aggregated[time_col].unique()):
+            # Get one value per fly at this time point
+            fly_values = fly_aggregated[fly_aggregated[time_col] == t][value_col_plot].values
+            if len(fly_values) == 0:
+                continue
+
+            # Compute mean across flies
+            mean_val = np.mean(fly_values)
+
+            # Bootstrap 95% CI by resampling flies
+            if len(fly_values) > 1:
+                n_bootstrap = 1000
+                bootstrap_means = []
+                for _ in range(n_bootstrap):
+                    # Resample flies with replacement
+                    bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                    bootstrap_means.append(np.mean(bootstrap_flies))
+
+                ci_lower = np.percentile(bootstrap_means, 2.5)
+                ci_upper = np.percentile(bootstrap_means, 97.5)
+            else:
+                # Single fly: no CI
+                ci_lower = mean_val
+                ci_upper = mean_val
+
+            time_stats.append({time_col: t, "mean": mean_val, "ci_lower": ci_lower, "ci_upper": ci_upper})
+
+        time_grouped = pd.DataFrame(time_stats)
 
         # Plot mean line with appropriate line style
         ax.plot(
@@ -463,11 +500,11 @@ def create_trajectory_plot(
             zorder=10,
         )
 
-        # Plot error band (SEM)
+        # Plot bootstrapped 95% confidence interval
         ax.fill_between(
             time_grouped[time_col],
-            time_grouped["mean"] - y_baseline - time_grouped["sem"],
-            time_grouped["mean"] - y_baseline + time_grouped["sem"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
             color=error_colors[light],
             alpha=error_alphas[light],
             zorder=5,
@@ -523,25 +560,11 @@ def create_trajectory_plot(
                 color="red",
             )
 
-            # Add p-value below the stars
-            ax.text(
-                bin_center,
-                y_annotation_pval,
-                f"p={p_val:.3f}",
-                ha="center",
-                va="center",
-                fontsize=8,
-                color="darkgray",
-            )
-
     # Formatting
-    ax.set_xlabel("Time (s)", fontsize=14)
-    ax.set_ylabel("Ball distance from start (mm)", fontsize=14)
-    ax.set_title(
-        f"Ball Trajectory: Light {light_condition.upper()} vs Light {control_condition.upper()}\n(FDR-corrected permutation test)",
-        fontsize=16,
-    )
-    ax.legend(fontsize=12, loc="upper left")
+    ax.set_xlabel("Time (min)", fontsize=font_size_labels)
+    ax.set_ylabel("Ball distance from start (mm)", fontsize=font_size_labels)
+    ax.tick_params(axis="both", which="major", labelsize=font_size_ticks)
+    ax.legend(fontsize=font_size_legend, loc="upper left")
     # Remove background grid - only keep the time bin vertical lines
     ax.grid(False)
 
@@ -610,6 +633,12 @@ def generate_all_trajectory_plots(
 
     if control_condition not in light_conditions:
         raise ValueError(f"Control condition '{control_condition}' not found in data")
+
+    # Convert time from seconds to minutes before preprocessing
+    print(f"\nConverting time from seconds to minutes...")
+    data = data.copy()
+    data["time"] = data["time"] / 60.0
+    print(f"Time range: {data['time'].min():.2f} to {data['time'].max():.2f} minutes")
 
     # Preprocess data
     print(f"\nPreprocessing data into {n_bins} time bins...")
