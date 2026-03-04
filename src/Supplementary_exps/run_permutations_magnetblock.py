@@ -217,6 +217,9 @@ def get_elegant_metric_name(metric_name):
         "significant_ratio": "Significant event ratio",
         "first_significant_event": "First significant event",
         "first_significant_event_time": "First significant event time",
+        # Derived timing metrics
+        "time_significant_to_major": "Time: first significant → first major event",
+        "time_significant_to_max": "Time: first significant → max event",
         # Distance metrics
         "max_distance": "Max ball distance",
         "distance_moved": "Total ball distance moved",
@@ -785,6 +788,21 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         print(f"Dropped columns: {columns_to_drop}")
 
     print(f"Dataset cleaning completed successfully")
+
+    # ---------------------------------------------------------------------------
+    # Derived metrics
+    # ---------------------------------------------------------------------------
+    # Time between first significant event and first major event
+    if "first_significant_event_time" in dataset.columns and "first_major_event_time" in dataset.columns:
+        dataset["time_significant_to_major"] = (
+            dataset["first_major_event_time"] - dataset["first_significant_event_time"]
+        )
+        print("  Derived: time_significant_to_major")
+
+    # Time between first significant event and time of max event
+    if "first_significant_event_time" in dataset.columns and "max_event_time" in dataset.columns:
+        dataset["time_significant_to_max"] = dataset["max_event_time"] - dataset["first_significant_event_time"]
+        print("  Derived: time_significant_to_max")
 
     # Add test mode sampling for faster debugging
     if test_mode and len(dataset) > test_sample_size:

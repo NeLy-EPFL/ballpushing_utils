@@ -497,6 +497,163 @@ def generate_dark_olfaction_permutation_plots(
     return stats_df
 
 
+def generate_ir8a_light_permutation_plots(
+    data,
+    metrics,
+    ir8a_genotype="TNTxIR8a",
+    light_col="Light",
+    genotype_col="Genotype",
+    control_light="off",
+    test_light="on",
+    fig_width_mm=100,
+    fig_height_mm=125,
+    font_size_ticks=10,
+    font_size_labels=14,
+    font_size_annotations=16,
+    output_dir="permutation_dark_olfaction_ir8a_light_comparison",
+    alpha=0.05,
+    n_permutations=10000,
+):
+    """
+    Generate one-plot-per-metric permutation comparisons for IR8a across Light conditions.
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_data_base = data[(data[genotype_col] == ir8a_genotype)].copy()
+    if plot_data_base.empty:
+        print(f"⚠️  No rows found for genotype '{ir8a_genotype}'. Skipping IR8a light comparison plots.")
+        return pd.DataFrame()
+
+    light_values = sorted(plot_data_base[light_col].dropna().unique(), key=lambda x: (x != "off", x))
+    if control_light not in light_values or test_light not in light_values:
+        print(
+            f"⚠️  Required light conditions '{control_light}' and '{test_light}' not both present for {ir8a_genotype}. "
+            "Skipping IR8a light comparison plots."
+        )
+        return pd.DataFrame()
+
+    all_stats = []
+    ir8a_color = "#9467bd"
+
+    for metric_idx, metric in enumerate(metrics):
+        metric_start_time = time.time()
+        print(f"\n[IR8a light comparison] Processing metric {metric_idx+1}/{len(metrics)}: {metric}")
+
+        metric_data = plot_data_base.dropna(subset=[metric, light_col]).copy()
+        if metric_data.empty:
+            print(f"  ⚠️  No data available for metric '{metric}' after removing NaNs. Skipping.")
+            continue
+
+        metric_data[metric] = convert_metric_data(metric_data[metric], metric)
+        metric_unit = get_metric_unit(metric)
+
+        control_data = metric_data[metric_data[light_col] == control_light][metric].values
+        test_data = metric_data[metric_data[light_col] == test_light][metric].values
+
+        if len(control_data) < 2 or len(test_data) < 2:
+            print(
+                f"  ⚠️  Insufficient data for comparison '{test_light}' vs '{control_light}' "
+                f"(n={len(test_data)} vs n={len(control_data)}). Skipping."
+            )
+            continue
+
+        p_value = permutation_test(control_data, test_data, n_permutations=n_permutations)
+        mean_diff = np.mean(test_data) - np.mean(control_data)
+        pooled_std = np.sqrt((np.var(control_data, ddof=1) + np.var(test_data, ddof=1)) / 2)
+        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0
+
+        all_stats.append(
+            {
+                "Metric": metric,
+                "Control_Group": f"{control_light}_{ir8a_genotype}",
+                "Test_Group": f"{test_light}_{ir8a_genotype}",
+                "p_value": p_value,
+                "significant": p_value < alpha,
+                "effect_size": cohens_d,
+                "direction": "increased" if cohens_d > 0 else "decreased",
+            }
+        )
+
+        fig, ax = plt.subplots(figsize=(mm_to_inches(fig_width_mm), mm_to_inches(fig_height_mm)))
+
+        groups = [control_light, test_light]
+        group_arrays = [
+            metric_data[metric_data[light_col] == groups[0]][metric].values,
+            metric_data[metric_data[light_col] == groups[1]][metric].values,
+        ]
+        positions = np.arange(len(groups))
+
+        y_min, y_max = metric_data[metric].min(), metric_data[metric].max()
+        y_range = y_max - y_min if y_max > y_min else 1
+        y_bottom = y_min - 0.1 * y_range
+        y_top = y_max + 0.2 * y_range
+
+        for pos_idx, group_data_plot in enumerate(group_arrays):
+            ax.boxplot(
+                [group_data_plot],
+                positions=[positions[pos_idx]],
+                widths=0.6,
+                patch_artist=True,
+                showfliers=False,
+                boxprops=dict(facecolor="white", edgecolor="black", linewidth=1.5),
+                whiskerprops=dict(color="black", linewidth=1.5),
+                capprops=dict(color="black", linewidth=1.5),
+                medianprops=dict(color="black", linewidth=2),
+                zorder=2,
+            )
+
+            np.random.seed(42)
+            jitter = np.random.normal(0, 0.04, size=len(group_data_plot))
+            ax.scatter(positions[pos_idx] + jitter, group_data_plot, alpha=0.6, s=20, color=ir8a_color, zorder=3)
+
+        if p_value < 0.001:
+            sig_text = "***"
+        elif p_value < 0.01:
+            sig_text = "**"
+        elif p_value < 0.05:
+            sig_text = "*"
+        else:
+            sig_text = ""
+
+        if sig_text:
+            center_x = (positions[0] + positions[1]) / 2
+            ax.text(
+                center_x,
+                y_top - 0.05 * y_range,
+                sig_text,
+                ha="center",
+                va="top",
+                fontsize=font_size_annotations,
+                color="red",
+                fontweight="bold",
+            )
+
+        ax.set_xticks(positions)
+        ax.set_xticklabels(groups, rotation=0, fontsize=font_size_ticks)
+        ax.tick_params(axis="y", labelsize=font_size_ticks)
+        ax.set_ylim(y_bottom, y_top)
+        ax.set_title(f"{ir8a_genotype}: Light effect", fontsize=font_size_labels, pad=10)
+        ylabel = f"{metric} {metric_unit}".strip()
+        ax.set_ylabel(ylabel, fontsize=font_size_labels)
+
+        plt.tight_layout()
+        output_path = output_dir / f"{metric}_ir8a_light_permutation_test.pdf"
+        plt.savefig(output_path, bbox_inches="tight", dpi=300)
+        plt.close()
+
+        metric_time = time.time() - metric_start_time
+        print(f"  ✅ Saved: {output_path} (took {metric_time:.1f}s)")
+
+    stats_df = pd.DataFrame(all_stats)
+    if not stats_df.empty:
+        stats_path = output_dir / "dark_olfaction_ir8a_light_permutation_statistics.csv"
+        stats_df.to_csv(stats_path, index=False)
+        print(f"\n✅ IR8a light comparison statistics saved to: {stats_path}")
+
+    return stats_df
+
+
 def generate_text_report(stats_df, data, control_group, report_file):
     """
     Generate a human-readable text report of the statistical results.
@@ -694,6 +851,12 @@ def main(overwrite=True, test_mode=False):
     condition_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Created/verified: {condition_dir}")
 
+    # Create dedicated IR8a light-comparison subdirectory
+    ir8a_light_subdir = "permutation_dark_olfaction_ir8a_light_comparison"
+    ir8a_light_dir = base_output_dir / ir8a_light_subdir
+    ir8a_light_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  Created/verified: {ir8a_light_dir}")
+
     # Load the dataset
     print("\nLoading dark olfaction dataset...")
     dataset = load_and_clean_dataset(test_mode=test_mode, test_sample_size=200)
@@ -778,10 +941,29 @@ def main(overwrite=True, test_mode=False):
         font_size_labels=14,
         font_size_legend=12,
         font_size_annotations=16,
-        output_dir=condition_dir,
+        output_dir=str(condition_dir),
         alpha=0.05,
         n_permutations=10000,
         split_by_light=True,
+    )
+
+    print(f"\nGenerating IR8a-only light comparison permutation plots...")
+    ir8a_light_stats_df = generate_ir8a_light_permutation_plots(
+        data=dataset,
+        metrics=available_metrics,
+        ir8a_genotype="TNTxIR8a",
+        light_col="Light",
+        genotype_col="Genotype",
+        control_light="off",
+        test_light="on",
+        fig_width_mm=100,
+        fig_height_mm=125,
+        font_size_ticks=10,
+        font_size_labels=14,
+        font_size_annotations=16,
+        output_dir=str(ir8a_light_dir),
+        alpha=0.05,
+        n_permutations=10000,
     )
 
     print("\n" + "=" * 80)
@@ -803,7 +985,8 @@ def main(overwrite=True, test_mode=False):
             metric_sig = stats_df[(stats_df["Metric"] == metric) & (stats_df["significant"])]
             print(f"  - {metric}: {len(metric_sig)} significant comparison(s)")
 
-    print(f"\n✅ All plots saved to: {condition_dir}")
+    print(f"\n✅ Main plots saved to: {condition_dir}")
+    print(f"✅ IR8a light-comparison plots saved to: {ir8a_light_dir}")
 
 
 if __name__ == "__main__":

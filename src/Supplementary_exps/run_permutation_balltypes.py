@@ -100,6 +100,42 @@ def format_metric_label(metric_name):
     return metric_name
 
 
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
+    """Calculate bootstrapped confidence interval for difference in means.
+
+    Parameters:
+    -----------
+    group1_data : array-like
+        Data from first group (control)
+    group2_data : array-like
+        Data from second group (test)
+    n_bootstrap : int
+        Number of bootstrap samples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+
+    Returns:
+    --------
+    tuple
+        (lower_bound, upper_bound) for mean(test) - mean(control)
+    """
+    if len(group1_data) == 0 or len(group2_data) == 0:
+        return np.nan, np.nan
+
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = np.random.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = np.random.choice(group2_data, size=len(group2_data), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return float(lower), float(upper)
+
+
 # Fixed color mapping for ball types - ensures consistent colors across all plots
 # Colors match trajectory plot colors
 BALLTYPE_COLORS = {
@@ -218,6 +254,7 @@ def generate_balltype_permutation_plots(
             continue
 
         control_median = control_vals.median()  # Calculate control median once
+        control_mean = control_vals.mean()
 
         # Perform permutation tests for all ball types vs control
         pvals = []
@@ -232,6 +269,7 @@ def generate_balltype_permutation_plots(
             try:
                 # Permutation test using median difference as statistic
                 test_median = test_vals.median()
+                test_mean = test_vals.mean()
                 obs_diff = test_median - control_median
 
                 n1 = len(control_vals)
@@ -254,11 +292,36 @@ def generate_balltype_permutation_plots(
                 direction = "increased" if test_median > control_median else "decreased"
                 effect_size = test_median - control_median
 
+                # Bootstrap CI for mean difference (test - control)
+                ci_lower, ci_upper = bootstrap_ci_difference(
+                    control_vals.values,
+                    test_vals.values,
+                    n_bootstrap=n_permutations,
+                    ci=95,
+                )
+                mean_diff = test_mean - control_mean
+
+                if control_mean != 0:
+                    pct_change = (mean_diff / control_mean) * 100
+                    pct_ci_lower = (ci_lower / control_mean) * 100
+                    pct_ci_upper = (ci_upper / control_mean) * 100
+                else:
+                    pct_change = np.nan
+                    pct_ci_lower = np.nan
+                    pct_ci_upper = np.nan
+
             except Exception as e:
                 print(f"Error in permutation test for {ball_type} vs {control_balltype}: {e}")
                 pval = 1.0
                 direction = "none"
                 effect_size = 0.0
+                test_mean = test_vals.mean() if len(test_vals) > 0 else np.nan
+                mean_diff = np.nan
+                ci_lower = np.nan
+                ci_upper = np.nan
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
 
             pvals.append(pval)
             test_results.append(
@@ -271,9 +334,18 @@ def generate_balltype_permutation_plots(
                     "effect_size": effect_size,
                     "test_median": test_vals.median() if len(test_vals) > 0 else np.nan,
                     "control_median": control_median,
+                    "test_mean": test_mean,
+                    "control_mean": control_mean,
+                    "mean_diff": mean_diff,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "pct_change": pct_change,
+                    "pct_ci_lower": pct_ci_lower,
+                    "pct_ci_upper": pct_ci_upper,
                     "test_n": len(test_vals),
                     "control_n": len(control_vals),
                     "n_permutations": n_permutations,
+                    "n_bootstrap": n_permutations,
                 }
             )
 
@@ -572,19 +644,20 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
         report_lines.append("")
 
         # Get control median for reference
-        control_median = 0  # Initialize default value
-        control_data = data[data["BallType"] == control_balltype][metric].dropna()
-        if len(control_data) > 0:
-            control_median = control_data.median()
-            control_mean = control_data.mean()
-            control_std = control_data.std()
-            control_n = len(control_data)
+        if not metric_stats.empty:
+            control_median = metric_stats["control_median"].iloc[0]
+            control_mean = metric_stats["control_mean"].iloc[0] if "control_mean" in metric_stats.columns else np.nan
+            control_n = metric_stats["control_n"].iloc[0]
 
-            report_lines.append(
-                f"**Control ({control_balltype}):** median = {control_median:.3f}, mean = {control_mean:.3f} ± {control_std:.3f} (n={control_n})"
-            )
+            if not np.isnan(control_mean):
+                report_lines.append(
+                    f"**Control ({control_balltype}):** median = {control_median:.3f}, mean = {control_mean:.3f} (n={control_n})"
+                )
+            else:
+                report_lines.append(f"**Control ({control_balltype}):** median = {control_median:.3f} (n={control_n})")
             report_lines.append("")
         else:
+            control_median = 0
             report_lines.append(f"**Control ({control_balltype}):** No data available")
             report_lines.append("")
 
@@ -600,12 +673,28 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             test_median = row["test_median"]
             effect_size = row["effect_size"]
             test_n = row["test_n"]
+            mean_diff = row.get("mean_diff", np.nan)
+            ci_lower = row.get("ci_lower", np.nan)
+            ci_upper = row.get("ci_upper", np.nan)
+            pct_change = row.get("pct_change", np.nan)
+            pct_ci_lower = row.get("pct_ci_lower", np.nan)
+            pct_ci_upper = row.get("pct_ci_upper", np.nan)
 
-            # Calculate percent change
-            if control_median != 0:
-                percent_change = (effect_size / control_median) * 100
+            if np.isnan(pct_change):
+                if control_median != 0:
+                    percent_change = (effect_size / control_median) * 100
+                else:
+                    percent_change = 0
             else:
-                percent_change = 0
+                percent_change = pct_change
+
+            ci_text = ""
+            if not np.isnan(ci_lower) and not np.isnan(ci_upper):
+                ci_text = f", 95% bootstrap CI Δmean [{ci_lower:.3f}, {ci_upper:.3f}]"
+
+            pct_ci_text = ""
+            if not np.isnan(pct_ci_lower) and not np.isnan(pct_ci_upper):
+                pct_ci_text = f", 95% bootstrap CI %Δ [{pct_ci_lower:+.1f}%, {pct_ci_upper:+.1f}%]"
 
             description = f'"{ball_type}" (median = {test_median:.3f}, n={test_n})'
 
@@ -616,6 +705,9 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
                             "ball_type": ball_type,
                             "description": description,
                             "effect_size": effect_size,
+                            "mean_diff": mean_diff,
+                            "ci_text": ci_text,
+                            "pct_ci_text": pct_ci_text,
                             "percent_change": percent_change,
                             "p_fdr": p_fdr,
                             "sig_level": sig_level,
@@ -627,6 +719,9 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
                             "ball_type": ball_type,
                             "description": description,
                             "effect_size": effect_size,
+                            "mean_diff": mean_diff,
+                            "ci_text": ci_text,
+                            "pct_ci_text": pct_ci_text,
                             "percent_change": percent_change,
                             "p_fdr": p_fdr,
                             "sig_level": sig_level,
@@ -638,6 +733,9 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
                         "ball_type": ball_type,
                         "description": description,
                         "effect_size": effect_size,
+                        "mean_diff": mean_diff,
+                        "ci_text": ci_text,
+                        "pct_ci_text": pct_ci_text,
                         "percent_change": percent_change,
                         "p_fdr": p_fdr,
                     }
@@ -650,7 +748,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             report_lines.append("**Significantly higher values than control:**")
             for item in significant_increased:
                 report_lines.append(
-                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']})"
+                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']}{item['ci_text']}{item['pct_ci_text']})"
                 )
             report_lines.append("")
 
@@ -660,7 +758,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             report_lines.append("**Significantly lower values than control:**")
             for item in significant_decreased:
                 report_lines.append(
-                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']})"
+                    f"- {item['description']} showed **{item['percent_change']:+.1f}%** change (p={item['p_fdr']:.4f}{item['sig_level']}{item['ci_text']}{item['pct_ci_text']})"
                 )
             report_lines.append("")
 
@@ -670,7 +768,7 @@ def generate_text_report(stats_df, data, control_balltype, report_file):
             report_lines.append("**No significant difference from control:**")
             for item in non_significant:
                 report_lines.append(
-                    f"- {item['description']} showed {item['percent_change']:+.1f}% change (p={item['p_fdr']:.4f}, ns)"
+                    f"- {item['description']} showed {item['percent_change']:+.1f}% change (p={item['p_fdr']:.4f}, ns{item['ci_text']}{item['pct_ci_text']})"
                 )
             report_lines.append("")
 

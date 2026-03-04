@@ -90,6 +90,26 @@ def permutation_test_1d(group1, group2, n_permutations=10000, random_state=None)
     return pval
 
 
+def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_state=42):
+    """Bootstrap confidence interval for mean(group1) - mean(group2)."""
+    if len(group1) == 0 or len(group2) == 0:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(random_state)
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = rng.choice(group1, size=len(group1), replace=True)
+        sample2 = rng.choice(group2, size=len(group2), replace=True)
+        bootstrap_diffs[i] = np.mean(sample1) - np.mean(sample2)
+
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return float(lower), float(upper)
+
+
 def _parse_args():
     parser = argparse.ArgumentParser(description="Detailed metric statistics for high combined-consistency hits")
     parser.add_argument("--output-dir", default=OUTPUT_DIR, help="Directory for all outputs")
@@ -118,10 +138,11 @@ def _parse_args():
         help="Control selection mode (default: tailored)",
     )
     parser.add_argument(
-        "--use-permutation-per-pc",
-        action="store_true",
-        default=False,
-        help="Use permutation test instead of Mann-Whitney U for per-metric significance testing (default: Mann-Whitney U)",
+        "--use-mannwhitney-per-pc",
+        dest="use_permutation_per_pc",
+        action="store_false",
+        default=True,
+        help="Use Mann-Whitney U instead of permutation test for per-metric significance testing (default: permutation test)",
     )
     parser.add_argument(
         "--discrete-effects",
@@ -140,7 +161,7 @@ def _parse_args():
 # These globals will be overridden by CLI if provided
 OUTPUT_DIR = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Plots/Detailed_metrics_statistics"
 CONTROL_MODE = "tailored"
-USE_PERMUTATION_PER_PC = False
+USE_PERMUTATION_PER_PC = True
 DISCRETE_EFFECTS = False
 CLIP_EFFECTS = 1.5
 
@@ -163,9 +184,9 @@ def _apply_args(args):
     if CLIP_EFFECTS is not None:
         print(f"✂️  Clipping Cohen's d values to ±{CLIP_EFFECTS} (prevents extreme values from dominating color scale)")
     if USE_PERMUTATION_PER_PC:
-        print(f"🔀 Per-metric testing: Permutation test (10000 permutations + FDR)")
+        print(f"🔀 Per-metric testing: Permutation test (10000 permutations + FDR, default)")
     else:
-        print(f"📊 Per-metric testing: Mann-Whitney U (default + FDR)")
+        print(f"📊 Per-metric testing: Mann-Whitney U (+ FDR, optional override)")
 
     # Check for consistency files in multiple locations (PCA_Static.py saves to data_files subdirectory)
     proposed_consistency_dir = args.consistency_dir
@@ -243,6 +264,50 @@ BRAIN_REGION_DISPLAY_NAMES = {
     "Neuropeptide": "Neuropeptide",
     "Vision": "Visual projection neurons",
 }
+
+# Thematic metric groups for brain-region grouped heatmap (defines column ordering and bracket annotations)
+# Each entry is (group_label, [metric_internal_names...])
+METRIC_GROUPS = [
+    (
+        "Push efficiency",
+        ["pulling_ratio", "distance_ratio", "distance_moved", "pulled"],
+    ),
+    (
+        "Ball contact events",
+        [
+            "max_event",
+            "nb_events",
+            "first_major_event",
+            "first_major_event_time",
+            "max_event_time",
+            "max_distance",
+            "significant_ratio",
+            "interaction_persistence",
+        ],
+    ),
+    (
+        "Kinematics",
+        [
+            "velocity_trend",
+            "normalized_velocity",
+            "fraction_not_facing_ball",
+            "velocity_during_interactions",
+            "flailing",
+            "head_pushing_ratio",
+        ],
+    ),
+    (
+        "Pauses & durations",
+        [
+            "persistence_at_end",
+            "time_chamber_beginning",
+            "chamber_ratio",
+            "chamber_exit_time",
+            "number_of_pauses",
+            "nb_freeze",
+        ],
+    ),
+]
 
 # Custom ordering for brain regions in grouped heatmap
 BRAIN_REGION_ORDER = [
@@ -694,10 +759,11 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
     print(f"   🎯 Analyzing {len(analysis_genotypes)} high-consistency genotypes")
     print(f"   🔬 Computing statistical tests FRESH from raw data (not using pre-computed results)")
     if USE_PERMUTATION_PER_PC:
-        print(f"   📊 Per-metric test: Permutation (10000 permutations + FDR correction)")
+        print(f"   📊 Per-metric test: Permutation (10000 permutations + FDR correction, default)")
     else:
-        print(f"   📊 Per-metric test: Mann-Whitney U (+ FDR correction)")
+        print(f"   📊 Per-metric test: Mann-Whitney U (+ FDR correction, optional override)")
     print(f"   📐 Computing Cohen's d effect sizes for all {len(valid_metrics)} metrics")
+    print(f"   🎯 Computing bootstrap CIs for mean differences and % changes (n=10000)")
     print()
 
     for nickname in analysis_genotypes:
@@ -726,6 +792,7 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         metrics_tested = []
         directions = {}
         effect_sizes = {}  # Store Cohen's d for each metric
+        metric_stats = {}  # Store per-metric descriptive/CI stats
 
         for metric in valid_metrics:
             group_values = subset[subset["Nickname"] == nickname][metric]
@@ -733,9 +800,39 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             if group_values.empty or control_values.empty:
                 continue
 
+            group_arr = group_values.values.astype(float)
+            control_arr = control_values.values.astype(float)
+
+            genotype_n = len(group_arr)
+            control_n = len(control_arr)
+            genotype_mean = float(np.mean(group_arr))
+            control_mean = float(np.mean(control_arr))
+            genotype_median = float(np.median(group_arr))
+            control_median = float(np.median(control_arr))
+
+            mean_diff = genotype_mean - control_mean
+            median_diff = genotype_median - control_median
+
+            ci_lower, ci_upper = bootstrap_ci_difference(
+                group_arr,
+                control_arr,
+                n_bootstrap=10000,
+                ci=95,
+                random_state=42,
+            )
+
+            if control_mean != 0:
+                pct_change = (mean_diff / control_mean) * 100
+                pct_ci_lower = (ci_lower / control_mean) * 100
+                pct_ci_upper = (ci_upper / control_mean) * 100
+            else:
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
+
             # Compute test fresh from raw data (not pre-computed)
             if USE_PERMUTATION_PER_PC:
-                pval = permutation_test_1d(group_values.values, control_values.values, random_state=42)
+                pval = permutation_test_1d(group_arr, control_arr, random_state=42)
             else:
                 stat, pval = mannwhitneyu(group_values, control_values, alternative="two-sided")
 
@@ -743,11 +840,28 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             metrics_tested.append(metric)
 
             # Calculate Cohen's d effect size
-            d = cohens_d(group_values, control_values)
+            d = cohens_d(group_arr, control_arr)
             effect_sizes[metric] = d
 
             # Calculate direction (same as sign of Cohen's d)
             directions[metric] = 1 if d > 0 else -1
+
+            metric_stats[metric] = {
+                "genotype_n": genotype_n,
+                "control_n": control_n,
+                "genotype_mean": genotype_mean,
+                "control_mean": control_mean,
+                "mean_diff": mean_diff,
+                "genotype_median": genotype_median,
+                "control_median": control_median,
+                "median_diff": median_diff,
+                "ci_lower": ci_lower,
+                "ci_upper": ci_upper,
+                "pct_change": pct_change,
+                "pct_ci_lower": pct_ci_lower,
+                "pct_ci_upper": pct_ci_upper,
+                "n_bootstrap": 10000,
+            }
 
         if len(ppc_pvals) > 0:
             rejected, pvals_corr, _, _ = multipletests(ppc_pvals, alpha=0.05, method="fdr_bh")
@@ -776,6 +890,21 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
                 result_dict[f"{metric}_significant"] = metric in significant_metrics
                 result_dict[f"{metric}_direction"] = directions.get(metric, 0)
                 result_dict[f"{metric}_cohens_d"] = effect_sizes.get(metric, 0.0)
+                stats = metric_stats.get(metric, {})
+                result_dict[f"{metric}_genotype_n"] = stats.get("genotype_n", np.nan)
+                result_dict[f"{metric}_control_n"] = stats.get("control_n", np.nan)
+                result_dict[f"{metric}_genotype_mean"] = stats.get("genotype_mean", np.nan)
+                result_dict[f"{metric}_control_mean"] = stats.get("control_mean", np.nan)
+                result_dict[f"{metric}_mean_diff"] = stats.get("mean_diff", np.nan)
+                result_dict[f"{metric}_genotype_median"] = stats.get("genotype_median", np.nan)
+                result_dict[f"{metric}_control_median"] = stats.get("control_median", np.nan)
+                result_dict[f"{metric}_median_diff"] = stats.get("median_diff", np.nan)
+                result_dict[f"{metric}_ci_lower"] = stats.get("ci_lower", np.nan)
+                result_dict[f"{metric}_ci_upper"] = stats.get("ci_upper", np.nan)
+                result_dict[f"{metric}_pct_change"] = stats.get("pct_change", np.nan)
+                result_dict[f"{metric}_pct_ci_lower"] = stats.get("pct_ci_lower", np.nan)
+                result_dict[f"{metric}_pct_ci_upper"] = stats.get("pct_ci_upper", np.nan)
+                result_dict[f"{metric}_n_bootstrap"] = stats.get("n_bootstrap", np.nan)
 
         results.append(result_dict)
 
@@ -849,6 +978,16 @@ def save_statistical_results_table(results_df, metrics_list, output_dir):
     """
     print(f"\n📝 Generating statistical results table...")
 
+    def _fmt_num(value, decimals=3):
+        if value is None or pd.isna(value):
+            return "N/A"
+        return f"{value:.{decimals}f}"
+
+    def _fmt_pct(value, decimals=1):
+        if value is None or pd.isna(value):
+            return "N/A"
+        return f"{value:+.{decimals}f}%"
+
     # Prepare data for table
     table_rows = []
 
@@ -861,6 +1000,17 @@ def save_statistical_results_table(results_df, metrics_list, output_dir):
             pval_col = f"{metric}_pval"
             pval_corr_col = f"{metric}_pval_corrected"
             cohens_d_col = f"{metric}_cohens_d"
+            genotype_n_col = f"{metric}_genotype_n"
+            control_n_col = f"{metric}_control_n"
+            genotype_mean_col = f"{metric}_genotype_mean"
+            control_mean_col = f"{metric}_control_mean"
+            mean_diff_col = f"{metric}_mean_diff"
+            ci_lower_col = f"{metric}_ci_lower"
+            ci_upper_col = f"{metric}_ci_upper"
+            pct_change_col = f"{metric}_pct_change"
+            pct_ci_lower_col = f"{metric}_pct_ci_lower"
+            pct_ci_upper_col = f"{metric}_pct_ci_upper"
+            n_bootstrap_col = f"{metric}_n_bootstrap"
 
             # Skip if metric not in results
             if pval_col not in row or pd.isna(row[pval_col]):
@@ -869,6 +1019,17 @@ def save_statistical_results_table(results_df, metrics_list, output_dir):
             pval = row[pval_col]
             pval_corrected = row[pval_corr_col] if pval_corr_col in row else pval
             cohens_d_value = row[cohens_d_col] if cohens_d_col in row else np.nan
+            genotype_n = row[genotype_n_col] if genotype_n_col in row else np.nan
+            control_n = row[control_n_col] if control_n_col in row else np.nan
+            genotype_mean = row[genotype_mean_col] if genotype_mean_col in row else np.nan
+            control_mean = row[control_mean_col] if control_mean_col in row else np.nan
+            mean_diff = row[mean_diff_col] if mean_diff_col in row else np.nan
+            ci_lower = row[ci_lower_col] if ci_lower_col in row else np.nan
+            ci_upper = row[ci_upper_col] if ci_upper_col in row else np.nan
+            pct_change = row[pct_change_col] if pct_change_col in row else np.nan
+            pct_ci_lower = row[pct_ci_lower_col] if pct_ci_lower_col in row else np.nan
+            pct_ci_upper = row[pct_ci_upper_col] if pct_ci_upper_col in row else np.nan
+            n_bootstrap = row[n_bootstrap_col] if n_bootstrap_col in row else np.nan
 
             table_rows.append(
                 {
@@ -876,6 +1037,17 @@ def save_statistical_results_table(results_df, metrics_list, output_dir):
                     "Control": control,
                     "Metric": get_display_name(metric),
                     "Metric_ID": metric,
+                    "Genotype_n": genotype_n,
+                    "Control_n": control_n,
+                    "Genotype_mean": genotype_mean,
+                    "Control_mean": control_mean,
+                    "Mean_diff": mean_diff,
+                    "Bootstrap_CI_lower": ci_lower,
+                    "Bootstrap_CI_upper": ci_upper,
+                    "Percent_change": pct_change,
+                    "Percent_CI_lower": pct_ci_lower,
+                    "Percent_CI_upper": pct_ci_upper,
+                    "N_bootstrap": n_bootstrap,
                     "P_value": pval,
                     "P_value_formatted": format_p_value(pval),
                     "P_value_corrected": pval_corrected,
@@ -918,17 +1090,36 @@ def save_statistical_results_table(results_df, metrics_list, output_dir):
                 f.write(f"**Significant metrics:** {n_significant}/{len(genotype_data)}\n\n")
 
                 # Create table
-                f.write("| Metric | P-value | P-value (FDR) | Cohen's d | Significance |\n")
-                f.write("|--------|---------|---------------|-----------|--------------|\n")
+                f.write(
+                    "| Metric | n (G/C) | Mean G | Mean C | ΔMean (G-C) | 95% BS CI ΔMean | %Δ vs C | 95% BS CI %Δ | P-value | P-value (FDR) | Cohen's d | Significance |\n"
+                )
+                f.write(
+                    "|--------|---------|--------|--------|-------------|-----------------|---------|--------------|---------|---------------|-----------|--------------|\n"
+                )
 
                 for _, metric_row in genotype_data.iterrows():
                     metric_name = metric_row["Metric"]
+                    genotype_n = f"{int(metric_row['Genotype_n'])}" if not pd.isna(metric_row["Genotype_n"]) else "N/A"
+                    control_n = f"{int(metric_row['Control_n'])}" if not pd.isna(metric_row["Control_n"]) else "N/A"
+                    n_text = f"{genotype_n}/{control_n}"
+                    mean_g = _fmt_num(metric_row.get("Genotype_mean", np.nan), 3)
+                    mean_c = _fmt_num(metric_row.get("Control_mean", np.nan), 3)
+                    mean_diff = _fmt_num(metric_row.get("Mean_diff", np.nan), 3)
+                    ci_low = _fmt_num(metric_row.get("Bootstrap_CI_lower", np.nan), 3)
+                    ci_high = _fmt_num(metric_row.get("Bootstrap_CI_upper", np.nan), 3)
+                    ci_text = f"[{ci_low}, {ci_high}]"
+                    pct_change = _fmt_pct(metric_row.get("Percent_change", np.nan), 1)
+                    pct_ci_low = _fmt_pct(metric_row.get("Percent_CI_lower", np.nan), 1)
+                    pct_ci_high = _fmt_pct(metric_row.get("Percent_CI_upper", np.nan), 1)
+                    pct_ci_text = f"[{pct_ci_low}, {pct_ci_high}]"
                     p_fmt = metric_row["P_value_formatted"]
                     p_corr_fmt = metric_row["P_value_corrected_formatted"]
                     cohens_d = f"{metric_row['Cohens_d']:.3f}" if not pd.isna(metric_row["Cohens_d"]) else "N/A"
                     sig = metric_row["Significance"]
 
-                    f.write(f"| {metric_name} | {p_fmt} | {p_corr_fmt} | {cohens_d} | {sig} |\n")
+                    f.write(
+                        f"| {metric_name} | {n_text} | {mean_g} | {mean_c} | {mean_diff} | {ci_text} | {pct_change} | {pct_ci_text} | {p_fmt} | {p_corr_fmt} | {cohens_d} | {sig} |\n"
+                    )
 
         print(f"   💾 Saved Markdown table: {md_path}")
 
@@ -1196,14 +1387,6 @@ def create_hits_heatmap(
         title_suffix = "Statistical Significance"
         color_description = "Color = Significance at p < 0.05"
 
-    ax.set_title(
-        f"High-Consistency Hits - Detailed Metric Analysis ({title_suffix})\n"
-        f"Individual Metrics (≥{MIN_COMBINED_CONSISTENCY:.0%} combined consistency)\n"
-        f"{len(genotype_names)} genotypes across {len(metric_names)} metrics",
-        fontsize=14,
-        fontweight="bold",
-        pad=20,
-    )
     ax.set_xlabel("Metrics", fontsize=12, fontweight="bold")
     ax.set_ylabel("Genotypes (High-Consistency Hits)", fontsize=12, fontweight="bold")
 
@@ -2261,13 +2444,6 @@ def plot_two_way_dendrogram_metrics(
                 ax_hm.spines["top"].set_visible(False)
                 ax_hm.spines["right"].set_visible(False)
 
-    fig.suptitle(
-        f"Metric Analysis - Two-way Dendrogram\n({clustering_description})",
-        fontsize=14,
-        fontweight="bold",
-        y=0.98,
-    )
-
     # 13) Save files
     png = os.path.join(OUTPUT_DIR, f"metric_two_way_dendrogram.png")
     pdf = os.path.join(OUTPUT_DIR, f"metric_two_way_dendrogram.pdf")
@@ -2565,13 +2741,7 @@ def plot_simple_metric_heatmap(
     cbar.set_ticklabels(tick_labels)
     cbar.ax.tick_params(labelsize=9)
 
-    # 10) Set title and labels
-    ax_main.set_title(
-        f"Metric Analysis - Simple Heatmap\n" f"(Genotypes sorted by brain region, Metrics by correlation)",
-        fontsize=14,
-        fontweight="bold",
-        pad=20,
-    )
+    # 10) Set labels
     ax_main.set_xlabel("Metrics", fontsize=12, fontweight="bold")
     ax_main.set_ylabel("Genotypes (sorted by brain region)", fontsize=12, fontweight="bold")
 
@@ -2695,36 +2865,22 @@ def plot_brain_region_grouped_heatmap(
         if region not in sorted_regions:
             sorted_regions.append(region)
 
-    # Cluster metrics by correlation (same order for all subplots)
-    # Use same approach as dendrogram with NaN handling
-    corr_subset = correlation_matrix.loc[metric_names, metric_names]
-
-    # Handle NaN values in correlation matrix
-    corr_subset = corr_subset.fillna(0.0)  # Replace NaN with 0 correlation
-
-    # Convert correlation to distance matrix
-    distance_matrix = 1 - np.abs(corr_subset.values)
-
-    # Ensure diagonal is 0 (distance from metric to itself)
-    np.fill_diagonal(distance_matrix, 0.0)
-
-    # Check for any remaining non-finite values
-    if not np.all(np.isfinite(distance_matrix)):
-        print("⚠️  Non-finite values in distance matrix, replacing with 1.0")
-        distance_matrix = np.where(np.isfinite(distance_matrix), distance_matrix, 1.0)
-
-    # Extract upper triangle to get condensed distance matrix
-    n = distance_matrix.shape[0]
-    col_distances = distance_matrix[np.triu_indices(n, k=1)]
-
-    # Final check for finite values in condensed distance matrix
-    if not np.all(np.isfinite(col_distances)):
-        print("⚠️  Non-finite values in condensed distance matrix, replacing with 1.0")
-        col_distances = np.where(np.isfinite(col_distances), col_distances, 1.0)
-
-    col_Z = linkage(col_distances, method="ward") if len(metric_names) > 1 else None
-    col_order_idx = leaves_list(col_Z) if col_Z is not None else list(range(len(metric_names)))
-    col_order = [metric_names[i] for i in col_order_idx]
+    # Order metrics by predefined thematic groups (METRIC_GROUPS) instead of correlation clustering
+    metric_names_set = set(metric_names)
+    col_order = []
+    # valid_groups tracks (group_label, [metric_keys_in_order]) for annotation
+    valid_groups = []
+    for group_label, group_keys in METRIC_GROUPS:
+        present = [k for k in group_keys if k in metric_names_set]
+        if present:
+            col_order.extend(present)
+            valid_groups.append((group_label, present))
+    # Append any metrics not covered by any group, preserving original order
+    covered = set(col_order)
+    extra = [m for m in metric_names if m not in covered]
+    if extra:
+        col_order.extend(extra)
+        valid_groups.append(("Other", extra))
 
     # Get informative metric names for display
     display_metric_names = [get_display_name(m) for m in col_order]
@@ -2740,7 +2896,7 @@ def plot_brain_region_grouped_heatmap(
         num_regions,
         2,
         height_ratios=height_ratios,
-        width_ratios=[20, 1],  # Main plot area and colorbar
+        width_ratios=[20, 0.4],  # Main plot area and colorbar
         hspace=0.3,  # Spacing between brain regions
         wspace=0.05,
     )
@@ -2862,7 +3018,16 @@ def plot_brain_region_grouped_heatmap(
         axes[-1].set_xticklabels(
             axes[-1].get_xticklabels(), rotation=metric_label_rotation, ha="right", fontsize=col_label_fontsize
         )
-        axes[-1].set_xlabel("Metrics", fontsize=12, fontweight="bold")
+        # Color each metric label to match its thematic group (black / gray alternation)
+        _group_colors_tick = ["black", "#888888"]
+        _col_to_group_color = {}
+        for _g_idx, (_g_label, _g_keys) in enumerate(valid_groups):
+            _gc = _group_colors_tick[_g_idx % len(_group_colors_tick)]
+            for _k in _g_keys:
+                if _k in col_order:
+                    _col_to_group_color[col_order.index(_k)] = _gc
+        for _j, _lbl in enumerate(axes[-1].get_xticklabels()):
+            _lbl.set_color(_col_to_group_color.get(_j, "black"))
 
     # Add smaller colorbar on the right (centered, about 1/4 height)
     # Calculate middle rows to center the colorbar
@@ -2907,15 +3072,94 @@ def plot_brain_region_grouped_heatmap(
         print("   ⚠️  Could not set clipped colorbar tick labels.")
         pass
 
-    # Overall title
-    fig.suptitle(
-        "Metric Analysis by Brain Region\n(Separate panels per region, metrics clustered by correlation)",
-        fontsize=14,
-        fontweight="bold",
-        y=0.995,
-    )
+    # Overall title removed
 
-    plt.tight_layout(rect=[0, 0, 1, 0.99])  # Leave space for title
+    # Reserve extra bottom margin for the group bracket annotations, then finalise layout
+    plt.tight_layout(rect=[0, 0.12, 1, 0.99])
+
+    # --- Thematic group bracket annotations below x-axis of bottom subplot ---
+    # Must come AFTER tight_layout so that all axes positions are final and
+    # tick-label bounding boxes reflect the actual rendered layout.
+    # We work in figure-fraction coordinates (DPI-independent).
+    if axes and valid_groups:
+        from matplotlib.lines import Line2D
+
+        ax_bottom = axes[-1]
+        col_idx_map = {m: i for i, m in enumerate(col_order)}
+        group_colors = ["black", "#888888"]  # alternating black / medium-gray
+        line_lw = 2.0
+
+        # Render into the Agg canvas so bounding boxes are populated
+        fig.canvas.draw()
+        try:
+            renderer = fig.canvas.get_renderer()
+        except AttributeError:
+            renderer = fig.canvas.renderer
+        fig_inv = fig.transFigure.inverted()
+
+        # Collect label bounding boxes in figure-fraction coords.
+        # tick_labels[j] corresponds to col_order[j].
+        tick_labels = ax_bottom.get_xticklabels()
+        label_x0_fig = {}  # col_idx -> left edge of rotated label bbox (fig frac)
+        y_min_fig = float("inf")  # lowest y of any label (fig frac)
+        for j, lbl in enumerate(tick_labels):
+            bb = lbl.get_window_extent(renderer=renderer)
+            pts = fig_inv.transform([[bb.x0, bb.y0], [bb.x1, bb.y1]])
+            label_x0_fig[j] = pts[0, 0]  # leftmost x = bottom-left of rotated label
+            y_min_fig = min(y_min_fig, pts[0, 1])  # track the lowest y across all labels
+
+        # Place bracket line just below the lowest label edge
+        gap_frac = 0.005  # gap between lowest label bottom and bracket line (fig frac)
+        label_gap = 0.012  # gap between bracket line and group text (fig frac)
+
+        y_line_fig = y_min_fig - gap_frac
+        y_label_fig = y_line_fig - label_gap
+
+        for g_idx, (group_label, group_keys) in enumerate(valid_groups):
+            present_in_col = [k for k in group_keys if k in col_idx_map]
+            if not present_in_col:
+                continue
+            j_start_idx = col_idx_map[present_in_col[0]]
+            j_end_idx = col_idx_map[present_in_col[-1]]
+            color = group_colors[g_idx % len(group_colors)]
+
+            # x_start: bottom-left (leftmost point) of the first label's rotated bbox
+            x_start = label_x0_fig.get(j_start_idx, None)
+            if x_start is None:
+                continue
+
+            # x_end: bottom-left (leftmost point) of the LAST label's rotated bbox —
+            # so the bar spans from the visual tip of the first label to the visual
+            # tip of the last label (not beyond it).
+            x_end = label_x0_fig.get(j_end_idx, None)
+            if x_end is None:
+                continue
+
+            # Horizontal bracket line (no end-cap ticks)
+            fig.add_artist(
+                Line2D(
+                    [x_start, x_end],
+                    [y_line_fig, y_line_fig],
+                    transform=fig.transFigure,
+                    color=color,
+                    linewidth=line_lw,
+                    solid_capstyle="butt",
+                    clip_on=False,
+                )
+            )
+            # Group label — centred on the bracket bar
+            fig.text(
+                (x_start + x_end) / 2,
+                y_label_fig,
+                group_label,
+                transform=fig.transFigure,
+                color=color,
+                ha="center",
+                va="top",
+                fontsize=col_label_fontsize,
+                fontweight="bold",
+                clip_on=False,
+            )
 
     # Save
     png = os.path.join(OUTPUT_DIR, "metric_brain_region_grouped_heatmap.png")
