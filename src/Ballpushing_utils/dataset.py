@@ -276,19 +276,23 @@ class Dataset:
 
         return embeddings
 
-    def _prepare_dataset_coordinates(self, fly, downsampling_factor=None, annotate_events=True):
+    def _prepare_dataset_coordinates(self, fly, downsampling_factor=None, annotate_events=True, annotate_contacts=None):
         """
         Helper function to prepare individual fly dataset with fly and ball coordinates. It also adds the fly name, experiment name, and arena metadata as categorical data.
 
         Args:
             fly (Fly): A Fly object.
             downsampling_factor (int): The factor (in seconds) by which to downsample the dataset. Defaults to None.
-            annotate_events (bool): Whether to annotate the dataset with interaction events. Defaults to False.
+            annotate_events (bool): Whether to annotate the dataset with interaction events. Defaults to True.
+            annotate_contacts (bool | None): Whether to annotate the dataset with contact events. If None,
+                value is taken from fly.config.annotate_contacts.
 
         Returns:
             pandas.DataFrame: A DataFrame containing the fly's coordinates and associated metadata.
         """
         downsampling_factor = fly.config.downsampling_factor or downsampling_factor
+        if annotate_contacts is None:
+            annotate_contacts = bool(getattr(fly.config, "annotate_contacts", False))
 
         # Extract fly and ball tracking data
         flydata = [obj.dataset for obj in fly.tracking_data.flytrack.objects]
@@ -329,6 +333,10 @@ class Dataset:
         # Annotate interaction events if required
         if annotate_events:
             self._annotate_interaction_events(dataset, fly)
+
+        # Annotate contact events if required
+        if annotate_contacts:
+            self._annotate_contact_events(dataset, fly)
 
         # Add trial information for learning experiments
         if fly.config.experiment_type == "Learning" and hasattr(fly, "learning_metrics"):
@@ -444,6 +452,55 @@ class Dataset:
                     event_onset += 1
 
         dataset["interaction_event_onset"] = event_onset_frames
+
+    def _annotate_contact_events(self, dataset, fly):
+        """
+        Annotate the dataset with contact events and their onsets.
+
+        Args:
+            dataset (pd.DataFrame): The dataset to annotate.
+            fly (Fly): A Fly object.
+        """
+        contact_frames = np.full(len(dataset), np.nan)
+        contact_onset_frames = np.full(len(dataset), np.nan)
+
+        if not hasattr(fly, "skeleton_metrics") or fly.skeleton_metrics is None:
+            dataset["contact_event"] = contact_frames
+            dataset["contact_event_onset"] = contact_onset_frames
+            return
+
+        contact_events = getattr(fly.skeleton_metrics, "all_contacts", None)
+        if not contact_events:
+            dataset["contact_event"] = contact_frames
+            dataset["contact_event_onset"] = contact_onset_frames
+            return
+
+        contact_index = 0
+        for event in contact_events:
+            if event is None or len(event) < 2:
+                continue
+
+            start_idx = int(event[0])
+            end_idx = int(event[1])
+
+            if end_idx < start_idx:
+                continue
+
+            start_idx = max(0, start_idx)
+            end_idx = min(len(dataset), end_idx)
+
+            if start_idx >= len(dataset):
+                continue
+
+            if end_idx <= start_idx:
+                end_idx = min(len(dataset), start_idx + 1)
+
+            contact_frames[start_idx:end_idx] = contact_index
+            contact_onset_frames[start_idx] = contact_index
+            contact_index += 1
+
+        dataset["contact_event"] = contact_frames
+        dataset["contact_event_onset"] = contact_onset_frames
 
     def _prepare_dataset_contact_data(self, fly, hidden_value=None):
         if hidden_value is None:
@@ -623,14 +680,19 @@ class Dataset:
 
     def _prepare_dataset_F1_coordinates(self, fly, downsampling_factor=None):
         """
-        Prepare F1 coordinates dataset with simple adjusted time and ball distances.
+        Prepare F1 coordinates dataset with explicit training/test phases.
+
+        - Keeps first-corridor frames (training phase) with raw `time`
+        - Keeps second-corridor frames (test phase) with `adjusted_time`
+        - Adds `phase` and `phase_time` for easier phase-specific plotting
+        - Applies 1-hour cutoff to training phase only at dataset level
 
         Args:
             fly (Fly): A Fly object.
             downsampling_factor (int): Optional downsampling factor.
 
         Returns:
-            pandas.DataFrame: DataFrame with adjusted_time and ball distances.
+            pandas.DataFrame: DataFrame with time/phase columns and F1 coordinate signals.
         """
         # Check if the fly ever exits the corridor
         if fly.tracking_data.f1_exit_time is None:
@@ -639,52 +701,117 @@ class Dataset:
 
         downsampling_factor = fly.config.downsampling_factor or downsampling_factor
 
-        # Get the raw adjusted time from tracking data
+        # Get adjusted time from tracking data (negative before exit, >=0 after exit)
         raw_adjusted_time = fly.tracking_data.adjusted_time
 
         if raw_adjusted_time is None or np.all(np.isnan(raw_adjusted_time)):
             print(f"No valid adjusted time data for {fly.metadata.name}")
             return pd.DataFrame()
 
+        # Base fly tracking
+        fly_track = fly.tracking_data.flytrack.objects[0].dataset
+
         # Initialize dataset with time information
         dataset = pd.DataFrame(
             {
-                "time": fly.tracking_data.flytrack.objects[0].dataset["time"],
-                "frame": fly.tracking_data.flytrack.objects[0].dataset["frame"],
+                "time": fly_track["time"],
+                "frame": fly_track["frame"],
                 "adjusted_time": raw_adjusted_time,
             }
         )
+
+        # Add fly coordinates if available
+        if "x_thorax" in fly_track.columns:
+            dataset["x_fly_0"] = fly_track["x_thorax"] - fly.tracking_data.start_x
+        else:
+            dataset["x_fly_0"] = np.nan
+
+        if "y_thorax" in fly_track.columns:
+            dataset["y_fly_0"] = fly_track["y_thorax"] - fly.tracking_data.start_y
+        else:
+            dataset["y_fly_0"] = np.nan
+
+        dataset["distance_fly_0"] = np.sqrt(dataset["x_fly_0"].pow(2) + dataset["y_fly_0"].pow(2))
 
         # Add ball distances directly from tracking data
 
         # For training ball (only if not control condition)
         if fly.metadata.F1_condition != "control" and fly.tracking_data.has_training_ball():
             training_ball_data = fly.tracking_data.get_training_ball_data()
-            if training_ball_data is not None and "euclidean_distance" in training_ball_data.columns:
-                dataset["training_ball_euclidean_distance"] = training_ball_data["euclidean_distance"]
+            if training_ball_data is not None:
+                if "x_centre" in training_ball_data.columns:
+                    dataset["x_training_ball"] = training_ball_data["x_centre"] - fly.tracking_data.start_x
+                else:
+                    dataset["x_training_ball"] = np.nan
+
+                if "y_centre" in training_ball_data.columns:
+                    dataset["y_training_ball"] = training_ball_data["y_centre"] - fly.tracking_data.start_y
+                else:
+                    dataset["y_training_ball"] = np.nan
+
+                if "euclidean_distance" in training_ball_data.columns:
+                    dataset["training_ball_euclidean_distance"] = training_ball_data["euclidean_distance"]
+                else:
+                    dataset["training_ball_euclidean_distance"] = np.nan
             else:
+                dataset["x_training_ball"] = np.nan
+                dataset["y_training_ball"] = np.nan
                 dataset["training_ball_euclidean_distance"] = np.nan
         else:
+            dataset["x_training_ball"] = np.nan
+            dataset["y_training_ball"] = np.nan
             dataset["training_ball_euclidean_distance"] = np.nan
 
         # For test ball (should always be available)
         if fly.tracking_data.has_test_ball():
             test_ball_data = fly.tracking_data.get_test_ball_data()
-            if test_ball_data is not None and "euclidean_distance" in test_ball_data.columns:
-                dataset["test_ball_euclidean_distance"] = test_ball_data["euclidean_distance"]
+            if test_ball_data is not None:
+                if "x_centre" in test_ball_data.columns:
+                    dataset["x_test_ball"] = test_ball_data["x_centre"] - fly.tracking_data.start_x
+                else:
+                    dataset["x_test_ball"] = np.nan
+
+                if "y_centre" in test_ball_data.columns:
+                    dataset["y_test_ball"] = test_ball_data["y_centre"] - fly.tracking_data.start_y
+                else:
+                    dataset["y_test_ball"] = np.nan
+
+                if "euclidean_distance" in test_ball_data.columns:
+                    dataset["test_ball_euclidean_distance"] = test_ball_data["euclidean_distance"]
+                else:
+                    dataset["test_ball_euclidean_distance"] = np.nan
             else:
+                dataset["x_test_ball"] = np.nan
+                dataset["y_test_ball"] = np.nan
                 dataset["test_ball_euclidean_distance"] = np.nan
         else:
+            dataset["x_test_ball"] = np.nan
+            dataset["y_test_ball"] = np.nan
             dataset["test_ball_euclidean_distance"] = np.nan
 
-        # Filter out data points with negative adjusted time (keep only positive values)
-        positive_time_mask = dataset["adjusted_time"] >= 0
-        if positive_time_mask.any():
-            dataset = dataset[positive_time_mask].reset_index(drop=True)
-            print(f"Fly {fly.metadata.name}: Kept {len(dataset)} frames with positive adjusted time")
-        else:
-            print(f"Fly {fly.metadata.name}: No frames with positive adjusted time")
-            return pd.DataFrame()
+        # Phase columns for plotting convenience
+        # training: before exit (adjusted_time < 0)
+        # test: at/after exit (adjusted_time >= 0)
+        dataset["phase"] = np.where(dataset["adjusted_time"] < 0, "training", "test")
+        dataset["phase_time"] = np.where(dataset["phase"] == "training", dataset["time"], dataset["adjusted_time"])
+
+        # Keep explicit flags for downstream filtering
+        dataset["training_phase"] = dataset["phase"] == "training"
+        dataset["test_phase"] = dataset["phase"] == "test"
+
+        # Annotate interaction events BEFORE filtering (so frame indices align with tracking data)
+        self._annotate_interaction_events(dataset, fly)
+
+        # Apply 1-hour cutoff to training phase only (dataset-level, no tracking-data mutation)
+        training_cutoff_seconds = 3600
+        valid_training = ~dataset["training_phase"] | (dataset["time"] <= training_cutoff_seconds)
+        dropped_training_rows = int((~valid_training & dataset["training_phase"]).sum())
+        dataset = dataset.loc[valid_training].reset_index(drop=True)
+        if dropped_training_rows > 0:
+            print(
+                f"Fly {fly.metadata.name}: Dropped {dropped_training_rows} training-phase frames beyond "
+                f"{training_cutoff_seconds}s"
+            )
 
         # Apply downsampling if specified
         if downsampling_factor:

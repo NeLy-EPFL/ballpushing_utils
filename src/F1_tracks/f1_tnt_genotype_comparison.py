@@ -11,6 +11,7 @@ Usage:
     python f1_tnt_genotype_comparison.py --show  # Display plots instead of just saving
     python f1_tnt_genotype_comparison.py --metrics interaction_rate,interaction_duration
     python f1_tnt_genotype_comparison.py --no-stats  # Generate plots without statistical annotations
+    python f1_tnt_genotype_comparison.py --generate-all-combinations  # Run Visual, Dopaminergic, MB, All in one pass
 """
 
 import argparse
@@ -22,8 +23,10 @@ import pandas as pd
 import matplotlib
 
 matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 
-matplotlib.rcParams["font.family"] = "Arial"
+matplotlib.rcParams["font.family"] = "sans-serif"
+matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -47,7 +50,7 @@ DATASET_PATHS = {
     "coordinates": "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/F1_coordinates/pooled_F1_coordinates.feather",
 }
 
-OUTPUT_DIR = "/mnt/upramdya_data/MD/F1_Tracks/F1_TNT/All"
+OUTPUT_DIR = "/mnt/upramdya_data/MD/F1_Tracks/F1_TNT/Dopaminergic"
 
 # ============================================================================
 # GENOTYPE SELECTION - Comment out genotypes to exclude from analysis
@@ -72,6 +75,22 @@ SELECTED_GENOTYPES = [
     #'PRxLC16-1',
 ]
 
+# Predefined genotype combinations for one-shot batch generation
+PREDEFINED_GENOTYPE_COMBINATIONS = {
+    "Visual": ["TNTxEmptySplit", "TNTxLC10-2", "TNTxLC16-1"],
+    "Dopaminergic": ["TNTxEmptySplit", "TNTxDDC", "TNTxTH", "TNTxTRH"],
+    "MB": ["TNTxEmptySplit", "TNTxMB247"],
+    "All": [
+        "TNTxEmptySplit",
+        "TNTxLC10-2",
+        "TNTxLC16-1",
+        "TNTxDDC",
+        "TNTxTH",
+        "TNTxTRH",
+        "TNTxMB247",
+    ],
+}
+
 # ============================================================================
 # ANALYSIS CONFIGURATION
 # ============================================================================
@@ -95,6 +114,57 @@ DEFAULT_CONTINUOUS_METRICS = [
     "significant_ratio",  # Proportion of significant events
     "raw_distance_moved",  # Total ball distance moved (raw)
     "raw_max_distance",  # Maximum ball distance (raw)
+]
+
+# ============================================================================
+# SUPPLEMENTARY METRICS - Additional metrics analyzed in supplementary subfolder
+# ============================================================================
+# These metrics are analyzed in addition to the main metrics
+# Results are saved in {OUTPUT_DIR}/supplementary/ subfolder
+
+# Binary metrics (supplementary)
+SUPPLEMENTARY_BINARY_METRICS = [
+    "has_significant",  # Whether there was a significant event
+]
+
+# Continuous metrics (supplementary)
+# Note: These are available in the dataset but not in the main analysis
+SUPPLEMENTARY_CONTINUOUS_METRICS = [
+    "max_event",  # Max event value
+    "max_event_time",  # Time of max event
+    "final_event",  # Final event value
+    "final_event_time",  # Time of final event
+    "distance_ratio",  # Ratio of ball distance moved
+    "chamber_time",  # Time in chamber
+    "chamber_ratio",  # Ratio of time in chamber
+    "chamber_exit_time",  # Time to exit chamber
+    "nb_significant_events",  # Number of significant events
+    "time_to_first_interaction",  # Time to first interaction
+    "first_significant_event",  # First significant event value
+    "first_significant_event_time",  # Time of first significant event
+    "first_major_event",  # First major event value
+    "first_major_event_time",  # Time of first major event
+    "pulled",  # Number of pulls
+    "pushed",  # Number of pushes
+    "pulling_ratio",  # Ratio of pulls
+    "interaction_persistence",  # Interaction persistence
+    "normalized_velocity",  # Normalized velocity
+    "velocity_during_interactions",  # Velocity during interactions
+    "nb_long_pauses",  # Number of long pauses
+    "median_long_pause_duration",  # Median long pause duration
+    "total_pause_duration",  # Total pause duration
+    "pauses_persistence",  # Pauses persistence
+    "nb_freeze",  # Number of freezes
+    "median_freeze_duration",  # Median freeze duration
+    "interaction_proportion",  # Interaction proportion
+    "cumulated_breaks_duration",  # Total break duration
+    "fly_distance_moved",  # Fly distance moved
+    "persistence_at_end",  # Persistence at end
+    "time_chamber_beginning",  # Time in chamber (early)
+    "fraction_not_facing_ball",  # Fraction not facing ball
+    "head_pushing_ratio",  # Head pushing ratio
+    "leg_visibility_ratio",  # Leg visibility ratio
+    "flailing",  # Leg flailing
 ]
 
 # Columns to exclude from auto-detection
@@ -147,17 +217,30 @@ GENOTYPE_COLORS = {
 
 # Pretraining styles - Controls visual distinction for pretrained vs naive
 PRETRAINING_STYLES = {
-    "n": {"alpha": 0.6, "edgecolor": "black", "linewidth": 1.5, "label_suffix": " (Naive)"},  # Naive (no pretraining)
-    "y": {"alpha": 1.0, "edgecolor": "black", "linewidth": 2.5, "label_suffix": " (Pretrained)"},  # Pretrained
+    "n": {"alpha": 0.6, "edgecolor": "#7f7f7f", "linewidth": 1, "label_suffix": " (Naive)"},  # Naive (no pretraining)
+    "y": {"alpha": 1.0, "edgecolor": "black", "linewidth": 1, "label_suffix": " (Pretrained)"},  # Pretrained
 }
 
 # Plot configuration - Base values (will be adapted based on number of genotypes)
-FIGURE_SIZE = (14, 8)  # Width, Height for individual metric plots
+# Paper-style figure geometry (compact, mm-based)
+PAPER_FIGURE_HEIGHT_MM = 25 * 5
+PAPER_FIGURE_WIDTH_MM_MIN = 25 * 5
+PAPER_FIGURE_WIDTH_MM_MAX = 125 * 5
+
+# Typography tuned for compact paper panels
+FONT_SIZE_TICKS = 6
+FONT_SIZE_LABELS = 7
+FONT_SIZE_TITLE = 8
+FONT_SIZE_LEGEND = 6
+FONT_SIZE_ANNOTATIONS = 7
+FONT_SIZE_N_TEXT = 5
+
+FIGURE_SIZE = (2.5, 1.0)  # Fallback inches (will be overridden by adaptive sizing)
 DPI = 300
 PLOT_FORMATS = ["png", "pdf", "svg"]  # Save plots in multiple formats
-JITTER_AMOUNT = 0.15  # Amount of jitter for scatter points (baseline - adapted per analysis)
-SCATTER_SIZE = 30  # Baseline scatter point size (adapted per analysis)
-SCATTER_ALPHA = 0.5
+JITTER_AMOUNT = 0.06  # Amount of jitter for scatter points (baseline - adapted per analysis)
+SCATTER_SIZE = 10  # Baseline scatter point size (adapted per analysis)
+SCATTER_ALPHA = 0.6
 
 # Y-axis limits for handling outliers
 YLIM_PERCENTILE_LOW = 0  # Lower percentile for y-axis (0 = minimum)
@@ -188,6 +271,11 @@ N_PERMUTATIONS = 10000  # Number of permutations for permutation tests
 # ============================================================================
 
 
+def mm_to_inches(mm_value):
+    """Convert millimeters to inches for matplotlib figsize."""
+    return mm_value / 25.4
+
+
 def get_adaptive_styling_params(n_genotypes, n_pretraining=2):
     """
     Calculate adaptive styling parameters based on number of genotypes and pretraining conditions.
@@ -204,42 +292,37 @@ def get_adaptive_styling_params(n_genotypes, n_pretraining=2):
     Returns:
         dict with adaptive parameters: jitter_amount, figure_size, scatter_size
     """
-    # Adaptive jitter: inversely proportional to number of genotypes
-    # 3 genotypes -> 0.08, 5 -> 0.10, 10 -> 0.12, 15+ -> 0.15
+    # Adaptive jitter: tighter for compact panel widths
     if n_genotypes <= 3:
+        jitter = 0.05
+    elif n_genotypes <= 5:
+        jitter = 0.06
+    elif n_genotypes <= 10:
+        jitter = 0.07
+    else:
         jitter = 0.08
-    elif n_genotypes <= 5:
-        jitter = 0.10
-    elif n_genotypes <= 10:
-        jitter = 0.12
-    else:
-        jitter = 0.15
 
-    # Adaptive figure width based on number of genotypes
-    # 3 genotypes -> (10, 8), 5 -> (12, 8), 10+ -> (14, 8), 15+ -> (16, 8)
-    if n_genotypes <= 3:
-        fig_width = 10
-    elif n_genotypes <= 5:
-        fig_width = 12
-    elif n_genotypes <= 10:
-        fig_width = 14
-    else:
-        fig_width = 16
+    # Adaptive figure width in mm, bounded to requested paper range
+    # Keeps small panels compact while allowing wider multi-condition figures.
+    width_mm = 12 + 9 * n_genotypes
+    width_mm = max(PAPER_FIGURE_WIDTH_MM_MIN, min(PAPER_FIGURE_WIDTH_MM_MAX, width_mm))
+    fig_width = mm_to_inches(width_mm)
+    fig_height = mm_to_inches(PAPER_FIGURE_HEIGHT_MM)
 
     # Adaptive scatter size: inversely proportional to number of genotypes
     # More genotypes = smaller points (less visual clutter)
-    if n_genotypes <= 3:
-        scatter_size = 50  # Larger for focused analysis
-    elif n_genotypes <= 5:
-        scatter_size = 40
-    elif n_genotypes <= 10:
-        scatter_size = 30
+    if n_genotypes <= 2:
+        scatter_size = 14
+    elif n_genotypes <= 4:
+        scatter_size = 12
+    elif n_genotypes <= 6:
+        scatter_size = 10
     else:
-        scatter_size = 20
+        scatter_size = 8
 
     return {
         "jitter_amount": jitter,
-        "figure_size": (fig_width, 8),
+        "figure_size": (fig_width, fig_height),
         "scatter_size": scatter_size,
     }
 
@@ -1558,11 +1641,12 @@ def plot_binary_metric_single(
         print(f"Warning: Metric '{metric}' not found in dataset")
         return None
 
-    fig, ax = plt.subplots(figsize=FIGURE_SIZE)
-
     # Get unique pretraining values
     pretrain_values = sorted(df[pretraining_col].dropna().unique())
     n_pretrain = len(pretrain_values)
+
+    adaptive_params = get_adaptive_styling_params(len(SELECTED_GENOTYPES), n_pretraining=n_pretrain)
+    fig, ax = plt.subplots(figsize=adaptive_params["figure_size"])
 
     # Calculate positions
     positions, bar_width = create_grouped_positions(len(SELECTED_GENOTYPES), n_pretrain)
@@ -1603,19 +1687,19 @@ def plot_binary_metric_single(
             )
 
             # Add sample size on top
-            ax.text(positions[pos_idx], prop, f"n={n}", ha="center", va="bottom", fontsize=7)
+            ax.text(positions[pos_idx], prop, f"n={n}", ha="center", va="bottom", fontsize=FONT_SIZE_N_TEXT)
 
             pos_idx += 1
 
     # Set x-axis labels
     ax.set_xticks(xtick_positions)
-    ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=10)
-    ax.set_ylabel("Proportion", fontsize=12)
-    ax.set_ylim([0, 1.1])
-    ax.set_title(get_elegant_metric_name(metric), fontsize=14, fontweight="bold")
+    ax.set_xticklabels(xtick_labels, rotation=45, ha="right", fontsize=FONT_SIZE_TICKS)
+    ax.set_ylabel("Proportion", fontsize=FONT_SIZE_LABELS)
+    ax.set_ylim(0, 1.1)
+    ax.set_title(get_elegant_metric_name(metric), fontsize=FONT_SIZE_TITLE, fontweight="bold")
 
     # Add second x-axis label for pretraining
-    ax.set_xlabel("Genotype", fontsize=12)
+    ax.set_xlabel("Genotype", fontsize=FONT_SIZE_LABELS)
 
     # Add legend
     legend_elements = []
@@ -1623,7 +1707,7 @@ def plot_binary_metric_single(
         pretrain_style = PRETRAINING_STYLES.get(str(pretrain_val).lower(), PRETRAINING_STYLES["n"])
         label = format_pretraining_label(pretrain_val)
         legend_elements.append(
-            plt.Rectangle(
+            Rectangle(
                 (0, 0),
                 1,
                 1,
@@ -1634,7 +1718,16 @@ def plot_binary_metric_single(
                 label=label,
             )
         )
-    ax.legend(handles=legend_elements, loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=10)
+    ax.legend(
+        handles=legend_elements,
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.22),
+        borderaxespad=0.0,
+        fontsize=FONT_SIZE_LEGEND,
+        frameon=False,
+        handlelength=1.1,
+        ncol=2,
+    )
 
     # Add significance annotations
     if show_stats and pretrain_stats and "test_results" in pretrain_stats:
@@ -1663,14 +1756,17 @@ def plot_binary_metric_single(
                     sig_text,
                     ha="center",
                     va="bottom",
-                    fontsize=11,
+                    fontsize=FONT_SIZE_ANNOTATIONS,
                     fontweight="bold",
                     color="red" if p_val < 0.05 else "gray",
                 )
 
-    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ax.grid(False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.0)
+    ax.spines["bottom"].set_linewidth(1.0)
+    ax.tick_params(axis="both", which="major", direction="out", length=3, width=1.0, labelsize=FONT_SIZE_TICKS)
 
     plt.tight_layout()
 
@@ -1891,14 +1987,14 @@ def plot_continuous_metric_single(
         patch.set_linewidth(style["linewidth"])
 
     # Add jittered scatter points
-    for data, pos, color in zip(all_data, all_positions, all_colors):
+    for data, pos, color, style in zip(all_data, all_positions, all_colors, all_styles):
         if len(data) > 0:
             # Add jitter using adaptive jitter amount
             x_jitter = np.random.normal(pos, jitter_amount_adaptive * box_width, size=len(data))
             ax.scatter(
                 x_jitter,
                 data,
-                alpha=SCATTER_ALPHA,
+                alpha=min(1.0, style["alpha"] * 0.8),
                 s=scatter_size_adaptive,
                 color=color,
                 edgecolors="black",
@@ -1952,7 +2048,7 @@ def plot_continuous_metric_single(
                     sig_text,
                     ha="center",
                     va="bottom",
-                    fontsize=11,
+                    fontsize=FONT_SIZE_ANNOTATIONS,
                     fontweight="bold",
                     color="red" if p_val < 0.05 else "gray",
                 )
@@ -1976,9 +2072,9 @@ def plot_continuous_metric_single(
             label = f"{genotype}\n(n = {', '.join(n_values)})"
         labels_with_n.append(label)
 
-    ax.set_xticklabels(labels_with_n, rotation=45, ha="right", fontsize=9)
-    ax.set_ylabel(format_metric_label(metric), fontsize=12)
-    ax.set_xlabel("Genotype", fontsize=12)
+    ax.set_xticklabels(labels_with_n, rotation=45, ha="right", fontsize=FONT_SIZE_TICKS)
+    ax.set_ylabel(format_metric_label(metric), fontsize=FONT_SIZE_LABELS)
+    ax.set_xlabel("Genotype", fontsize=FONT_SIZE_LABELS)
 
     # Add legend for pretraining only
     legend_elements = []
@@ -1986,7 +2082,7 @@ def plot_continuous_metric_single(
         pretrain_style = PRETRAINING_STYLES.get(str(pretrain_val).lower(), PRETRAINING_STYLES["n"])
         label = format_pretraining_label(pretrain_val)
         legend_elements.append(
-            plt.Rectangle(
+            Rectangle(
                 (0, 0),
                 1,
                 1,
@@ -1998,14 +2094,26 @@ def plot_continuous_metric_single(
             )
         )
 
-    ax.legend(handles=legend_elements, loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=10)
+    ax.legend(
+        handles=legend_elements,
+        loc="upper left",
+        bbox_to_anchor=(0.0, 1.22),
+        borderaxespad=0.0,
+        fontsize=FONT_SIZE_LEGEND,
+        frameon=False,
+        handlelength=1.1,
+        ncol=2,
+    )
 
-    ax.grid(axis="y", alpha=0.3, linestyle="--")
+    ax.grid(False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(1.0)
+    ax.spines["bottom"].set_linewidth(1.0)
+    ax.tick_params(axis="both", which="major", direction="out", length=3, width=1.0, labelsize=FONT_SIZE_TICKS)
 
     # Adjust layout to prevent title overlap with significance annotations
-    plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave 4% space at top for title
+    plt.tight_layout(rect=(0, 0, 1, 0.96))  # Leave 4% space at top for title
 
     # Save plot in multiple formats
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -2134,8 +2242,8 @@ def plot_residual_vs_original_effects(lmm_results, residual_perm_results, output
         fontsize=13,
         fontweight="bold",
     )
-    ax.grid(alpha=0.3)
-    ax.legend()
+    ax.grid(False)
+    ax.legend(loc="upper left", bbox_to_anchor=(0.0, 1.18), borderaxespad=0.0, frameon=False)
 
     try:
         plt.tight_layout()
@@ -2204,6 +2312,446 @@ def generate_summary_table(lmm_results, residual_perm_results, output_file):
         print(f"⚠️ Could not save summary table: {e}")
 
 
+def _get_pretraining_counts_from_table(counts_table):
+    """Extract naive/pretrained sample sizes from a 2-row contingency table."""
+    if counts_table is None or counts_table.shape[0] < 2:
+        return np.nan, np.nan
+
+    row_labels = [str(idx).strip().lower() for idx in counts_table.index]
+    row_sums = counts_table.sum(axis=1)
+
+    naive_idx = None
+    pretrained_idx = None
+
+    for i, label in enumerate(row_labels):
+        if label in ["n", "no", "false", "0"]:
+            naive_idx = i
+        elif label in ["y", "yes", "true", "1"]:
+            pretrained_idx = i
+
+    if naive_idx is None or pretrained_idx is None:
+        # Fallback: preserve existing ordering if labels are non-standard
+        return row_sums.iloc[0], row_sums.iloc[1]
+
+    return row_sums.iloc[naive_idx], row_sums.iloc[pretrained_idx]
+
+
+def export_comprehensive_statistics_csv(
+    output_file,
+    binary_pretrain_stats=None,
+    lmm_stats=None,
+    residual_permutation_stats=None,
+    regular_permutation_stats=None,
+):
+    """Export a broad, review-friendly CSV containing all tested conditions and methods."""
+    rows = []
+
+    # ---------------------------------------------------------------------
+    # Binary metrics: pretraining effect within each genotype
+    # ---------------------------------------------------------------------
+    if binary_pretrain_stats:
+        for metric, metric_data in binary_pretrain_stats.items():
+            for result in metric_data.get("test_results", []):
+                counts = result.get("counts")
+                n_naive, n_pretrained = _get_pretraining_counts_from_table(counts)
+
+                test_statistic = np.nan
+                if "odds_ratio" in result:
+                    test_statistic = result.get("odds_ratio", np.nan)
+                elif "chi2" in result:
+                    test_statistic = result.get("chi2", np.nan)
+
+                rows.append(
+                    {
+                        "analysis_type": "binary",
+                        "method": result.get("method", "unknown"),
+                        "metric": metric,
+                        "metric_label": get_elegant_metric_name(metric),
+                        "genotype": result.get("genotype", "unknown"),
+                        "comparison": "pretrained_vs_naive",
+                        "effect_estimate": np.nan,
+                        "effect_estimate_secondary": np.nan,
+                        "cohens_d": np.nan,
+                        "stderr": np.nan,
+                        "ci_lower": np.nan,
+                        "ci_upper": np.nan,
+                        "test_statistic": test_statistic,
+                        "p_value": result.get("p_value", np.nan),
+                        "p_value_fdr": result.get("p_corrected", np.nan),
+                        "n_naive": n_naive,
+                        "n_pretrained": n_pretrained,
+                    }
+                )
+
+    # ---------------------------------------------------------------------
+    # Continuous metrics: LMM per genotype
+    # ---------------------------------------------------------------------
+    if lmm_stats:
+        for metric, metric_data in lmm_stats.items():
+            genotype_effects = metric_data.get("genotype_effects", {})
+            for genotype, effects in genotype_effects.items():
+                rows.append(
+                    {
+                        "analysis_type": "continuous",
+                        "method": "lmm",
+                        "metric": metric,
+                        "metric_label": get_elegant_metric_name(metric),
+                        "genotype": genotype,
+                        "comparison": "pretrained_vs_naive",
+                        "effect_estimate": effects.get("effect_size", np.nan),
+                        "effect_estimate_secondary": effects.get("percent_change", np.nan),
+                        "cohens_d": np.nan,
+                        "stderr": effects.get("stderr", np.nan),
+                        "ci_lower": effects.get("ci_lower", np.nan),
+                        "ci_upper": effects.get("ci_upper", np.nan),
+                        "test_statistic": np.nan,
+                        "p_value": effects.get("pvalue", np.nan),
+                        "p_value_fdr": np.nan,
+                        "n_naive": effects.get("n_naive", np.nan),
+                        "n_pretrained": effects.get("n_pretrained", np.nan),
+                    }
+                )
+
+    # ---------------------------------------------------------------------
+    # Continuous metrics: residual permutation (blocking-aware)
+    # ---------------------------------------------------------------------
+    if residual_permutation_stats:
+        for metric, metric_data in residual_permutation_stats.items():
+            genotype_effects = metric_data.get("genotype_effects", {})
+            for genotype, effects in genotype_effects.items():
+                rows.append(
+                    {
+                        "analysis_type": "continuous",
+                        "method": "residual_permutation",
+                        "metric": metric,
+                        "metric_label": get_elegant_metric_name(metric),
+                        "genotype": genotype,
+                        "comparison": "pretrained_vs_naive",
+                        "effect_estimate": effects.get("observed_diff_original", np.nan),
+                        "effect_estimate_secondary": effects.get("observed_diff_residual", np.nan),
+                        "cohens_d": effects.get("cohens_d_residual", np.nan),
+                        "stderr": np.nan,
+                        "ci_lower": np.nan,
+                        "ci_upper": np.nan,
+                        "test_statistic": np.nan,
+                        "p_value": effects.get("p_value_residual", np.nan),
+                        "p_value_fdr": effects.get("p_value_corrected", np.nan),
+                        "n_naive": effects.get("n_naive", np.nan),
+                        "n_pretrained": effects.get("n_pretrained", np.nan),
+                    }
+                )
+
+    # ---------------------------------------------------------------------
+    # Continuous metrics: regular permutation (fallback)
+    # ---------------------------------------------------------------------
+    if regular_permutation_stats:
+        for metric, metric_data in regular_permutation_stats.items():
+            genotype_effects = metric_data.get("genotype_effects", {})
+            for genotype, effects in genotype_effects.items():
+                rows.append(
+                    {
+                        "analysis_type": "continuous",
+                        "method": "regular_permutation",
+                        "metric": metric,
+                        "metric_label": get_elegant_metric_name(metric),
+                        "genotype": genotype,
+                        "comparison": "pretrained_vs_naive",
+                        "effect_estimate": effects.get("observed_diff", np.nan),
+                        "effect_estimate_secondary": np.nan,
+                        "cohens_d": effects.get("cohens_d", np.nan),
+                        "stderr": np.nan,
+                        "ci_lower": np.nan,
+                        "ci_upper": np.nan,
+                        "test_statistic": np.nan,
+                        "p_value": effects.get("p_value", np.nan),
+                        "p_value_fdr": effects.get("p_value_corrected", np.nan),
+                        "n_naive": effects.get("n_naive", np.nan),
+                        "n_pretrained": effects.get("n_pretrained", np.nan),
+                    }
+                )
+
+    if not rows:
+        print(f"⚠️ No statistical rows available for comprehensive export: {output_file}")
+        return
+
+    df_stats = pd.DataFrame(rows)
+    df_stats = df_stats.sort_values(["analysis_type", "metric", "genotype", "method"]).reset_index(drop=True)
+
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df_stats.to_csv(output_path, index=False)
+    print(f"✓ Saved comprehensive statistics CSV: {output_path}")
+    print(f"  Includes {len(df_stats)} rows across binary and continuous analyses")
+
+
+def run_analysis_for_configuration(
+    df, genotype_col, pretraining_col, args, selected_genotypes, output_dir, config_name
+):
+    """Run full analysis pipeline for one genotype combination and output folder."""
+    global SELECTED_GENOTYPES, OUTPUT_DIR
+
+    SELECTED_GENOTYPES = list(selected_genotypes)
+    OUTPUT_DIR = str(output_dir)
+
+    print("\n" + "#" * 80)
+    print(f"RUNNING CONFIGURATION: {config_name}")
+    print(f"Output folder: {output_dir}")
+    print(f"Selected genotypes: {SELECTED_GENOTYPES}")
+    print("#" * 80)
+
+    # Filter dataset
+    df_filtered = filter_dataset(df, genotype_col)
+    if df_filtered.empty:
+        print(f"⚠️ No data after filtering for configuration '{config_name}', skipping")
+        return
+
+    # Auto-detect continuous metrics
+    all_continuous_metrics = auto_detect_continuous_metrics(df_filtered)
+
+    # Print summary
+    print("\n" + "=" * 80)
+    print("DATASET SUMMARY")
+    print("=" * 80)
+    print(f"\nGenotypes included: {SELECTED_GENOTYPES}")
+    print(f"\nSample sizes by genotype and pretraining:")
+    summary = df_filtered.groupby([genotype_col, pretraining_col]).size().unstack(fill_value=0)
+    print(summary)
+
+    # Perform statistical analyses
+    print("\n" + "=" * 80)
+    print("STATISTICAL ANALYSIS")
+    print("=" * 80)
+
+    # Check if blocking factors are confounded with pretraining
+    print("\n🔍 Checking for confounding between blocking factors and pretraining:")
+    for col in ["Date", "date"]:
+        if col in df_filtered.columns:
+            check_blocking_factor_balance(df_filtered, genotype_col, pretraining_col, col)
+
+    binary_stats = perform_binary_analysis(df_filtered, genotype_col, pretraining_col)
+    binary_pretrain_stats = perform_binary_pretraining_effect(df_filtered, genotype_col, pretraining_col)
+
+    # Determine which metrics to analyze
+    if args.metrics:
+        metrics_to_analyze = [m.strip() for m in args.metrics.split(",")]
+        print(f"\n📌 Analyzing user-specified metrics: {metrics_to_analyze}")
+    elif args.all_metrics:
+        metrics_to_analyze = all_continuous_metrics
+        print(f"\n📌 Analyzing ALL {len(metrics_to_analyze)} auto-detected metrics")
+        print(f"   First 10: {', '.join(metrics_to_analyze[:10])}")
+        if len(metrics_to_analyze) > 10:
+            print(f"   ... and {len(metrics_to_analyze) - 10} more")
+    else:
+        metrics_to_analyze = DEFAULT_CONTINUOUS_METRICS
+        print(f"\n📌 Analyzing {len(metrics_to_analyze)} predefined metrics (matching PCA analysis)")
+        print(f"   Metrics: {', '.join(metrics_to_analyze)}")
+
+    # Perform LMM analysis if enabled
+    lmm_stats = None
+    if USE_LMM and not FORCE_REGULAR_PERMUTATION:
+        print("\n" + "=" * 80)
+        print("LINEAR MIXED-EFFECTS MODEL ANALYSIS")
+        print("=" * 80)
+        lmm_stats = perform_lmm_continuous_analysis(
+            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze
+        )
+
+    # Check blocking factor balance early in analysis
+    print("\n" + "=" * 80)
+    print("BLOCKING FACTOR BALANCE ANALYSIS")
+    print("=" * 80)
+    for date_col in df_filtered.columns:
+        if "date" in date_col.lower() or date_col == "Date":
+            check_blocking_factor_balance(df_filtered, genotype_col, pretraining_col, date_col)
+
+    # Perform residual permutation test analysis
+    permutation_stats = None
+    if USE_RESIDUAL_PERMUTATION and not FORCE_REGULAR_PERMUTATION:
+        print("\n" + "=" * 80)
+        print("RESIDUAL PERMUTATION TEST ANALYSIS (PRIMARY METHOD)")
+        print("Distribution-free inference accounting for blocking factors (Date, Arena, Side)")
+        print("=" * 80)
+        permutation_stats = perform_residual_permutation_analysis(
+            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
+        )
+
+    # Perform regular permutation test analysis
+    print("\n" + "=" * 80)
+    print("REGULAR PERMUTATION TEST ANALYSIS (FALLBACK METHOD)")
+    print("Distribution-free inference on original data (no blocking correction)")
+    print("=" * 80)
+    regular_permutation_stats = perform_permutation_continuous_analysis(
+        df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
+    )
+
+    # Create plots
+    print("\n" + "=" * 80)
+    print("GENERATING PLOTS")
+    print("=" * 80)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_binary_metrics(
+        df_filtered,
+        genotype_col,
+        pretraining_col,
+        binary_stats,
+        output_dir,
+        pretrain_stats=binary_pretrain_stats,
+        show_stats=not args.no_stats,
+    )
+    plot_continuous_metrics(
+        df_filtered,
+        genotype_col,
+        pretraining_col,
+        None,
+        metrics=metrics_to_analyze,
+        output_dir=output_dir,
+        lmm_results=lmm_stats,
+        permutation_results=permutation_stats,
+        regular_permutation_results=regular_permutation_stats,
+        show_stats=not args.no_stats,
+    )
+
+    if args.show and not args.generate_all_combinations:
+        plt.show()
+    else:
+        plt.close("all")
+
+    # Generate validation plots and summary tables
+    print("\n" + "=" * 80)
+    print("GENERATING VALIDATION OUTPUTS")
+    print("=" * 80)
+
+    if lmm_stats and permutation_stats:
+        plot_residual_vs_original_effects(lmm_stats, permutation_stats, output_dir)
+
+    comprehensive_output = output_dir / "comprehensive_statistics.csv"
+    export_comprehensive_statistics_csv(
+        comprehensive_output,
+        binary_pretrain_stats=binary_pretrain_stats,
+        lmm_stats=lmm_stats,
+        residual_permutation_stats=permutation_stats,
+        regular_permutation_stats=regular_permutation_stats,
+    )
+
+    if lmm_stats and permutation_stats:
+        summary_output = output_dir / "summary_statistics.csv"
+        generate_summary_table(lmm_stats, permutation_stats, summary_output)
+
+    # Supplementary analysis
+    print("\n" + "=" * 80)
+    print("SUPPLEMENTARY ANALYSIS")
+    print("=" * 80)
+
+    supplementary_output_dir = output_dir / "supplementary"
+    supplementary_output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nSupplementary results will be saved to: {supplementary_output_dir}")
+
+    supplementary_binary_pretrain_stats = {}
+    supplementary_lmm_stats = None
+    supplementary_permutation_stats = None
+    supplementary_regular_permutation_stats = None
+
+    if SUPPLEMENTARY_BINARY_METRICS:
+        print(f"\n📊 Analyzing {len(SUPPLEMENTARY_BINARY_METRICS)} supplementary binary metrics...")
+        supplementary_binary_stats = perform_binary_analysis(df_filtered, genotype_col, pretraining_col)
+        supplementary_binary_stats = {
+            k: v
+            for k, v in supplementary_binary_stats.items()
+            if any(k.startswith(f"{metric}_") for metric in SUPPLEMENTARY_BINARY_METRICS)
+        }
+
+        if supplementary_binary_stats:
+            plot_binary_metrics(
+                df_filtered,
+                genotype_col,
+                pretraining_col,
+                supplementary_binary_stats,
+                supplementary_output_dir,
+                pretrain_stats=None,
+                show_stats=not args.no_stats,
+            )
+            print(f"✅ Plotted {len(supplementary_binary_stats)} supplementary binary metrics")
+        else:
+            print(f"⚠️  No supplementary binary metrics found in dataset")
+
+        supplementary_binary_pretrain_all = perform_binary_pretraining_effect(
+            df_filtered, genotype_col, pretraining_col
+        )
+        supplementary_binary_pretrain_stats = {
+            metric: supplementary_binary_pretrain_all[metric]
+            for metric in SUPPLEMENTARY_BINARY_METRICS
+            if metric in supplementary_binary_pretrain_all
+        }
+
+    available_supplementary_metrics = [m for m in SUPPLEMENTARY_CONTINUOUS_METRICS if m in all_continuous_metrics]
+
+    if available_supplementary_metrics:
+        print(f"\n📊 Analyzing {len(available_supplementary_metrics)} supplementary continuous metrics...")
+
+        if USE_LMM and not FORCE_REGULAR_PERMUTATION:
+            supplementary_lmm_stats = perform_lmm_continuous_analysis(
+                df_filtered, genotype_col, pretraining_col, metrics=available_supplementary_metrics
+            )
+
+        if USE_RESIDUAL_PERMUTATION and not FORCE_REGULAR_PERMUTATION:
+            supplementary_permutation_stats = perform_residual_permutation_analysis(
+                df_filtered,
+                genotype_col,
+                pretraining_col,
+                metrics=available_supplementary_metrics,
+                n_permutations=N_PERMUTATIONS,
+            )
+
+        supplementary_regular_permutation_stats = perform_permutation_continuous_analysis(
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            metrics=available_supplementary_metrics,
+            n_permutations=N_PERMUTATIONS,
+        )
+
+        plot_continuous_metrics(
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            None,
+            metrics=available_supplementary_metrics,
+            output_dir=supplementary_output_dir,
+            lmm_results=supplementary_lmm_stats,
+            permutation_results=supplementary_permutation_stats,
+            regular_permutation_results=supplementary_regular_permutation_stats,
+            show_stats=not args.no_stats,
+        )
+
+        print(f"✅ Plotted {len(available_supplementary_metrics)} supplementary continuous metrics")
+
+        if supplementary_lmm_stats and supplementary_permutation_stats:
+            supplementary_summary_output = supplementary_output_dir / "supplementary_summary_statistics.csv"
+            generate_summary_table(
+                supplementary_lmm_stats, supplementary_permutation_stats, supplementary_summary_output
+            )
+    else:
+        print(f"⚠️  No supplementary continuous metrics found in dataset")
+
+    supplementary_comprehensive_output = supplementary_output_dir / "supplementary_comprehensive_statistics.csv"
+    export_comprehensive_statistics_csv(
+        supplementary_comprehensive_output,
+        binary_pretrain_stats=supplementary_binary_pretrain_stats,
+        lmm_stats=supplementary_lmm_stats,
+        residual_permutation_stats=supplementary_permutation_stats,
+        regular_permutation_stats=supplementary_regular_permutation_stats,
+    )
+
+    print("\n" + "=" * 80)
+    print(f"ANALYSIS COMPLETE ({config_name})")
+    print("=" * 80)
+    print(f"\nMain results saved to: {output_dir}")
+    print(f"Supplementary results saved to: {supplementary_output_dir}")
+
+
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
@@ -2222,6 +2770,11 @@ def main():
         "--force-regular-permutation",
         action="store_true",
         help="Force regular permutation tests (skip LMM and residual permutation)",
+    )
+    parser.add_argument(
+        "--generate-all-combinations",
+        action="store_true",
+        help="Run Visual, Dopaminergic, MB, and All predefined genotype combinations in one execution",
     )
     args = parser.parse_args()
 
@@ -2262,18 +2815,6 @@ def main():
         print("]")
         return
 
-    # Check if genotypes are selected
-    if not SELECTED_GENOTYPES or SELECTED_GENOTYPES == ["Empty", "EmptySplit", "TNTxPR"]:
-        print("\n" + "!" * 80)
-        print("WARNING: SELECTED_GENOTYPES is empty or only contains placeholders!")
-        print("!" * 80)
-        print("\nRun with --detect-genotypes to see all available genotypes:")
-        print("  python f1_tnt_genotype_comparison.py --detect-genotypes")
-        binary_pretrain_stats = perform_binary_pretraining_effect(df_filtered, genotype_col, pretraining_col)
-
-        print("\nThen update SELECTED_GENOTYPES in the script.")
-        return
-
     # Detect pretraining column
     pretraining_col = None
     for col in df.columns:
@@ -2286,145 +2827,47 @@ def main():
 
     print(f"Pretraining column: {pretraining_col}")
 
-    # Filter dataset
-    df_filtered = filter_dataset(df, genotype_col)
+    if args.generate_all_combinations:
+        if args.show:
+            print("\n⚠️ --show is ignored when --generate-all-combinations is enabled")
 
-    # Auto-detect continuous metrics
-    all_continuous_metrics = auto_detect_continuous_metrics(df_filtered)
-
-    # Print summary
-    print("\n" + "=" * 80)
-    print("DATASET SUMMARY")
-    print("=" * 80)
-    print(f"\nGenotypes included: {SELECTED_GENOTYPES}")
-    print(f"\nSample sizes by genotype and pretraining:")
-    summary = df_filtered.groupby([genotype_col, pretraining_col]).size().unstack(fill_value=0)
-    print(summary)
-
-    # Perform statistical analyses
-    print("\n" + "=" * 80)
-    print("STATISTICAL ANALYSIS")
-    print("=" * 80)
-
-    # Check if blocking factors are confounded with pretraining
-    print("\n🔍 Checking for confounding between blocking factors and pretraining:")
-    for col in ["Date", "date"]:
-        if col in df_filtered.columns:
-            check_blocking_factor_balance(df_filtered, genotype_col, pretraining_col, col)
-
-    binary_stats = perform_binary_analysis(df_filtered, genotype_col, pretraining_col)
-    binary_pretrain_stats = perform_binary_pretraining_effect(df_filtered, genotype_col, pretraining_col)
-
-    # Determine which metrics to analyze
-    if args.metrics:
-        # User specified specific metrics
-        metrics_to_analyze = [m.strip() for m in args.metrics.split(",")]
-        print(f"\n📌 Analyzing user-specified metrics: {metrics_to_analyze}")
-    elif args.all_metrics:
-        # Use all auto-detected metrics
-        metrics_to_analyze = all_continuous_metrics
-        print(f"\n📌 Analyzing ALL {len(metrics_to_analyze)} auto-detected metrics")
-        print(f"   First 10: {', '.join(metrics_to_analyze[:10])}")
-        if len(metrics_to_analyze) > 10:
-            print(f"   ... and {len(metrics_to_analyze) - 10} more")
-    else:
-        # Use predefined metrics (matching PCA analysis)
-        metrics_to_analyze = DEFAULT_CONTINUOUS_METRICS
-        print(f"\n📌 Analyzing {len(metrics_to_analyze)} predefined metrics (matching PCA analysis)")
-        print(f"   Metrics: {', '.join(metrics_to_analyze)}")
-
-    # Perform LMM analysis if enabled (for effect sizes and diagnostics)
-    lmm_stats = None
-    if USE_LMM and not FORCE_REGULAR_PERMUTATION:
+        batch_root = Path(OUTPUT_DIR).parent
         print("\n" + "=" * 80)
-        print("LINEAR MIXED-EFFECTS MODEL ANALYSIS")
+        print("BATCH MODE: GENERATING ALL PREDEFINED COMBINATIONS")
         print("=" * 80)
-        lmm_stats = perform_lmm_continuous_analysis(
-            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze
-        )
+        print(f"Output root: {batch_root}")
 
-    # Check blocking factor balance early in analysis
-    print("\n" + "=" * 80)
-    print("BLOCKING FACTOR BALANCE ANALYSIS")
-    print("=" * 80)
-    for date_col in df_filtered.columns:
-        if "date" in date_col.lower() or date_col == "Date":
-            check_blocking_factor_balance(df_filtered, genotype_col, pretraining_col, date_col)
-
-    # Perform residual permutation test analysis if enabled (PRIMARY METHOD)
-    permutation_stats = None
-    if USE_RESIDUAL_PERMUTATION and not FORCE_REGULAR_PERMUTATION:
-        print("\n" + "=" * 80)
-        print("RESIDUAL PERMUTATION TEST ANALYSIS (PRIMARY METHOD)")
-        print("Distribution-free inference accounting for blocking factors (Date, Arena, Side)")
-        print("=" * 80)
-        permutation_stats = perform_residual_permutation_analysis(
-            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
-        )
-
-    # Perform regular permutation test analysis (fallback when LMM is inadequate)
-    regular_permutation_stats = None
-    print("\n" + "=" * 80)
-    print("REGULAR PERMUTATION TEST ANALYSIS (FALLBACK METHOD)")
-    print("Distribution-free inference on original data (no blocking correction)")
-    print("=" * 80)
-    regular_permutation_stats = perform_permutation_continuous_analysis(
-        df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
-    )
-
-    # Create plots
-    print("\n" + "=" * 80)
-    print("GENERATING PLOTS")
-    print("=" * 80)
-
-    output_dir = Path(OUTPUT_DIR)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    plot_binary_metrics(
-        df_filtered,
-        genotype_col,
-        pretraining_col,
-        binary_stats,
-        output_dir,
-        pretrain_stats=binary_pretrain_stats,
-        show_stats=not args.no_stats,
-    )
-    plot_continuous_metrics(
-        df_filtered,
-        genotype_col,
-        pretraining_col,
-        None,  # No longer using Mann-Whitney (continuous_stats)
-        metrics=metrics_to_analyze,
-        output_dir=output_dir,
-        lmm_results=lmm_stats,
-        permutation_results=permutation_stats,
-        regular_permutation_results=regular_permutation_stats,
-        show_stats=not args.no_stats,
-    )
-
-    if args.show:
-        plt.show()
+        for combo_name, combo_genotypes in PREDEFINED_GENOTYPE_COMBINATIONS.items():
+            combo_output_dir = batch_root / combo_name
+            run_analysis_for_configuration(
+                df,
+                genotype_col,
+                pretraining_col,
+                args,
+                combo_genotypes,
+                combo_output_dir,
+                combo_name,
+            )
     else:
-        plt.close("all")
+        # Check if genotypes are selected for single-run mode
+        if not SELECTED_GENOTYPES or SELECTED_GENOTYPES == ["Empty", "EmptySplit", "TNTxPR"]:
+            print("\n" + "!" * 80)
+            print("WARNING: SELECTED_GENOTYPES is empty or only contains placeholders!")
+            print("!" * 80)
+            print("\nRun with --detect-genotypes to see all available genotypes:")
+            print("  python f1_tnt_genotype_comparison.py --detect-genotypes")
+            print("\nThen update SELECTED_GENOTYPES in the script.")
+            return
 
-    # Generate validation plots and summary tables
-    print("\n" + "=" * 80)
-    print("GENERATING VALIDATION OUTPUTS")
-    print("=" * 80)
-
-    # Plot comparison between methods
-    if lmm_stats and permutation_stats:
-        plot_residual_vs_original_effects(lmm_stats, permutation_stats, output_dir)
-
-    # Generate summary statistics table for publication
-    if lmm_stats and permutation_stats:
-        summary_output = output_dir / "summary_statistics.csv"
-        generate_summary_table(lmm_stats, permutation_stats, summary_output)
-
-    print("\n" + "=" * 80)
-    print("ANALYSIS COMPLETE")
-    print("=" * 80)
-    print(f"\nPlots saved to: {output_dir}")
+        run_analysis_for_configuration(
+            df,
+            genotype_col,
+            pretraining_col,
+            args,
+            SELECTED_GENOTYPES,
+            Path(OUTPUT_DIR),
+            "Single",
+        )
 
 
 if __name__ == "__main__":

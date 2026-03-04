@@ -65,6 +65,11 @@ class FlyTrackingData:
             # Assign ball identities based on position relative to fly
             self.assign_ball_identities()
 
+            # Reset interaction caches after identity assignment so any precomputed
+            # events (e.g. from early quality checks) are recomputed with ball-specific
+            # filtering logic.
+            self._reset_interaction_caches()
+
             self.calculate_relative_positions()
 
             time_range_start = self.fly.config.time_range[0] if self.fly.config.time_range else None
@@ -125,6 +130,21 @@ class FlyTrackingData:
             # Determine success cutoff reference
             if self.fly.config.success_cutoff:
                 self._determine_success_cutoff()
+
+    def _reset_interaction_caches(self):
+        """Clear cached interaction-derived structures so they are recomputed."""
+        for attr in [
+            "_interaction_events",
+            "_interactions_onsets",
+            "_interactions_offsets",
+            "_std_interactions",
+            "_random_events",
+            "_random_events_onsets",
+            "_random_events_offsets",
+            "_std_random_events",
+        ]:
+            if hasattr(self, attr):
+                delattr(self, attr)
 
     def load_tracking_file(
         self,
@@ -399,6 +419,7 @@ class FlyTrackingData:
         )
 
         if not has_track_names:
+            print(f"⚠️  WARNING: No SLEAP track names found for {self.fly.metadata.name}!")
             # No track names - handle based on number of balls
             if num_balls == 1:
                 # Single ball without track names - regular experiment
@@ -696,18 +717,7 @@ class FlyTrackingData:
                 self.cutoff_reference = None
 
         # Reset cached calculations
-        for attr in [
-            "_interaction_events",
-            "_interactions_onsets",
-            "_interactions_offsets",
-            "_std_interactions",
-            "_random_events",
-            "_random_events_onsets",
-            "_random_events_offsets",
-            "_std_random_events",
-        ]:
-            if hasattr(self, attr):
-                delattr(self, attr)
+        self._reset_interaction_caches()
 
     @property
     def interaction_events(self):
@@ -725,6 +735,36 @@ class FlyTrackingData:
             self._interaction_events = self._calculate_interactions(time_range)
         return self._interaction_events
 
+    def _is_f1_training_ball(self, ball_idx):
+        if not hasattr(self.fly.config, "experiment_type") or self.fly.config.experiment_type != "F1":
+            return False
+        if not hasattr(self, "ball_identities") or self.ball_identities is None:
+            return False
+        return self.ball_identities.get(ball_idx) == "training"
+
+    def _get_interaction_time_range_for_ball(self, ball_idx, base_time_range=None):
+        """
+        Return the interaction-detection time range for a specific ball.
+
+        For F1 training balls when success_cutoff is disabled, enforce a fixed
+        upper bound at f1_training_cutoff_seconds (default 3600s).
+        """
+        start = base_time_range[0] if base_time_range is not None else None
+        end = base_time_range[1] if base_time_range is not None else None
+
+        if not self._is_f1_training_ball(ball_idx):
+            return (start, end) if base_time_range is not None else None
+
+        if getattr(self.fly.config, "success_cutoff", False):
+            return (start, end) if base_time_range is not None else None
+
+        cutoff_seconds = getattr(self.fly.config, "f1_training_cutoff_seconds", 3600)
+        if cutoff_seconds is None or cutoff_seconds <= 0:
+            return (start, end) if base_time_range is not None else None
+
+        effective_end = min(end, cutoff_seconds) if end is not None else cutoff_seconds
+        return (start, effective_end)
+
     def _calculate_interactions(self, time_range=None):
         """Actual event detection with optional time range"""
         if self.balltrack is None or self.balltrack.objects is None:
@@ -738,8 +778,9 @@ class FlyTrackingData:
         for fly_idx in range(len(self.flytrack.objects)):
             events[fly_idx] = {}
             for ball_idx in range(len(self.balltrack.objects)):
+                ball_time_range = self._get_interaction_time_range_for_ball(ball_idx, time_range)
                 events[fly_idx][ball_idx] = self.find_flyball_interactions(
-                    time_range=time_range, fly_idx=fly_idx, ball_idx=ball_idx
+                    time_range=ball_time_range, fly_idx=fly_idx, ball_idx=ball_idx
                 )
         return events
 
@@ -769,12 +810,15 @@ class FlyTrackingData:
         fly_data = self.flytrack.objects[fly_idx].dataset
         ball_data = self.balltrack.objects[ball_idx].dataset
 
-        # if time_range:
-        #     # Convert frame indices to integers for iloc
-        #     start = int(time_range[0] * self.fly.experiment.fps) if time_range[0] is not None else 0
-        #     end = int(time_range[1] * self.fly.experiment.fps) if time_range[1] is not None else None
-        #     fly_data = fly_data.iloc[start:end]
-        #     ball_data = ball_data.iloc[start:end]
+        start_offset = 0
+        if time_range:
+            start_offset = int(time_range[0] * self.fly.experiment.fps) if time_range[0] is not None else 0
+            end_offset = int(time_range[1] * self.fly.experiment.fps) if time_range[1] is not None else None
+            fly_data = fly_data.iloc[start_offset:end_offset]
+            ball_data = ball_data.iloc[start_offset:end_offset]
+
+            if fly_data.empty or ball_data.empty:
+                return []
 
         # Original event detection logic
         interaction_events = utilities.find_interaction_events(
@@ -787,6 +831,10 @@ class FlyTrackingData:
             event_min_length=event_min_length,
             fps=self.fly.experiment.fps,
         )
+
+        if start_offset > 0:
+            interaction_events = [[e[0] + start_offset, e[1] + start_offset, e[2]] for e in interaction_events]
+
         return interaction_events
 
     @property
@@ -1649,12 +1697,7 @@ class FlyTrackingData:
                 raise ValueError(f"Skeletontrack data is empty after filtering for {self.fly.metadata.name}.")
 
         # Reset cached interaction events to force recomputation with filtered data
-        if hasattr(self, "_interaction_events"):
-            del self._interaction_events
-        if hasattr(self, "_interactions_onsets"):
-            del self._interactions_onsets
-        if hasattr(self, "_interactions_offsets"):
-            del self._interactions_offsets
+        self._reset_interaction_caches()
 
     def get_spontaneous_movement_summary(self, ball_idx=0):
         """
