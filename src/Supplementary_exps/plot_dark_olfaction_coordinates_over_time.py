@@ -779,6 +779,182 @@ def create_trajectory_plot_with_permutation(
     ax.grid(False)
 
 
+def create_ir8a_light_trajectory_plot_with_permutation(
+    data,
+    time_col,
+    value_col,
+    light_col,
+    subject_col,
+    permutation_results=None,
+    color_mapping=None,
+    alpha_mapping=None,
+    linestyle_mapping=None,
+    ax=None,
+    bin_edges=None,
+):
+    """
+    Create a trajectory plot comparing Light conditions within IR8a only.
+    """
+    PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+    if data.empty:
+        ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+        return
+
+    groups = sorted(data[light_col].unique(), key=lambda x: (x != "off", x))
+    if len(groups) != 2:
+        ax.text(
+            0.5,
+            0.5,
+            f"Expected 2 light conditions, found {len(groups)}",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        return
+
+    data_copy = data.copy()
+    data_copy[f"{value_col}_mm"] = data_copy[value_col] / PIXELS_PER_MM
+    value_col_plot = f"{value_col}_mm"
+
+    time_bin_size = 0.1
+    min_time = data_copy[time_col].min()
+    max_time = data_copy[time_col].max()
+    fine_bin_edges = np.arange(min_time, max_time + time_bin_size, time_bin_size)
+    data_copy["time_bin_fine"] = pd.cut(data_copy[time_col], bins=fine_bin_edges, labels=False, include_lowest=True)
+    data_copy["time_bin_center"] = data_copy["time_bin_fine"] * time_bin_size + time_bin_size / 2 + min_time
+
+    all_means = []
+    for group in groups:
+        group_data = data_copy[data_copy[light_col] == group]
+        time_grouped = group_data.groupby("time_bin_center")[value_col_plot].agg(["mean", "sem"]).reset_index()
+        all_means.extend(time_grouped["mean"].values)
+
+    y_baseline = min(all_means) if all_means else 0
+
+    for group in groups:
+        group_data = data_copy[data_copy[light_col] == group]
+        fly_binned = group_data.groupby([subject_col, "time_bin_center"])[value_col_plot].mean().reset_index()
+        time_bin_centers = sorted(fly_binned["time_bin_center"].unique())
+
+        means = []
+        ci_lower = []
+        ci_upper = []
+
+        for time_bin in time_bin_centers:
+            fly_values = fly_binned[fly_binned["time_bin_center"] == time_bin][value_col_plot].values
+
+            if len(fly_values) > 0:
+                mean_val = np.mean(fly_values)
+                means.append(mean_val)
+
+                if len(fly_values) > 1:
+                    n_bootstrap = 1000
+                    bootstrap_means = []
+                    for _ in range(n_bootstrap):
+                        bootstrap_flies = np.random.choice(fly_values, size=len(fly_values), replace=True)
+                        bootstrap_means.append(np.mean(bootstrap_flies))
+
+                    ci_low = np.percentile(bootstrap_means, 2.5)
+                    ci_high = np.percentile(bootstrap_means, 97.5)
+                else:
+                    ci_low = mean_val
+                    ci_high = mean_val
+
+                ci_lower.append(ci_low)
+                ci_upper.append(ci_high)
+
+        time_grouped = pd.DataFrame(
+            {"time_bin_center": time_bin_centers, "mean": means, "ci_lower": ci_lower, "ci_upper": ci_upper}
+        )
+
+        if color_mapping is not None:
+            color = color_mapping.get(group, "#9467bd")
+        else:
+            color = "#9467bd"
+
+        if alpha_mapping is not None:
+            line_alpha = alpha_mapping.get(group, 0.9)
+        else:
+            line_alpha = 0.95 if group == "on" else 0.55
+
+        if linestyle_mapping is not None:
+            linestyle = linestyle_mapping.get(group, "solid")
+        else:
+            linestyle = "solid" if group == "on" else "dashed"
+
+        fill_alpha = max(0.08, min(0.3, line_alpha * 0.25))
+
+        ax.plot(
+            time_grouped["time_bin_center"],
+            time_grouped["mean"] - y_baseline,
+            linestyle=linestyle,
+            color=color,
+            linewidth=2.5,
+            label=f"Light {group}",
+            alpha=line_alpha,
+            zorder=10,
+        )
+
+        ax.fill_between(
+            time_grouped["time_bin_center"],
+            time_grouped["ci_lower"] - y_baseline,
+            time_grouped["ci_upper"] - y_baseline,
+            color=color,
+            alpha=fill_alpha,
+            zorder=5,
+        )
+
+    if bin_edges is not None:
+        for edge in bin_edges:
+            ax.axvline(edge, color="gray", linestyle="dotted", alpha=0.4, zorder=1)
+
+    y_max_shifted = max(all_means) - y_baseline if all_means else 0
+    y_range = y_max_shifted
+    ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
+
+    if permutation_results is not None and bin_edges is not None:
+        y_annotation_stars = y_max_shifted + 0.02 * y_range
+
+        for idx in permutation_results["significant_timepoints"]:
+            if idx >= len(bin_edges) - 1:
+                continue
+
+            bin_start = bin_edges[idx]
+            bin_end = bin_edges[idx + 1]
+            x_pos = (bin_start + bin_end) / 2
+
+            p_value = permutation_results["p_values"][idx]
+
+            if p_value < 0.001:
+                significance = "***"
+            elif p_value < 0.01:
+                significance = "**"
+            elif p_value < 0.05:
+                significance = "*"
+            else:
+                significance = ""
+
+            if significance:
+                ax.text(
+                    x_pos,
+                    y_annotation_stars,
+                    significance,
+                    ha="center",
+                    va="center",
+                    fontsize=16,
+                    color="red",
+                    fontweight="bold",
+                    zorder=15,
+                )
+
+    ax.set_xlabel("Time (min)", fontsize=14)
+    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    ax.tick_params(axis="both", labelsize=10)
+    ax.grid(False)
+    ax.legend(loc="upper left", fontsize=12)
+
+
 def main():
     """Main function to create the dark olfaction coordinates plots."""
 
@@ -1046,6 +1222,79 @@ def main():
     print(f"\nPooled BallTypes plots (Genotype with permutation tests) saved to: {output_path_pooled_genotype}")
 
     # =============================================================================
+    # IMPLEMENTATION 3: IR8A ONLY, LIGHT EFFECT (ON VS OFF)
+    # =============================================================================
+    print(f"\n{'='*60}")
+    print("IMPLEMENTATION 3: IR8a ONLY (Light Effect with Permutation Tests)")
+    print(f"{'='*60}")
+
+    ir8a_data_trimmed = pooled_data_trimmed[pooled_data_trimmed[genotype_col] == "TNTxIR8a"].copy()
+    print(f"IR8a-only dataset shape: {ir8a_data_trimmed.shape}")
+
+    if ir8a_data_trimmed.empty:
+        print("⚠️ No IR8a data available; skipping IR8a light comparison trajectory plot.")
+    else:
+        ir8a_lights = sorted(ir8a_data_trimmed[light_col].unique(), key=lambda x: (x != "off", x))
+        print(f"IR8a light conditions: {ir8a_lights}")
+
+        if len(ir8a_lights) != 2:
+            print("⚠️ Expected exactly two light conditions for IR8a; skipping IR8a light comparison trajectory plot.")
+        else:
+            print(f"  Preprocessing IR8a data into {n_permutation_bins} time bins...")
+            ir8a_processed, ir8a_bin_edges = preprocess_data_for_permutation(
+                ir8a_data_trimmed,
+                time_col=time_col,
+                value_col=ball_distance_col,
+                group_col=light_col,
+                subject_col="fly",
+                n_bins=n_permutation_bins,
+            )
+
+            print(f"  Computing IR8a Light on vs off permutation test ({n_permutations} permutations)...")
+            ir8a_perm_results = compute_permutation_test_genotype(
+                ir8a_processed,
+                metric=f"avg_{ball_distance_col}",
+                group_col=light_col,
+                control_group="off",
+                n_permutations=n_permutations,
+                alpha=0.05,
+                progress=True,
+            )
+
+            fig_ir8a, ax_ir8a = plt.subplots(1, 1, figsize=(10, 6))
+            light_colors = {"off": "#9467bd", "on": "#9467bd"}
+            light_alphas = {"off": 0.5, "on": 0.95}
+            light_linestyles = {"off": "dashed", "on": "solid"}
+
+            create_ir8a_light_trajectory_plot_with_permutation(
+                ir8a_data_trimmed,
+                time_col=time_col,
+                value_col=ball_distance_col,
+                light_col=light_col,
+                subject_col="fly",
+                permutation_results=ir8a_perm_results,
+                color_mapping=light_colors,
+                alpha_mapping=light_alphas,
+                linestyle_mapping=light_linestyles,
+                ax=ax_ir8a,
+                bin_edges=ir8a_bin_edges,
+            )
+
+            ax_ir8a.set_title("IR8a: Light effect", fontsize=14)
+            plt.tight_layout()
+
+            ir8a_output_dir = output_dir / "IR8a_light_comparison"
+            ir8a_output_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path_ir8a = ir8a_output_dir / "dark_olfaction_coordinates_ir8a_light_permutation.png"
+            plt.savefig(output_path_ir8a, dpi=300, bbox_inches="tight")
+            plt.savefig(output_path_ir8a.with_suffix(".pdf"), dpi=300, bbox_inches="tight")
+            plt.savefig(output_path_ir8a.with_suffix(".svg"), dpi=300, bbox_inches="tight")
+            plt.close(fig_ir8a)
+
+            print(f"\nIR8a light-comparison trajectory plot saved to: {output_path_ir8a}")
+
+    # =============================================================================
     # SUMMARY
     # =============================================================================
     print("\n" + "=" * 80)
@@ -1066,6 +1315,8 @@ def main():
     print(f"\nGenerated plots:")
     print(f"  - Pooled BallTypes with permutation tests (side-by-side by Light condition)")
     print(f"    Saved as PNG, PDF, and SVG in: {output_dir}")
+    print(f"  - IR8a-only Light comparison trajectory plot (single panel: on vs off)")
+    print(f"    Saved as PNG, PDF, and SVG in: {output_dir / 'IR8a_light_comparison'}")
 
     print(f"\n✅ All plots generated successfully!")
 
