@@ -91,7 +91,7 @@ CONFIG = {
             "F1_coordinates",  # For F1 experiments only
             # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps) - Deprecated since ballpushing metrics include proximity times
             # "standardized_contacts",
-            "summary",  # Re-enabled for testing the optimization
+            # "summary",  # Re-enabled for testing the optimization
             # "coordinates",  # For regular experiments
             # "fly_positions",
         ],  # Metrics to process (add/remove as needed)
@@ -980,6 +980,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Always clear caches regardless of memory usage (original behavior)",
     )
+    parser.add_argument(
+        "--skip-pooling",
+        nargs="+",
+        default=[],
+        metavar="METRIC",
+        help="Metrics to exclude from pooling (e.g. --skip-pooling coordinates). Useful for heavy datasets that would crash RAM.",
+    )
     args = parser.parse_args()
 
     # Update CONFIG with command line arguments
@@ -1247,7 +1254,12 @@ if __name__ == "__main__":
     # ==================================================================
     # Create pooled datasets
     # ==================================================================
+    if args.skip_pooling:
+        logging.info(f"Skipping pooling for metrics: {args.skip_pooling}")
     for metric in CONFIG["PROCESSING"]["metrics"]:
+        if metric in args.skip_pooling:
+            logging.info(f"Skipping pooling for metric '{metric}' (excluded via --skip-pooling)")
+            continue
         pooled_path = output_data / metric / f"pooled_{metric}.feather"
 
         # In complement mode, always redo pooling since we added new files

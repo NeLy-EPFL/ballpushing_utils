@@ -113,6 +113,7 @@ class Config:
     # Coordinates dataset attributes
 
     downsampling_factor: Optional[int] = None  # Classic values used are 5 or 10.
+    annotate_contacts: bool = False
 
     # Random events attributes
 
@@ -138,6 +139,7 @@ class Config:
     success_direction_threshold: int = 25
     final_event_threshold: int = 170
     final_event_F1_threshold: int = 100
+    f1_training_cutoff_seconds: int = 3600
     max_event_threshold: int = 10
 
     pause_threshold: int = 5

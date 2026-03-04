@@ -95,6 +95,15 @@ class InteractionsMetrics:
         max_event = self.summary.get_max_event(fly_idx, ball_idx)
         final_event = self.summary.get_final_event(fly_idx, ball_idx)
 
+        max_event_idx = max_event[0] if max_event is not None else None
+        final_event_idx = final_event[0] if final_event is not None else None
+
+        if max_event_idx is not None and (max_event_idx < 0 or max_event_idx >= len(events)):
+            max_event_idx = None
+
+        if final_event_idx is not None and (final_event_idx < 0 or final_event_idx >= len(events)):
+            final_event_idx = None
+
         metrics = {}
         previous_success = None  # To store the success of the previous event
 
@@ -126,10 +135,10 @@ class InteractionsMetrics:
             major_event = int(displacement > self.fly.config.major_event_threshold)
 
             # Max event (1 if it is, 0 if not)
-            is_max_event = 1 if event_idx == max_event[0] else 0
+            is_max_event = 1 if max_event_idx is not None and event_idx == max_event_idx else 0
 
             # Final event (1 if it is, 0 if not)
-            is_final_event = 1 if event_idx == final_event[0] else 0
+            is_final_event = 1 if final_event_idx is not None and event_idx == final_event_idx else 0
 
             # Ball velocity during the interaction
             ball_velocity = displacement / duration if duration > 0 else 0

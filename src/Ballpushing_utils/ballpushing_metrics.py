@@ -366,11 +366,23 @@ class BallPushingMetrics:
                 ):
                     significant_events = metrics["significant_events"]()
 
-                # Filter events and significant events up to and including the final event
                 filtered_events = events
-                filtered_significant_events = significant_events if significant_events is not None else []
+                if significant_events is not None:
+                    event_set = {(event[0], event[1]) for event in filtered_events}
+                    filtered_significant_events = [
+                        event_info
+                        for event_info in significant_events
+                        if (event_info[0][0], event_info[0][1]) in event_set
+                    ]
+                else:
+                    filtered_significant_events = []
 
-                if not pd.isna(final_event_idx) and final_event_idx >= 0:
+                # Apply final-event truncation except for F1 test ball
+                apply_final_event_truncation = True
+                if self._is_test_ball(ball_idx):
+                    apply_final_event_truncation = False
+
+                if apply_final_event_truncation and not pd.isna(final_event_idx) and final_event_idx >= 0:
                     filtered_events = events[: final_event_idx + 1]
                     if significant_events is not None:
                         filtered_significant_events = [e for e in significant_events if e[1] <= final_event_idx]
@@ -1067,6 +1079,11 @@ class BallPushingMetrics:
 
         return True
 
+    def _is_test_ball(self, ball_idx):
+        if not hasattr(self.tracking_data, "ball_identities") or self.tracking_data.ball_identities is None:
+            return False
+        return self.tracking_data.ball_identities.get(ball_idx) == "test"
+
     def _adjust_time_for_f1_test_ball(self, raw_time, fly_idx, ball_idx):
         """
         Adjust time for F1 test ball metrics by subtracting the corridor exit time.
@@ -1125,7 +1142,14 @@ class BallPushingMetrics:
             Adjusted number of events.
         """
         if signif:
-            events = self.get_significant_events(fly_idx, ball_idx)
+            significant_events = self.get_significant_events(fly_idx, ball_idx)
+            base_events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+            base_event_set = {(event[0], event[1]) for event in base_events}
+            events = [
+                event_info
+                for event_info in significant_events
+                if (event_info[0][0], event_info[0][1]) in base_event_set
+            ]
         else:
             events = self.tracking_data.interaction_events[fly_idx][ball_idx]
 
