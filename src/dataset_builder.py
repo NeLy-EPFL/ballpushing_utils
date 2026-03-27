@@ -88,10 +88,10 @@ CONFIG = {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
         "metrics": [
             # "F1_checkpoints",
-            "F1_coordinates",  # For F1 experiments only
+            #"F1_coordinates",  # For F1 experiments only
             # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps) - Deprecated since ballpushing metrics include proximity times
             # "standardized_contacts",
-            # "summary",  # Re-enabled for testing the optimization
+             "summary",  # Re-enabled for testing the optimization
             # "coordinates",  # For regular experiments
             # "fly_positions",
         ],  # Metrics to process (add/remove as needed)

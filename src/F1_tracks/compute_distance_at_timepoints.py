@@ -2,8 +2,10 @@
 """
 Compute distance moved at specific time bins for F1 TNT genotypes.
 
-For each time bin (10, 20, 30, 40, 50, 60 minutes), compute the cumulative
-distance moved up to that time point and create boxplots grouped by pretraining.
+Reads distance_moved_Xmin columns directly from the summary dataset
+(computed by BallPushingMetrics.get_distance_moved_at_timepoint during
+dataset building). Creates boxplots grouped by pretraining and runs
+permutation tests.
 
 Usage:
     python compute_distance_at_timepoints.py
@@ -16,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+from statsmodels.stats.multitest import multipletests
 
 warnings.filterwarnings("ignore")
 
@@ -24,11 +26,8 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ============================================================================
 
-COORDINATES_PATH = Path(
-    "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260217_19_F1_coordinates_F1_TNT_Full_Data/F1_coordinates/pooled_F1_coordinates.feather"
-)
 SUMMARY_PATH = Path(
-    "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather"
+    "/mnt/upramdya_data/MD/F1_Tracks/Datasets/260325_16_summary_F1_TNT_Full_Data/summary/pooled_summary.feather"
 )
 
 OUTPUT_DIR = Path("/mnt/upramdya_data/MD/F1_Tracks/F1_TNT/Distance_At_Timepoints")
@@ -43,9 +42,21 @@ SELECTED_GENOTYPES = [
     "TNTxLC16-1",
 ]
 
-# Time bins in seconds (10, 20, 30, 40, 50, 60 minutes)
-TIME_BINS = [600, 1200, 1800, 2400, 3000, 3600]
+# Column name → display label for each 10-min interval of the test phase
+TIMEPOINT_COLS = [
+    "distance_moved_10min",
+    "distance_moved_20min",
+    "distance_moved_30min",
+    "distance_moved_40min",
+    "distance_moved_50min",
+    "distance_moved_60min",
+]
 TIME_BIN_LABELS = ["10 min", "20 min", "30 min", "40 min", "50 min", "60 min"]
+COL_TO_LABEL = dict(zip(TIMEPOINT_COLS, TIME_BIN_LABELS))
+LABEL_TO_COL = dict(zip(TIME_BIN_LABELS, TIMEPOINT_COLS))
+
+# Equivalent raw-seconds cutoffs (used only for labelling / CSV export)
+TIME_BIN_SECS = [4200, 4800, 5400, 6000, 6600, 7200]
 
 # Color scheme matching f1_tnt_genotype_comparison.py
 GENOTYPE_COLORS = {
@@ -72,137 +83,191 @@ JITTER_AMOUNT = 0.15
 SCATTER_SIZE = 40
 SCATTER_ALPHA = 0.5
 
+# Permutation test settings
+N_PERMUTATIONS = 5000
+
 # ============================================================================
-# DATA LOADING AND PROCESSING
+# DATA LOADING
 # ============================================================================
 
 
-def load_datasets():
-    """Load datasets."""
-    print("Loading datasets...")
-    df_coords = pd.read_feather(COORDINATES_PATH)
-    df_summary = pd.read_feather(SUMMARY_PATH)
-    print(f"  F1 coordinates: {df_coords.shape}")
-    print(f"  Summary: {df_summary.shape}")
-    return df_coords, df_summary
-
-
-def compute_distance_at_timepoint(df_fly, time_cutoff, ball_col="test_ball_euclidean_distance"):
+def load_and_prepare():
     """
-    Compute NET distance moved (using euclidean distance displacement) up to a specific time point.
+    Load the summary feather, filter to test-ball rows for selected genotypes,
+    and return a long-format DataFrame with one row per fly × timepoint.
 
-    For each interaction event that occurs before time_cutoff, compute the net displacement
-    as: euclidean_distance[end_of_event] - euclidean_distance[start_of_event]
-    Sum these displacements to get total NET distance moved.
+    Distances are stored in pixels in the summary; this function converts them
+    to mm for all downstream use.
+    """
+    print("Loading summary dataset...")
+    df = pd.read_feather(SUMMARY_PATH)
+    print(f"  Full summary: {df.shape}")
 
-    Parameters
-    ----------
-    df_fly : DataFrame
-        Data for a single fly
-    time_cutoff : float
-        Time cutoff in seconds from adjusted_time
-    ball_col : str
-        Which ball column to use ('test_ball_euclidean_distance' or 'training_ball_euclidean_distance')
+    # Keep only test-ball rows
+    df = df[df["ball_identity"] == "test"].copy()
+    print(f"  Test-ball rows: {len(df)}")
+
+    # Keep selected genotypes
+    df = df[df["Genotype"].isin(SELECTED_GENOTYPES)].copy()
+    print(f"  After genotype filter: {len(df)} rows, {df['fly'].nunique()} flies")
+
+    # Normalise Pretraining labels
+    df["pretraining"] = df["Pretraining"].map(
+        lambda v: "Pretrained" if str(v).strip().lower() in ("y", "yes", "true", "1") else "Naive"
+    )
+
+    # Check all timepoint columns are present
+    missing = [c for c in TIMEPOINT_COLS if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing timepoint columns: {missing}")
+
+    # Rename to lowercase for consistent downstream use
+    df = df.rename(columns={"Genotype": "genotype"})
+
+    # Melt to long format (pixels)
+    df_long = df.melt(
+        id_vars=["fly", "genotype", "pretraining", "distance_moved"],
+        value_vars=TIMEPOINT_COLS,
+        var_name="timepoint_col",
+        value_name="distance_pixels",
+    )
+    df_long["timepoint"] = df_long["timepoint_col"].map(COL_TO_LABEL)
+    df_long["timepoint_sec"] = df_long["timepoint_col"].map(
+        dict(zip(TIMEPOINT_COLS, TIME_BIN_SECS))
+    )
+    df_long["distance_mm"] = df_long["distance_pixels"] / PIXELS_PER_MM
+    df_long["distance_moved_mm"] = df_long["distance_moved"] / PIXELS_PER_MM
+
+    print(f"  Long-format records: {len(df_long)}")
+    return df_long
+
+
+# ============================================================================
+# STATISTICAL ANALYSIS
+# ============================================================================
+
+
+def _sig_label(p):
+    """Convert p-value to significance stars."""
+    if p < 0.001:
+        return "***"
+    if p < 0.01:
+        return "**"
+    if p < 0.05:
+        return "*"
+    return "ns"
+
+
+def perform_permutation_tests_at_timepoints(df_results, n_permutations=N_PERMUTATIONS):
+    """
+    For each genotype × timepoint, test Pretrained vs Naive distance with a
+    2-sample permutation test on the means.
+
+    Multiple-comparison correction uses Holm-Bonferroni (method="holm"), which
+    controls the familywise error rate under arbitrary dependence between tests.
+    This is appropriate here because the six timepoints are tested on the *same*
+    animals and the cumulative values at later timepoints contain the earlier
+    ones, making the tests positively correlated.
 
     Returns
     -------
-    float
-        Total NET distance moved up to time_cutoff
+    dict
+        {genotype: {timepoint_sec: {"p": float, "p_fdr": float, "sig": str,
+         "n_naive": int, "n_pretrained": int, "delta_mm": float}}}
     """
-    # Filter to frames up to time cutoff
-    df_time = df_fly[df_fly["adjusted_time"] <= time_cutoff].copy()
+    all_stats = {}
 
-    if df_time.empty:
-        return 0.0
+    for genotype in sorted(df_results["genotype"].unique()):
+        df_gen = df_results[df_results["genotype"] == genotype]
+        timepoints = sorted(df_gen["timepoint_sec"].unique())
 
-    # Check if ball column exists
-    if ball_col not in df_time.columns:
-        return 0.0
+        raw_p = {}
+        delta = {}
+        n_naive_map = {}
+        n_pretrained_map = {}
 
-    # Get interaction events and euclidean distances
-    euclidean_dist = df_time[ball_col].values
-    events = df_time["interaction_event"].values
-    frames = df_time["frame"].values
+        rng = np.random.default_rng(42)
 
-    # Find unique events and compute NET displacement for each
-    total_distance = 0.0
-    unique_events = np.unique(events[~np.isnan(events)])
+        for tp in timepoints:
+            df_tp = df_gen[df_gen["timepoint_sec"] == tp]
+            naive = df_tp[df_tp["pretraining"] == "Naive"]["distance_mm"].dropna().values
+            pretrained = df_tp[df_tp["pretraining"] == "Pretrained"]["distance_mm"].dropna().values
 
-    for event_num in unique_events:
-        event_num = int(event_num)
-        # Find indices where this event occurs
-        event_mask = events == event_num
-        event_idx = np.where(event_mask)[0]
+            n_naive_map[tp] = len(naive)
+            n_pretrained_map[tp] = len(pretrained)
 
-        if len(event_idx) > 0:
-            start_idx = event_idx[0]
-            end_idx = event_idx[-1]
+            if len(naive) < 2 or len(pretrained) < 2:
+                raw_p[tp] = 1.0
+                delta[tp] = np.nan
+                continue
 
-            # Get euclidean distances at start and end
-            start_dist = euclidean_dist[start_idx]
-            end_dist = euclidean_dist[end_idx]
+            obs_diff = float(np.mean(pretrained) - np.mean(naive))
+            delta[tp] = obs_diff
 
-            # NET displacement for this event
-            if not (np.isnan(start_dist) or np.isnan(end_dist)):
-                distance = abs(end_dist - start_dist)
-                total_distance += distance
+            combined = np.concatenate([naive, pretrained])
+            n1 = len(naive)
+            # Vectorised: permute all rows at once (~50-100× faster than loop)
+            perm_idx = rng.permuted(
+                np.tile(np.arange(len(combined)), (n_permutations, 1)), axis=1
+            )
+            perm_diffs = (
+                combined[perm_idx[:, n1:]].mean(axis=1)
+                - combined[perm_idx[:, :n1]].mean(axis=1)
+            )
 
-    return float(total_distance)
+            p = (np.sum(np.abs(perm_diffs) >= np.abs(obs_diff)) + 1) / (n_permutations + 1)
+            raw_p[tp] = float(p)
+
+        # Holm-Bonferroni correction within this genotype across timepoints
+        tps = list(raw_p.keys())
+        p_vals = [raw_p[tp] for tp in tps]
+        if len(p_vals) > 1:
+            _, p_corr, _, _ = multipletests(p_vals, alpha=0.05, method="holm")
+        else:
+            p_corr = p_vals
+
+        geno_stats = {}
+        for tp, p, pf in zip(tps, p_vals, p_corr):
+            geno_stats[tp] = {
+                "p": round(p, 6),
+                "p_fdr": round(float(pf), 6),
+                "sig": _sig_label(float(pf)),
+                "n_naive": n_naive_map[tp],
+                "n_pretrained": n_pretrained_map[tp],
+                "delta_mm": round(delta.get(tp, float("nan")), 3),
+            }
+
+        all_stats[genotype] = geno_stats
+        print(f"  {genotype}: " + "  ".join(
+            f"{TIME_BIN_LABELS[TIME_BIN_SECS.index(tp)]} p={geno_stats[tp]['p_fdr']:.4f} {geno_stats[tp]['sig']}"
+            for tp in tps if tp in TIME_BIN_SECS
+        ))
+
+    return all_stats
 
 
-def process_all_flies_at_timepoints(df_coords, genotypes):
-    """
-    Process all flies and compute distance at each time point.
-
-    Returns
-    -------
-    DataFrame
-        Long-format DataFrame with columns: fly, genotype, pretraining, timepoint, distance
-    """
-    results = []
-
-    for genotype in genotypes:
-        print(f"\n  Processing {genotype}...")
-        df_gen = df_coords[df_coords["Genotype"] == genotype].copy()
-
-        if df_gen.empty:
-            continue
-
-        # Check for Pretraining column
-        if "Pretraining" not in df_gen.columns:
-            print(f"    Warning: No Pretraining column for {genotype}")
-            continue
-
-        # Process each fly
-        for fly_name in df_gen["fly"].unique():
-            df_fly = df_gen[df_gen["fly"] == fly_name].copy()
-
-            # Get pretraining status
-            pretraining_val = df_fly["Pretraining"].iloc[0]
-            value_str = str(pretraining_val).lower()
-            pretraining_label = "Pretrained" if value_str in ["y", "yes", "true", "1"] else "Naive"
-
-            # Compute distance at each time point
-            for time_bin, time_label in zip(TIME_BINS, TIME_BIN_LABELS):
-                distance = compute_distance_at_timepoint(df_fly, time_bin)
-
-                results.append(
-                    {
-                        "fly": fly_name,
-                        "genotype": genotype,
-                        "pretraining": pretraining_label,
-                        "timepoint": time_label,
-                        "timepoint_sec": time_bin,
-                        "distance_pixels": distance,
-                        "distance_mm": distance / PIXELS_PER_MM,
-                    }
-                )
-
-        # Count flies processed
-        n_flies = len(df_gen["fly"].unique())
-        print(f"    Processed {n_flies} flies")
-
-    return pd.DataFrame(results)
+def export_permutation_stats(all_stats, output_dir):
+    """Save permutation test results to CSV."""
+    tp_label_map = dict(zip(TIME_BIN_SECS, TIME_BIN_LABELS))
+    records = []
+    for genotype, geno_stats in all_stats.items():
+        for tp_sec, s in geno_stats.items():
+            records.append({
+                "genotype": genotype,
+                "timepoint_sec": int(tp_sec),
+                "timepoint_label": tp_label_map.get(tp_sec, str(tp_sec)),
+                "n_naive": s["n_naive"],
+                "n_pretrained": s["n_pretrained"],
+                "delta_mm": s["delta_mm"],
+                "p_value": s["p"],
+                "p_fdr": s["p_fdr"],
+                "significance": s["sig"],
+            })
+    df_out = pd.DataFrame(records)
+    out_path = Path(output_dir) / "permutation_test_results.csv"
+    df_out.to_csv(out_path, index=False)
+    print(f"  Saved permutation results: {out_path.name}")
+    return df_out
 
 
 # ============================================================================
@@ -210,9 +275,50 @@ def process_all_flies_at_timepoints(df_coords, genotypes):
 # ============================================================================
 
 
-def plot_distance_by_timepoint(df_results, output_dir):
+def _draw_significance_bracket(ax, x1, x2, y, sig, fontsize=10):
+    """Draw a bracket with significance label between x1 and x2 at height y."""
+    h = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.02
+    ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], color="black", linewidth=1.0)
+    ax.text((x1 + x2) / 2, y + h * 1.1, sig,
+            ha="center", va="bottom", fontsize=fontsize,
+            color="black" if sig != "ns" else "#888888")
+
+
+def compute_global_ylim(df_results, data_percentile=99, bracket_headroom=0.22):
+    """
+    Compute a single (y_min, y_max) that will be applied to every plot so that
+    all axes share the same scale — making grid comparisons meaningful.
+
+    Parameters
+    ----------
+    data_percentile : int
+        Upper percentile of *distance_mm* used as the data ceiling.
+    bracket_headroom : float
+        Fraction of the data ceiling reserved above the data for significance
+        brackets.  0.22 gives ~22% headroom.
+
+    Returns
+    -------
+    (float, float)  —  (y_min, y_top)
+    """
+    vals = df_results["distance_mm"].dropna().values
+    if len(vals) == 0:
+        return (0.0, 1.0)
+    data_ceil = float(np.percentile(vals, data_percentile))
+    y_top = data_ceil * (1 + bracket_headroom)
+    return (0.0, y_top)
+
+
+def _apply_ylim(ax, ylim):
+    """Set y-axis limits, keeping a small gap below 0."""
+    ax.set_ylim(ylim[0] - ylim[1] * 0.02, ylim[1])
+
+
+def plot_distance_by_timepoint(df_results, output_dir, stats=None, ylim=None):
     """
     Create boxplots with jittered scatter for each timepoint, all genotypes combined.
+    Optionally overlays significance brackets (stats dict from
+    perform_permutation_tests_at_timepoints).
     Returns paths to saved plots.
     """
     output_dir = Path(output_dir)
@@ -222,7 +328,14 @@ def plot_distance_by_timepoint(df_results, output_dir):
     n_genotypes = df_results["genotype"].nunique()
     jitter = JITTER_AMOUNT * (3 / max(n_genotypes, 3))  # Adjust for number of genotypes
 
-    for timepoint, time_label in zip(TIME_BINS, TIME_BIN_LABELS):
+    # Derive bracket anchor from ylim so brackets sit at a fixed fractional height
+    if ylim is not None:
+        _y_data_ceil = ylim[1] / 1.22  # reverse the 22% headroom
+    else:
+        all_vals = df_results["distance_mm"].dropna().values
+        _y_data_ceil = float(np.percentile(all_vals, 99)) if len(all_vals) else 1.0
+
+    for timepoint, time_label in zip(TIME_BIN_SECS, TIME_BIN_LABELS):
         df_time = df_results[df_results["timepoint"] == time_label].copy()
 
         if df_time.empty:
@@ -241,12 +354,15 @@ def plot_distance_by_timepoint(df_results, output_dir):
         box_width = group_width / n_conditions
 
         x_positions = np.arange(n_groups)
+        box_centres = {}
 
         # Plot for each pretraining condition
         for i, pretrain in enumerate(pretraining_vals):
             df_pretrain = df_time[df_time["pretraining"] == pretrain]
 
             box_positions = x_positions + (i - n_conditions / 2 + 0.5) * box_width
+            for j_pos, g in enumerate(genotypes):
+                box_centres[(g, pretrain)] = box_positions[j_pos]
 
             # Prepare data for boxplot
             data_by_genotype = [df_pretrain[df_pretrain["genotype"] == g]["distance_mm"].values for g in genotypes]
@@ -296,6 +412,23 @@ def plot_distance_by_timepoint(df_results, output_dir):
                     zorder=3,
                 )
 
+        # Significance annotations
+        if stats and "Naive" in pretraining_vals and "Pretrained" in pretraining_vals:
+            bracket_y_base = _y_data_ceil * 1.03
+            for genotype_sig in genotypes:
+                if genotype_sig not in stats or timepoint not in stats[genotype_sig]:
+                    continue
+                sig = stats[genotype_sig][timepoint]["sig"]
+                x_naive = box_centres.get((genotype_sig, "Naive"))
+                x_pre = box_centres.get((genotype_sig, "Pretrained"))
+                if x_naive is None or x_pre is None:
+                    continue
+                _draw_significance_bracket(ax, x_naive, x_pre, bracket_y_base, sig, fontsize=9)
+
+        # Apply shared y-axis limits
+        if ylim is not None:
+            _apply_ylim(ax, ylim)
+
         # Customize plot
         ax.set_xticks(x_positions)
         ax.set_xticklabels(genotypes, rotation=45, ha="right")
@@ -331,9 +464,11 @@ def plot_distance_by_timepoint(df_results, output_dir):
     return plot_paths
 
 
-def plot_distance_by_genotype(df_results, output_dir):
+def plot_distance_by_genotype(df_results, output_dir, stats=None, ylim=None):
     """
     Create individual plots for each genotype showing all timepoints.
+    Optionally overlays permutation-test significance brackets (stats dict from
+    perform_permutation_tests_at_timepoints).
     Returns paths to saved plots.
     """
     output_dir = Path(output_dir)
@@ -351,7 +486,10 @@ def plot_distance_by_genotype(df_results, output_dir):
         fig, ax = plt.subplots(figsize=(12, 7))
 
         timepoints = sorted(df_gen["timepoint_sec"].unique())
-        pretraining_vals = sorted(df_gen["pretraining"].unique())
+        # Always put Naive before Pretrained for consistent ordering
+        all_pretrain = sorted(df_gen["pretraining"].unique())
+        pretraining_vals = ([p for p in ["Naive", "Pretrained"] if p in all_pretrain]
+                            + [p for p in all_pretrain if p not in ["Naive", "Pretrained"]])
 
         # Create positions
         n_timepoints = len(timepoints)
@@ -363,11 +501,17 @@ def plot_distance_by_genotype(df_results, output_dir):
 
         genotype_color = GENOTYPE_COLORS.get(genotype, "#808080")
 
+        # Track box centre positions keyed by (timepoint_sec, pretraining_label)
+        box_centres = {}
+
         # Plot for each pretraining condition
         for i, pretrain in enumerate(pretraining_vals):
             df_pretrain = df_gen[df_gen["pretraining"] == pretrain]
 
             box_positions = x_positions + (i - n_conditions / 2 + 0.5) * box_width
+
+            for j, tp in enumerate(timepoints):
+                box_centres[(tp, pretrain)] = box_positions[j]
 
             # Prepare data
             data_by_time = [df_pretrain[df_pretrain["timepoint_sec"] == t]["distance_mm"].values for t in timepoints]
@@ -375,7 +519,7 @@ def plot_distance_by_genotype(df_results, output_dir):
             pretrain_style = PRETRAINING_STYLES.get(pretrain, {})
 
             # Create boxplots
-            bp = ax.boxplot(
+            ax.boxplot(
                 data_by_time,
                 positions=box_positions,
                 widths=box_width * 0.6,
@@ -427,14 +571,42 @@ def plot_distance_by_genotype(df_results, output_dir):
                 1,
                 1,
                 facecolor=genotype_color,
-                edgecolor=PRETRAINING_STYLES[p].get("edgecolor", "black"),
-                linewidth=PRETRAINING_STYLES[p].get("linewidth", 1.5),
-                alpha=PRETRAINING_STYLES[p].get("alpha", 0.8),
+                edgecolor=PRETRAINING_STYLES.get(p, {}).get("edgecolor", "black"),
+                linewidth=PRETRAINING_STYLES.get(p, {}).get("linewidth", 1.5),
+                alpha=PRETRAINING_STYLES.get(p, {}).get("alpha", 0.8),
                 label=p,
             )
             for p in pretraining_vals
         ]
         ax.legend(handles=legend_elements, loc="upper left", fontsize=11, framealpha=0.9)
+
+        # --- Significance annotations ---
+        if stats and genotype in stats and "Naive" in pretraining_vals and "Pretrained" in pretraining_vals:
+            geno_stats = stats[genotype]
+            if ylim is not None:
+                _y_data_ceil = ylim[1] / 1.22
+            else:
+                all_vals = df_gen["distance_mm"].dropna().values
+                _y_data_ceil = float(np.percentile(all_vals, 99)) if len(all_vals) else ax.get_ylim()[1]
+
+            bracket_base = _y_data_ceil * 1.03
+            bracket_step = _y_data_ceil * 0.06
+
+            for k, tp in enumerate(timepoints):
+                if tp not in geno_stats:
+                    continue
+                sig = geno_stats[tp]["sig"]
+                x_naive = box_centres.get((tp, "Naive"), None)
+                x_pretrained = box_centres.get((tp, "Pretrained"), None)
+                if x_naive is None or x_pretrained is None:
+                    continue
+                # Stack brackets slightly so overlapping genotype labels don't collide
+                bracket_y = bracket_base + k * bracket_step * 0.4
+                _draw_significance_bracket(ax, x_naive, x_pretrained, bracket_y, sig, fontsize=11)
+
+        # Apply shared y-axis limits
+        if ylim is not None:
+            _apply_ylim(ax, ylim)
 
         plt.tight_layout()
 
@@ -504,61 +676,202 @@ def create_distance_genotype_grid(genotype_paths, output_dir, genotypes):
     print(f"  Saved grid layout: {grid_path.name}")
 
 
-def validate_60min_values(df_results, df_summary):
+def validate_60min_values(df_results):
     """
-    Compare 60-minute values with summary dataset to validate computation.
+    Compare distance_moved_60min with distance_moved within the summary dataset.
+    Both columns are already in the long-format DataFrame as distance_mm and
+    distance_moved_mm respectively.
     """
     print("\n" + "=" * 70)
-    print("VALIDATION: Comparing 60-min values with summary dataset")
+    print("VALIDATION: distance_moved_60min vs distance_moved (within summary)")
     print("=" * 70)
 
-    df_60min = df_results[df_results["timepoint_sec"] == 3600].copy()
+    df_60 = df_results[df_results["timepoint_sec"] == 7200].copy()
+    df_60 = df_60.dropna(subset=["distance_mm", "distance_moved_mm"])
+    df_60 = df_60[df_60["distance_moved_mm"] > 0]
 
-    if df_60min.empty:
-        print("  Warning: No 60-minute data found")
+    if df_60.empty:
+        print("  Warning: no 60-min data to validate")
         return
 
-    # Check if summary has distance_moved column
-    if "distance_moved" not in df_summary.columns:
-        print("  Warning: No distance_moved column in summary dataset")
+    df_60["pct_diff"] = 100 * (df_60["distance_mm"] - df_60["distance_moved_mm"]) / df_60["distance_moved_mm"]
+
+    print(f"  Flies compared: {len(df_60)}")
+    print(f"  Mean % difference:   {df_60['pct_diff'].mean():.4f}%")
+    print(f"  Median % difference: {df_60['pct_diff'].median():.4f}%")
+    print(f"  Max abs % difference: {df_60['pct_diff'].abs().max():.4f}%")
+    print("\n  Sample comparisons (mm):")
+    print(
+        df_60[["fly", "genotype", "pretraining", "distance_mm", "distance_moved_mm", "pct_diff"]]
+        .head(10)
+        .to_string(index=False)
+    )
+
+
+def plot_pretraining_difference_over_time(df_results, output_dir):
+    """
+    For each genotype, compute the Pretrained - Naive difference in median distance
+    at each timepoint and plot it across time. Highlights the timepoint of maximum
+    absolute difference per genotype.
+
+    Produces:
+      - pretraining_difference_over_time.png  (all genotypes on one axes)
+      - pretraining_difference_per_genotype.png  (one panel per genotype)
+      - pretraining_difference_summary.csv
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Median distance per genotype × pretraining × timepoint
+    medians = (
+        df_results.groupby(["genotype", "pretraining", "timepoint_sec"])["distance_mm"]
+        .median()
+        .reset_index()
+    )
+
+    pivot = medians.pivot_table(
+        index=["genotype", "timepoint_sec"], columns="pretraining", values="distance_mm"
+    ).reset_index()
+
+    if "Pretrained" not in pivot.columns or "Naive" not in pivot.columns:
+        print("  Warning: Cannot compute pretraining difference — missing Pretrained or Naive condition")
         return
 
-    # Match flies
-    comparison = []
-    for _, row in df_60min.iterrows():
-        fly_name = row["fly"]
-        computed_dist = row["distance_pixels"]
+    pivot["difference"] = pivot["Pretrained"] - pivot["Naive"]
 
-        # Find in summary
-        summary_row = df_summary[df_summary["fly"] == fly_name]
+    # Build ordered time labels aligned to TIME_BIN_SECS
+    timepoint_secs_sorted = sorted(df_results["timepoint_sec"].unique())
+    tp_label_map = dict(zip(TIME_BIN_SECS, TIME_BIN_LABELS))
+    ordered_labels = [tp_label_map.get(t, str(t)) for t in timepoint_secs_sorted]
+    n_tp = len(timepoint_secs_sorted)
 
-        if not summary_row.empty:
-            summary_dist = summary_row["distance_moved"].iloc[0]
+    genotypes = sorted(df_results["genotype"].unique())
 
-            if pd.notna(summary_dist) and summary_dist > 0:
-                pct_diff = 100 * (computed_dist - summary_dist) / summary_dist
+    # ------------------------------------------------------------------ #
+    # Plot 1: All genotypes on one figure
+    # ------------------------------------------------------------------ #
+    fig, ax = plt.subplots(figsize=(10, 6))
 
-                comparison.append(
-                    {
-                        "fly": fly_name,
-                        "computed": computed_dist,
-                        "summary": summary_dist,
-                        "pct_diff": pct_diff,
-                    }
-                )
+    for genotype in genotypes:
+        df_gen = pivot[pivot["genotype"] == genotype].sort_values("timepoint_sec")
+        if df_gen.empty:
+            continue
+        color = GENOTYPE_COLORS.get(genotype, "#808080")
+        diffs = df_gen["difference"].values
+        x = list(range(len(diffs)))
 
-    if comparison:
-        df_comp = pd.DataFrame(comparison)
-        print(f"\n  Compared {len(df_comp)} flies")
-        print(f"  Mean % difference: {df_comp['pct_diff'].mean():.2f}%")
-        print(f"  Median % difference: {df_comp['pct_diff'].median():.2f}%")
-        print(f"  Std % difference: {df_comp['pct_diff'].std():.2f}%")
+        ax.plot(x, diffs, color=color, label=genotype, linewidth=2, marker="o", markersize=6)
 
-        # Show some examples
-        print("\n  Sample comparisons:")
-        print(df_comp.head(10).to_string(index=False))
-    else:
-        print("  No matching flies found for comparison")
+        # Star on max-|diff| timepoint
+        if len(diffs) > 0:
+            max_idx = int(np.argmax(np.abs(diffs)))
+            ax.scatter(max_idx, diffs[max_idx], color=color, s=140, zorder=5,
+                       edgecolors="black", linewidth=1.5)
+
+    ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+    ax.set_xticks(range(n_tp))
+    ax.set_xticklabels(ordered_labels)
+    ax.set_xlabel("Time point", fontsize=12)
+    ax.set_ylabel("Δ Median Distance (mm)\n(Pretrained − Naive)", fontsize=12)
+    ax.set_title("Pretrained vs Naive Distance Difference Over Time", fontsize=13, fontweight="bold")
+    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=10, framealpha=0.9)
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+
+    out1 = output_dir / "pretraining_difference_over_time.png"
+    plt.savefig(out1, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved: {out1.name}")
+
+    # ------------------------------------------------------------------ #
+    # Plot 2: Per-genotype subplots
+    # ------------------------------------------------------------------ #
+    n_gen = len(genotypes)
+    n_cols = min(3, n_gen)
+    n_rows = (n_gen + n_cols - 1) // n_cols
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows), sharey=True, squeeze=False)
+    axes_flat = axes.flatten()
+
+    for ax_idx, genotype in enumerate(genotypes):
+        ax = axes_flat[ax_idx]
+        df_gen = pivot[pivot["genotype"] == genotype].sort_values("timepoint_sec")
+        if df_gen.empty:
+            ax.set_visible(False)
+            continue
+
+        color = GENOTYPE_COLORS.get(genotype, "#808080")
+        diffs = df_gen["difference"].values
+        x = list(range(len(diffs)))
+
+        ax.plot(x, diffs, color=color, linewidth=2, marker="o", markersize=6)
+        ax.fill_between(x, 0, diffs, alpha=0.15, color=color)
+
+        if len(diffs) > 0:
+            max_idx = int(np.argmax(np.abs(diffs)))
+            ax.scatter(max_idx, diffs[max_idx], color=color, s=140, zorder=5,
+                       edgecolors="black", linewidth=1.5)
+            ax.annotate(
+                ordered_labels[max_idx],
+                (max_idx, diffs[max_idx]),
+                textcoords="offset points",
+                xytext=(5, 5),
+                fontsize=8,
+            )
+
+        ax.axhline(0, color="black", linewidth=0.8, linestyle="--", alpha=0.5)
+        ax.set_xticks(range(n_tp))
+        ax.set_xticklabels(ordered_labels, rotation=45, ha="right")
+        ax.set_title(genotype, fontsize=11, fontweight="bold")
+        ax.grid(True, alpha=0.3, axis="y")
+        if ax_idx % n_cols == 0:
+            ax.set_ylabel("Δ Distance (mm)\n(Pretrained − Naive)", fontsize=10)
+
+    for ax_idx in range(len(genotypes), len(axes_flat)):
+        axes_flat[ax_idx].set_visible(False)
+
+    fig.suptitle("Pretrained vs Naive Distance Difference Over Time", fontsize=14,
+                 fontweight="bold", y=1.02)
+    plt.tight_layout()
+
+    out2 = output_dir / "pretraining_difference_per_genotype.png"
+    plt.savefig(out2, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"  Saved: {out2.name}")
+
+    # ------------------------------------------------------------------ #
+    # Console summary & CSV export
+    # ------------------------------------------------------------------ #
+    print("\n  Maximum Pretrained−Naive difference per genotype:")
+    records = []
+    for genotype in genotypes:
+        df_gen = pivot[pivot["genotype"] == genotype].sort_values("timepoint_sec")
+        if df_gen.empty:
+            continue
+        diffs = df_gen["difference"].values
+        tps = df_gen["timepoint_sec"].values
+        for i, (t, d) in enumerate(zip(tps, diffs)):
+            records.append({
+                "genotype": genotype,
+                "timepoint_sec": int(t),
+                "timepoint_label": tp_label_map.get(t, str(t)),
+                "diff_mm": round(float(d), 3),
+                "naive_mm": round(float(df_gen["Naive"].values[i]), 3) if "Naive" in df_gen.columns else np.nan,
+                "pretrained_mm": round(float(df_gen["Pretrained"].values[i]), 3) if "Pretrained" in df_gen.columns else np.nan,
+                "is_max_diff": False,
+            })
+        max_idx = int(np.argmax(np.abs(diffs)))
+        max_label = tp_label_map.get(tps[max_idx], str(tps[max_idx]))
+        # Mark in records
+        for r in records:
+            if r["genotype"] == genotype and r["timepoint_sec"] == int(tps[max_idx]):
+                r["is_max_diff"] = True
+        print(f"    {genotype:20s}: Δ = {diffs[max_idx]:+.2f} mm  at  {max_label}")
+
+    df_export = pd.DataFrame(records)
+    csv_out = output_dir / "pretraining_difference_summary.csv"
+    df_export.to_csv(csv_out, index=False)
+    print(f"\n  Saved difference table: {csv_out.name}")
 
 
 def generate_summary_statistics(df_results, output_dir):
@@ -595,46 +908,48 @@ def main():
     print("DISTANCE MOVED AT TIME POINTS ANALYSIS")
     print("=" * 70 + "\n")
 
-    # Load datasets
-    df_coords, df_summary = load_datasets()
-
-    # Check required columns
-    required_cols = ["adjusted_time", "test_ball_euclidean_distance", "Genotype", "Pretraining"]
-    missing = [col for col in required_cols if col not in df_coords.columns]
-    if missing:
-        print(f"\nError: Missing columns: {missing}")
-        return False
-
-    # Process all flies at all timepoints
-    print("\nProcessing flies at all timepoints...")
-    df_results = process_all_flies_at_timepoints(df_coords, SELECTED_GENOTYPES)
+    # Load summary and build long-format results DataFrame
+    df_results = load_and_prepare()
 
     if df_results.empty:
         print("\nError: No results generated!")
         return False
 
-    print(f"\nProcessed {df_results['fly'].nunique()} flies total")
+    print(f"\nFlies loaded: {df_results['fly'].nunique()}")
 
-    # Validate 60-minute values
-    validate_60min_values(df_results, df_summary)
+    # Validate 60-minute values against distance_moved
+    validate_60min_values(df_results)
+
+    # Permutation tests
+    print("\n" + "=" * 70)
+    print(f"Running permutation tests ({N_PERMUTATIONS} permutations per comparison)...")
+    print("=" * 70)
+    perm_stats = perform_permutation_tests_at_timepoints(df_results)
+    export_permutation_stats(perm_stats, OUTPUT_DIR)
+
+    # Compute a single global y-range shared by all individual plots
+    global_ylim = compute_global_ylim(df_results)
+    print(f"\n  Global y-range: [{global_ylim[0]:.2f}, {global_ylim[1]:.2f}] mm")
 
     # Generate plots
     print("\n" + "=" * 70)
     print("Generating plots...")
     print("=" * 70)
 
-    timepoint_paths = plot_distance_by_timepoint(df_results, OUTPUT_DIR)
-    genotype_paths = plot_distance_by_genotype(df_results, OUTPUT_DIR)
+    timepoint_paths = plot_distance_by_timepoint(df_results, OUTPUT_DIR, stats=perm_stats, ylim=global_ylim)
+    genotype_paths = plot_distance_by_genotype(df_results, OUTPUT_DIR, stats=perm_stats, ylim=global_ylim)
 
-    # Create grid layouts
     create_distance_timepoint_grid(timepoint_paths, OUTPUT_DIR, TIME_BIN_LABELS)
     create_distance_genotype_grid(genotype_paths, OUTPUT_DIR, SELECTED_GENOTYPES)
 
-    # Generate summary statistics
+    print("\n" + "=" * 70)
+    print("Generating pretraining difference plots...")
+    print("=" * 70)
+    plot_pretraining_difference_over_time(df_results, OUTPUT_DIR)
+
     print("\n" + "=" * 70)
     print("Generating summary statistics...")
     print("=" * 70)
-
     generate_summary_statistics(df_results, OUTPUT_DIR)
 
     print("\n" + "=" * 70)

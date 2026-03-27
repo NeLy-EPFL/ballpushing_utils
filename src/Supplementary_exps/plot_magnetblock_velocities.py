@@ -54,6 +54,38 @@ PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
 PIXELS_PER_FRAME_TO_MM_PER_S = 0.06
 
 
+def cohens_d(group1, group2):
+    """Calculate Cohen's d effect size (group2 - group1)."""
+    n1, n2 = len(group1), len(group2)
+    if n1 < 2 or n2 < 2:
+        return np.nan
+
+    var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    if pooled_std == 0:
+        return np.nan
+
+    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+
+def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_state=42):
+    """Bootstrap CI for mean(group2) - mean(group1)."""
+    if len(group1) == 0 or len(group2) == 0:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(random_state)
+    diffs = np.empty(n_bootstrap, dtype=float)
+    for i in range(n_bootstrap):
+        s1 = rng.choice(group1, size=len(group1), replace=True)
+        s2 = rng.choice(group2, size=len(group2), replace=True)
+        diffs[i] = np.mean(s2) - np.mean(s1)
+
+    alpha = 100 - ci
+    lower = np.percentile(diffs, alpha / 2)
+    upper = np.percentile(diffs, 100 - alpha / 2)
+    return lower, upper
+
+
 def load_coordinates_dataset():
     """Load the MagnetBlock experiments coordinates dataset and subset to summary flies"""
     # Load full coordinates dataset (2 hours)
@@ -255,6 +287,16 @@ def compute_permutation_test(
     # Store results for each bin
     observed_diffs = []
     p_values = []
+    n_control_values = []
+    n_test_values = []
+    mean_control_values = []
+    mean_test_values = []
+    ci_lower_values = []
+    ci_upper_values = []
+    pct_change_values = []
+    pct_ci_lower_values = []
+    pct_ci_upper_values = []
+    cohens_d_values = []
 
     iterator = tqdm(time_bins, desc=f"  {test_group} vs {control_group}") if progress else time_bins
 
@@ -268,11 +310,45 @@ def compute_permutation_test(
         if len(control_vals) == 0 or len(test_vals) == 0:
             observed_diffs.append(np.nan)
             p_values.append(1.0)
+            n_control_values.append(0)
+            n_test_values.append(0)
+            mean_control_values.append(np.nan)
+            mean_test_values.append(np.nan)
+            ci_lower_values.append(np.nan)
+            ci_upper_values.append(np.nan)
+            pct_change_values.append(np.nan)
+            pct_ci_lower_values.append(np.nan)
+            pct_ci_upper_values.append(np.nan)
+            cohens_d_values.append(np.nan)
             continue
 
         # Observed difference
-        obs_diff = np.mean(test_vals) - np.mean(control_vals)
+        mean_control = np.mean(control_vals)
+        mean_test = np.mean(test_vals)
+        obs_diff = mean_test - mean_control
         observed_diffs.append(obs_diff)
+        n_control_values.append(len(control_vals))
+        n_test_values.append(len(test_vals))
+        mean_control_values.append(mean_control)
+        mean_test_values.append(mean_test)
+
+        ci_lower, ci_upper = bootstrap_ci_difference(control_vals, test_vals, n_bootstrap=10000, ci=95, random_state=42)
+        ci_lower_values.append(ci_lower)
+        ci_upper_values.append(ci_upper)
+
+        if mean_control != 0:
+            pct_change = (obs_diff / mean_control) * 100
+            pct_ci_lower = (ci_lower / mean_control) * 100
+            pct_ci_upper = (ci_upper / mean_control) * 100
+        else:
+            pct_change = np.nan
+            pct_ci_lower = np.nan
+            pct_ci_upper = np.nan
+        pct_change_values.append(pct_change)
+        pct_ci_lower_values.append(pct_ci_lower)
+        pct_ci_upper_values.append(pct_ci_upper)
+
+        cohens_d_values.append(cohens_d(control_vals, test_vals))
 
         # Permutation test
         combined = np.concatenate([control_vals, test_vals])
@@ -340,6 +416,16 @@ def compute_permutation_test(
         "control_group": control_group,
         "time_bins": time_bins,
         "observed_diffs": observed_diffs,
+        "n_control": n_control_values,
+        "n_test": n_test_values,
+        "mean_control": mean_control_values,
+        "mean_test": mean_test_values,
+        "ci_lower": ci_lower_values,
+        "ci_upper": ci_upper_values,
+        "pct_change": pct_change_values,
+        "pct_ci_lower": pct_ci_lower_values,
+        "pct_ci_upper": pct_ci_upper_values,
+        "cohens_d": cohens_d_values,
         "p_values_raw": p_values_raw,
         "p_values": p_values_adj,
         "significant_timepoints": significant_timepoints,
@@ -981,6 +1067,51 @@ def generate_velocity_plot(
 
         return merged, results
 
+    def save_permutation_results_csv(results, output_csv_path):
+        """Save per-bin permutation stats to CSV."""
+        df = pd.DataFrame(
+            {
+                "Time_Bin": results["time_bins"],
+                "N_Control": results.get("n_control", [np.nan] * len(results["time_bins"])),
+                "N_Test": results.get("n_test", [np.nan] * len(results["time_bins"])),
+                "Mean_Control_mm_s": results.get("mean_control", [np.nan] * len(results["time_bins"])),
+                "Mean_Test_mm_s": results.get("mean_test", [np.nan] * len(results["time_bins"])),
+                "Difference_mm_s": results["observed_diffs"],
+                "CI_Lower_mm_s": results.get("ci_lower", [np.nan] * len(results["time_bins"])),
+                "CI_Upper_mm_s": results.get("ci_upper", [np.nan] * len(results["time_bins"])),
+                "Pct_Change": results.get("pct_change", [np.nan] * len(results["time_bins"])),
+                "Pct_CI_Lower": results.get("pct_ci_lower", [np.nan] * len(results["time_bins"])),
+                "Pct_CI_Upper": results.get("pct_ci_upper", [np.nan] * len(results["time_bins"])),
+                "Cohens_d": results.get("cohens_d", [np.nan] * len(results["time_bins"])),
+                "P_Value_Raw": results["p_values_raw"],
+                "P_Value_FDR": results["p_values"],
+            }
+        )
+        df["Significant_FDR"] = np.where(df["P_Value_FDR"] < 0.05, "*", "ns")
+        df.to_csv(output_csv_path, index=False, float_format="%.6f")
+        print(f"✅ Statistical CSV saved: {output_csv_path}")
+
+    def save_change_results_csv(results, output_csv_path):
+        """Save pre/post change comparison stats to CSV."""
+        rows = []
+        for metric_name, metric_results in results.items():
+            rows.append(
+                {
+                    "Comparison": metric_name,
+                    "Control_Mean": metric_results.get("control_mean", np.nan),
+                    "Control_SEM": metric_results.get("control_sem", np.nan),
+                    "Test_Mean": metric_results.get("test_mean", np.nan),
+                    "Test_SEM": metric_results.get("test_sem", np.nan),
+                    "Observed_Difference": metric_results.get("observed_diff", np.nan),
+                    "P_Value_Raw": metric_results.get("p_value", np.nan),
+                    "P_Value_FDR": metric_results.get("p_value_adj", np.nan),
+                    "Significant_FDR": bool(metric_results.get("significant_adj", False)),
+                }
+            )
+
+        pd.DataFrame(rows).to_csv(output_csv_path, index=False, float_format="%.6f")
+        print(f"✅ Change-comparison CSV saved: {output_csv_path}")
+
     # Initialize permutation results
     permutation_results = None
 
@@ -1019,6 +1150,10 @@ def generate_velocity_plot(
         post_window=(3800, 4000),
         n_permutations=n_permutations,
     )
+
+    # Save pre/post change-comparison CSV
+    change_csv = output_dir / f"velocity_change_comparison_{test_group}_vs_{control_group}.csv"
+    save_change_results_csv(change_results, change_csv)
 
     # Generate and save full range plot
     print(f"\nGenerating full range velocity plot...")
@@ -1091,6 +1226,10 @@ def generate_velocity_plot(
             progress=show_progress,
         )
 
+        # Save windowed permutation statistics CSV
+        window_csv = output_dir / f"velocity_permutation_statistics_window_{test_group}_vs_{control_group}.csv"
+        save_permutation_results_csv(permutation_results_window, window_csv)
+
     fig_window, ax_window = plt.subplots(figsize=((163.33 / 25.4), (80 / 25.4)))
     create_velocity_plot(
         data_with_velocities,
@@ -1147,6 +1286,10 @@ def generate_velocity_plot(
 
     # Save statistical results if statistics were computed
     if compute_stats and permutation_results is not None:
+        # Save full-range permutation statistics CSV
+        full_csv = output_dir / f"velocity_permutation_statistics_full_{test_group}_vs_{control_group}.csv"
+        save_permutation_results_csv(permutation_results, full_csv)
+
         stats_file = output_dir / "velocity_permutation_statistics.txt"
         with open(stats_file, "w") as f:
             f.write("MagnetBlock Velocity Permutation Test Results\n")

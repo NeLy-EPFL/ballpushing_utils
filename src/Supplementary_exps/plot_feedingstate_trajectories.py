@@ -272,6 +272,71 @@ def preprocess_data(
 
 
 # ---------------------------------------------------------------------------
+# Statistical helper functions
+# ---------------------------------------------------------------------------
+
+
+def cohens_d(group1, group2):
+    """Calculate Cohen's d effect size between two groups.
+
+    Parameters
+    ----------
+    group1, group2 : array-like
+        Data for each group
+
+    Returns
+    -------
+    float
+        Cohen's d effect size
+    """
+    n1, n2 = len(group1), len(group2)
+    if n1 < 2 or n2 < 2:
+        return np.nan
+
+    var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return np.nan
+
+    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+
+def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_state=42):
+    """Calculate bootstrapped confidence interval for difference between groups.
+
+    Parameters
+    ----------
+    group1, group2 : array-like
+        Data for each group
+    n_bootstrap : int
+        Number of bootstrap resamples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+    random_state : int
+        Random seed for reproducibility
+
+    Returns
+    -------
+    tuple
+        (lower_bound, upper_bound) of the CI for group2 - group1
+    """
+    rng = np.random.default_rng(random_state)
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = rng.choice(group1, size=len(group1), replace=True)
+        sample2 = rng.choice(group2, size=len(group2), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return lower, upper
+
+
+# ---------------------------------------------------------------------------
 # Permutation tests
 # ---------------------------------------------------------------------------
 
@@ -288,12 +353,15 @@ def compute_permutation_tests(
     """
     Permutation test (mean difference) for each time bin, for all pairwise
     condition combinations. FDR correction (BH) across bins for each pair.
+    Also computes Cohen's d, bootstrapped CIs, and sample sizes.
 
     Returns
     -------
-    dict  keyed by (cond_a, cond_b) → {time_bins, observed_diffs, p_values_raw,
-                                         p_values_corrected, significant_timepoints,
-                                         n_significant}
+    dict  keyed by (cond_a, cond_b) → detailed statistics including:
+          - time_bins, observed_diffs, p_values_raw, p_values_corrected
+          - cohens_d, ci_lower, ci_upper, pct_change, pct_ci_lower, pct_ci_upper
+          - n_a_per_bin, n_b_per_bin, mean_a_per_bin, mean_b_per_bin
+          - significant_timepoints, n_significant
     """
     groups = sorted(processed_data[group_col].unique())
     present = [g for g in FEEDING_ORDER if g in groups]
@@ -309,6 +377,16 @@ def compute_permutation_tests(
 
         obs_diffs = []
         p_raw = []
+        cohens_d_vals = []
+        ci_lower_vals = []
+        ci_upper_vals = []
+        pct_change_vals = []
+        pct_ci_lower_vals = []
+        pct_ci_upper_vals = []
+        n_a_per_bin = []
+        n_b_per_bin = []
+        mean_a_per_bin = []
+        mean_b_per_bin = []
 
         iterator = tqdm(time_bins, desc=f"  {cond_a} vs {cond_b}") if show_progress else time_bins
 
@@ -320,11 +398,53 @@ def compute_permutation_tests(
             if len(vals_a) == 0 or len(vals_b) == 0:
                 obs_diffs.append(np.nan)
                 p_raw.append(1.0)
+                cohens_d_vals.append(np.nan)
+                ci_lower_vals.append(np.nan)
+                ci_upper_vals.append(np.nan)
+                pct_change_vals.append(np.nan)
+                pct_ci_lower_vals.append(np.nan)
+                pct_ci_upper_vals.append(np.nan)
+                n_a_per_bin.append(0)
+                n_b_per_bin.append(0)
+                mean_a_per_bin.append(np.nan)
+                mean_b_per_bin.append(np.nan)
                 continue
 
-            obs_diff = np.mean(vals_b) - np.mean(vals_a)
+            # Observed difference
+            mean_a = np.mean(vals_a)
+            mean_b = np.mean(vals_b)
+            obs_diff = mean_b - mean_a
             obs_diffs.append(obs_diff)
 
+            # Cohen's d effect size
+            d = cohens_d(vals_a, vals_b)
+            cohens_d_vals.append(d)
+
+            # Bootstrapped CI for difference
+            ci_lower, ci_upper = bootstrap_ci_difference(vals_a, vals_b, n_bootstrap=10000, ci=95, random_state=42)
+            ci_lower_vals.append(ci_lower)
+            ci_upper_vals.append(ci_upper)
+
+            # Percentage change relative to mean_a
+            if mean_a != 0:
+                pct_change = (obs_diff / mean_a) * 100
+                pct_ci_lower = (ci_lower / mean_a) * 100
+                pct_ci_upper = (ci_upper / mean_a) * 100
+            else:
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
+            pct_change_vals.append(pct_change)
+            pct_ci_lower_vals.append(pct_ci_lower)
+            pct_ci_upper_vals.append(pct_ci_upper)
+
+            # Sample sizes and means
+            n_a_per_bin.append(len(vals_a))
+            n_b_per_bin.append(len(vals_b))
+            mean_a_per_bin.append(mean_a)
+            mean_b_per_bin.append(mean_b)
+
+            # Permutation test
             combined = np.concatenate([vals_a, vals_b])
             n_a = len(vals_a)
             perm_diffs = np.empty(n_permutations)
@@ -344,6 +464,16 @@ def compute_permutation_tests(
             "observed_diffs": obs_diffs,
             "p_values_raw": p_raw,
             "p_values_corrected": p_corr,
+            "cohens_d": cohens_d_vals,
+            "ci_lower": ci_lower_vals,
+            "ci_upper": ci_upper_vals,
+            "pct_change": pct_change_vals,
+            "pct_ci_lower": pct_ci_lower_vals,
+            "pct_ci_upper": pct_ci_upper_vals,
+            "n_a_per_bin": n_a_per_bin,
+            "n_b_per_bin": n_b_per_bin,
+            "mean_a_per_bin": mean_a_per_bin,
+            "mean_b_per_bin": mean_b_per_bin,
             "significant_timepoints": np.where(rejected)[0].tolist(),
             "n_significant": int(np.sum(rejected)),
             "n_significant_raw": int(np.sum(p_raw < alpha)),
@@ -708,7 +838,7 @@ def _run_single_trajectory_analysis(
     )
 
     # Save statistics text file
-    _save_stats(perm_results, n_bins, n_permutations, control_condition, output_dir)
+    _save_stats(perm_results, processed, n_bins, n_permutations, control_condition, output_dir)
 
     print(f"\n{'='*60}")
     print("Done. Results saved to:")
@@ -716,34 +846,63 @@ def _run_single_trajectory_analysis(
     print(f"{'='*60}")
 
 
-def _save_stats(perm_results, n_bins, n_permutations, control_condition, output_dir):
-    """Write permutation results to a text file."""
-    stats_file = output_dir / "trajectory_feedingstate_permutation_statistics.txt"
-    with open(stats_file, "w") as f:
+def _save_stats(perm_results, processed_data, n_bins, n_permutations, control_condition, output_dir):
+    """Save detailed statistical results to CSV files (Nature Neuroscience compatible format).
+
+    Creates one CSV per pairwise comparison with comprehensive statistics.
+    """
+    output_dir = Path(output_dir)
+
+    # Also save a summary text file with overall results
+    stats_file_txt = output_dir / "trajectory_feedingstate_permutation_statistics.txt"
+    with open(stats_file_txt, "w") as f:
         f.write("FEEDINGSTATE TRAJECTORY PERMUTATION TEST RESULTS\n")
-        f.write("=" * 60 + "\n\n")
-        f.write(f"Dataset filter:   Light=on only\n")
-        f.write(f"Comparisons:      all pairwise\n")
+        f.write("=" * 80 + "\n\n")
+        f.write(f"Filter:           Light=on only\n")
         f.write(f"Time bins:        {n_bins}\n")
-        f.write(f"Permutations:     {n_permutations}\n")
-        f.write(f"FDR method:       fdr_bh\n")
-        f.write(f"Alpha:            0.05\n\n")
+        f.write(f"Permutations:     {n_permutations:,}\n")
+        f.write(f"FDR method:       fdr_bh (Benjamini-Hochberg)\n")
+        f.write(f"Significance:     α = 0.05\n")
+        f.write(f"Bootstrap:        10,000 resamples (95% CI)\n\n")
 
         for (cond_a, cond_b), res in perm_results.items():
-            f.write(f"\n{cond_b} vs {cond_a}\n")
-            f.write("-" * 60 + "\n")
-            f.write(f"Raw significant bins: {res['n_significant_raw']}/{n_bins}\n")
-            f.write(f"FDR significant bins: {res['n_significant']}/{n_bins}\n")
-            f.write(f"Significant bin indices: {res['significant_timepoints']}\n\n")
-            f.write("Per-bin results:\n")
-            for i, tb in enumerate(res["time_bins"]):
-                sig = "*" if i in res["significant_timepoints"] else ""
-                obs = res["observed_diffs"][i]
-                pr = res["p_values_raw"][i]
-                pc = res["p_values_corrected"][i]
-                f.write(f"  Bin {tb:2d}: diff={obs:+.2f}, p_raw={pr:.4f}, p_FDR={pc:.4f} {sig}\n")
+            f.write(f"\n{FEEDING_LABELS.get(cond_b, cond_b)} vs {FEEDING_LABELS.get(cond_a, cond_a)}\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"Raw significant bins:  {res['n_significant_raw']}/{n_bins}\n")
+            f.write(f"FDR significant bins:  {res['n_significant']}/{n_bins}\n\n")
 
-    print(f"\nStatistics saved: {stats_file}")
+    # Save detailed CSV for each pairwise comparison
+    for (cond_a, cond_b), res in perm_results.items():
+        csv_filename = f"trajectory_stats_{cond_a}_vs_{cond_b}.csv"
+        csv_path = output_dir / csv_filename
+
+        # Build dataframe with all statistics
+        df_stats = pd.DataFrame(
+            {
+                "Time_Bin": res["time_bins"],
+                "Mean_Control_mm": res["mean_a_per_bin"],
+                "Mean_Test_mm": res["mean_b_per_bin"],
+                "N_Control": res["n_a_per_bin"],
+                "N_Test": res["n_b_per_bin"],
+                "Difference_mm": res["observed_diffs"],
+                "CI_Lower_mm": res["ci_lower"],
+                "CI_Upper_mm": res["ci_upper"],
+                "Pct_Change": res["pct_change"],
+                "Pct_CI_Lower": res["pct_ci_lower"],
+                "Pct_CI_Upper": res["pct_ci_upper"],
+                "Cohens_d": res["cohens_d"],
+                "P_Value_Raw": res["p_values_raw"],
+                "P_Value_FDR": res["p_values_corrected"],
+                "Significant_FDR": [
+                    "*" if res["p_values_corrected"][i] < 0.05 else "ns" for i in range(len(res["time_bins"]))
+                ],
+            }
+        )
+
+        df_stats.to_csv(csv_path, index=False, float_format="%.6f")
+        print(f"✅ Saved: {csv_path.name}")
+
+    print(f"\n✅ Summary statistics: {stats_file_txt.name}")
 
 
 # ---------------------------------------------------------------------------

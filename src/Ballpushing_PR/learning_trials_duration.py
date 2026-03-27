@@ -401,72 +401,135 @@ def create_duration_plot(trial_durations, friedman_stat, friedman_p, posthoc_res
     """
     print("Creating plot...")
 
-    plt.figure(figsize=(8, 6))
+    # Convert duration from seconds to minutes
+    trial_durations = trial_durations.copy()
+    trial_durations["duration_min"] = trial_durations["duration"] / 60.0
+
+    # Figure size in inches (4.858 cm × 3.0457 cm)
+    fig, ax = plt.subplots(figsize=(6 / 2.54, 2.6299 / 2.54))
+
+    # Map trial numbers to labels
+    trial_labels = {1: "Trial 1", 2: "Trial 2", 3: "Trial 3", 4: "Trial 4"}
+    trial_durations["trial_label"] = trial_durations["trial"].map(trial_labels)
+    trial_order = ["Trial 1", "Trial 2", "Trial 3", "Trial 4"]
 
     # Create boxplot
     sns.boxplot(
         data=trial_durations,
-        x="trial",
-        y="duration",
+        x="trial_label",
+        y="duration_min",
+        order=trial_order,
         color="black",
         showcaps=False,
-        boxprops={"facecolor": "none", "edgecolor": "black"},
-        whiskerprops={"color": "black"},
+        boxprops={"facecolor": "none", "edgecolor": "black", "linewidth": 0.8},
+        whiskerprops={"color": "black", "linewidth": 0.8},
+        medianprops={"color": "black", "linewidth": 0.8},
         fliersize=0,
+        ax=ax,
     )
 
-    # Add stripplot with jitter (black points)
+    # Add stripplot with jitter (plain black points, no alpha)
     sns.stripplot(
         data=trial_durations,
-        x="trial",
-        y="duration",
+        x="trial_label",
+        y="duration_min",
+        order=trial_order,
         color="black",
-        size=4,
-        alpha=0.5,
+        size=1.5,
         jitter=0.2,
+        ax=ax,
     )
 
     # Add connecting lines for individual flies
+    x_positions = {label: i for i, label in enumerate(trial_order)}
     for fly in trial_durations["fly"].unique():
-        fly_data = trial_durations[trial_durations["fly"] == fly]
-        plt.plot(fly_data["trial"].values - 1, fly_data["duration"].values, color="gray", alpha=0.2, linewidth=0.5)
+        fly_data = trial_durations[trial_durations["fly"] == fly].sort_values("trial")
+        xs = [x_positions[trial_labels[t]] for t in fly_data["trial"].values]
+        ax.plot(xs, fly_data["duration_min"].values, color="gray", alpha=0.2, linewidth=0.4)
 
-    # Labels and title
-    plt.xlabel("Trial", fontsize=12)
-    plt.ylabel("Trial Duration (s)", fontsize=12)
-    plt.title(f"Friedman p={friedman_p:.3g}", fontsize=14)
+    # Labels (no title)
+    ax.set_xlabel("", fontsize=7, labelpad=2)
+    ax.set_ylabel("Trial duration (min)", fontsize=7, labelpad=2)
 
-    # Add statistical annotations for significant pairs
-    y_max = trial_durations["duration"].max()
-    y_range = trial_durations["duration"].max() - trial_durations["duration"].min()
-    y_step = y_range * 0.07
-    annot_y = y_max + y_step
+    # Y axis: ticks every 1000 s (= 1000/60 min); label only 0, 50, 100
+    tick_step_min = 1000 / 60  # ≈ 16.67 min
+    tick_values = np.arange(0, 7) * tick_step_min  # 0, ~16.67, ~33.33, 50, ~66.67, ~83.33, 100
+    tick_labels = [
+        "0" if round(v) == 0 else "50" if round(v) == 50 else "100" if round(v) == 100 else "" for v in tick_values
+    ]
 
-    for r in posthoc_results:
-        if r["significant"]:
-            x1 = int(r["trial1"]) - 1
-            x2 = int(r["trial2"]) - 1
+    # Bracket geometry (fixed in data-coordinate minutes)
+    bar_h = 2.0  # bracket leg height (min)
+    gap_above_data = 2.0  # gap from actual data max to first bracket (min)
+    annot_step = 14.0  # vertical step per level: must exceed bar_h + 6pt text height in data coords
 
-            # Draw bracket
-            plt.plot(
-                [x1, x1, x2, x2], [annot_y, annot_y + y_step / 3, annot_y + y_step / 3, annot_y], color="k", lw=1.5
-            )
+    # Greedy interval-graph level assignment (sort by x1, then assign lowest non-conflicting level)
+    sig_pairs = [(r, int(r["trial2"]) - int(r["trial1"])) for r in posthoc_results if r["significant"]]
+    sig_pairs.sort(key=lambda item: int(item[0]["trial1"]))
 
-            # Add significance stars
-            if r["p_corr"] < 0.001:
-                stars = "***"
-            elif r["p_corr"] < 0.01:
-                stars = "**"
-            elif r["p_corr"] < 0.05:
-                stars = "*"
-            else:
-                stars = ""
+    level_map = []  # list of (r, level)
+    level_max_x2 = {}  # level -> rightmost x2 placed so far (strict > means touching brackets OK)
+    for r, span in sig_pairs:
+        x1 = x_positions[trial_labels[int(r["trial1"])]]
+        x2 = x_positions[trial_labels[int(r["trial2"])]]
+        lv = 0
+        while level_max_x2.get(lv, -1) > x1:
+            lv += 1
+        level_map.append((r, lv))
+        level_max_x2[lv] = x2
 
-            plt.text((x1 + x2) / 2, annot_y + y_step / 3, stars, ha="center", va="bottom", color="k", fontsize=14)
+    n_levels = max((lv for _, lv in level_map), default=-1) + 1
 
-            annot_y += y_step
+    # Base brackets off actual data maximum, not the hardcoded axis ceiling
+    data_max = trial_durations["duration_min"].max()
+    annot_base = data_max + gap_above_data
 
-    plt.tight_layout()
+    y_bottom = -tick_step_min * 0.25
+    # top = base + room for all levels + bar height + 6pt text budget (~9 min on this figure)
+    y_top = annot_base + annot_step * max(n_levels - 1, 0) + bar_h + 9.0
+
+    ax.set_ylim(y_bottom, y_top)
+    ax.set_yticks(tick_values)
+    ax.set_yticklabels(tick_labels)
+
+    ax.tick_params(axis="x", which="major", labelsize=6, width=0.4, length=1.35)
+    ax.tick_params(axis="y", which="major", labelsize=6, width=0.4, length=1.35)
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.4)
+    ax.spines[["top", "right"]].set_visible(False)
+
+    # Statistical annotations: brackets + stars
+    for r, lv in level_map:
+        annot_y = annot_base + lv * annot_step
+        x1 = x_positions[trial_labels[int(r["trial1"])]]
+        x2 = x_positions[trial_labels[int(r["trial2"])]]
+
+        ax.plot(
+            [x1, x1, x2, x2],
+            [annot_y, annot_y + bar_h, annot_y + bar_h, annot_y],
+            color="k",
+            lw=0.4,
+        )
+
+        if r["p_corr"] < 0.001:
+            stars = "***"
+        elif r["p_corr"] < 0.01:
+            stars = "**"
+        else:
+            stars = "*"
+
+        ax.text(
+            (x1 + x2) / 2,
+            annot_y + bar_h,
+            stars,
+            ha="center",
+            va="bottom",
+            color="k",
+            fontsize=6,
+        )
+
+    # Tight manual margins so the axes fill the figure
+    fig.subplots_adjust(left=0.30, right=0.97, bottom=0.18, top=0.97)
 
     # Save plots
     output_dir = Path(output_dir)
@@ -476,9 +539,9 @@ def create_duration_plot(trial_durations, friedman_stat, friedman_p, posthoc_res
     png_path = output_dir / "Trial_Duration_4trials_withstats_jitter.png"
     pdf_path = output_dir / "Trial_Duration_4trials_withstats_jitter.pdf"
 
-    plt.savefig(eps_path, dpi=300, bbox_inches="tight", format="eps")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
-    plt.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
+    fig.savefig(eps_path, dpi=300, bbox_inches="tight", format="eps")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    fig.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
 
     print(f"Saved plots to:")
     print(f"  - {eps_path}")
@@ -486,7 +549,7 @@ def create_duration_plot(trial_durations, friedman_stat, friedman_p, posthoc_res
     print(f"  - {pdf_path}")
 
     plt.show()
-    plt.close()
+    plt.close(fig)
 
 
 def main():

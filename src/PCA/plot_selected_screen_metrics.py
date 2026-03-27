@@ -77,6 +77,46 @@ METADATA_COLUMNS_FOR_METRICS = {
     "index",
 }
 
+# Keep display labels aligned with plot_detailed_metric_statistics.py
+METRIC_DISPLAY_NAMES = {
+    "pulling_ratio": "Proportion pull vs push",
+    "distance_ratio": "Dist. ball moved / corridor length",
+    "distance_moved": "Dist. ball moved",
+    "pulled": "Signif. (>0.3 mm) pulling events (#)",
+    "max_event": "Event max. ball displ. (n)",
+    "number_of_pauses": "Long pauses (>5s <5px) (#)",
+    "first_major_event": "First major (>1.2mm) event(n)",
+    "significant_ratio": "Fraction signif. (>0.3 mm) events",
+    "max_distance": "Max ball displacement (mm)",
+    "chamber_ratio": "Fraction time in chamber",
+    "nb_events": "Events (< 2mm fly-ball dist.)(#)",
+    "persistence_at_end": "Fraction time near end of corridor",
+    "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
+    "normalized_velocity": "Normalized walking velocity",
+    "first_major_event_time": "First major (>1.2mm) event time (s)",
+    "max_event_time": "Max ball displ. time (s)",
+    "nb_freeze": "short pauses (>2s <5px) (#)",
+    "flailing": "Movement of front legs during contact",
+    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "head_pushing_ratio": "Head pushing ratio",
+    "fraction_not_facing_ball": "Fraction not facing (>30deg) ball in corridor",
+    "interaction_persistence": "Avg. duration ball interaction events (s)",
+    "chamber_exit_time": "Time of first chamber exit (s)",
+    "velocity_trend": "Slope linear fit to fly velocity over time",
+}
+
+# Match F1 TNT plot geometry/typography for cross-figure compositing.
+PAPER_FIGURE_HEIGHT_MM = 85
+PAPER_FIGURE_WIDTH_MM_MIN = 85
+PAPER_FIGURE_WIDTH_MM_MAX = 85
+
+FONT_SIZE_TICKS = 6
+FONT_SIZE_LABELS = 7
+FONT_SIZE_ANNOTATIONS = 7
+FONT_SIZE_PVALUE = 6
+
+DPI = 300
+
 
 def parse_list_args(values):
     items = []
@@ -242,6 +282,88 @@ def region_color(region_name):
     return Config.color_dict.get(str(region_name), "#7f7f7f")
 
 
+def metric_display_name(metric_name):
+    metric_key = str(metric_name)
+    return METRIC_DISPLAY_NAMES.get(metric_key, metric_key)
+
+
+def mm_to_inches(mm_value):
+    return mm_value / 25.4
+
+
+def get_adaptive_styling_params(n_groups):
+    """Mirror the adaptive panel sizing used in F1 TNT plotting."""
+    if n_groups <= 3:
+        jitter = 0.05
+    elif n_groups <= 5:
+        jitter = 0.06
+    elif n_groups <= 10:
+        jitter = 0.07
+    else:
+        jitter = 0.08
+
+    width_mm = 12 + 9 * n_groups
+    width_mm = max(PAPER_FIGURE_WIDTH_MM_MIN, min(PAPER_FIGURE_WIDTH_MM_MAX, width_mm))
+
+    if n_groups <= 2:
+        scatter_size = 14
+    elif n_groups <= 4:
+        scatter_size = 12
+    elif n_groups <= 6:
+        scatter_size = 10
+    else:
+        scatter_size = 8
+
+    return {
+        "jitter_amount": jitter,
+        "figure_size": (mm_to_inches(width_mm), mm_to_inches(PAPER_FIGURE_HEIGHT_MM)),
+        "scatter_size": scatter_size,
+    }
+
+
+def compute_shared_metric_plot_settings(df, metrics, upper_clip_percentile=99.0):
+    """
+    Compute shared plotting limits per metric from the full dataset.
+
+    For each metric:
+    - upper clip is the chosen percentile (e.g. 99th)
+    - lower bound is the global minimum
+    - y-limits are shared across all plots for that metric
+    """
+    settings = {}
+    for metric in metrics:
+        if metric not in df.columns:
+            continue
+
+        values = df[metric].dropna().to_numpy(dtype=float)
+        if values.size == 0:
+            continue
+
+        lower_data = float(np.nanmin(values))
+        upper_clip = float(np.nanpercentile(values, upper_clip_percentile))
+        max_data = float(np.nanmax(values))
+
+        if not np.isfinite(upper_clip):
+            upper_clip = max_data
+        if upper_clip < lower_data:
+            upper_clip = max_data
+
+        y_range = max(upper_clip - lower_data, 1e-9)
+        y_lower = lower_data - 0.05 * y_range
+        y_upper = upper_clip + 0.15 * y_range
+
+        if lower_data >= 0 and y_lower < 0:
+            y_lower = 0.0
+
+        settings[metric] = {
+            "clip_upper": upper_clip,
+            "y_lower": float(y_lower),
+            "y_upper": float(y_upper),
+        }
+
+    return settings
+
+
 def plot_metric_box_jitter(
     metric,
     control_name,
@@ -252,68 +374,105 @@ def plot_metric_box_jitter(
     n_permutations,
     control_color,
     target_color,
+    shared_metric_settings=None,
 ):
-    fig, ax = plt.subplots(figsize=(3.0, 1.6))
+    style = get_adaptive_styling_params(n_groups=2)
+    fig, ax = plt.subplots(figsize=style["figure_size"])
 
     box_data = [control_values, target_values]
-    positions = [0, 1]
+    positions = [0.0, 0.65]
+    box_width = 0.5
+
+    # Clip only for visualization; statistics are computed on original values.
+    control_plot_values = control_values
+    target_plot_values = target_values
+    if shared_metric_settings is not None:
+        clip_upper = float(shared_metric_settings["clip_upper"])
+        control_plot_values = np.clip(control_values, a_min=None, a_max=clip_upper)
+        target_plot_values = np.clip(target_values, a_min=None, a_max=clip_upper)
 
     bp = ax.boxplot(
-        box_data,
+        [control_plot_values, target_plot_values],
         positions=positions,
-        widths=0.5,
+        widths=box_width * 0.6,
         patch_artist=True,
         showfliers=False,
-        boxprops=dict(linewidth=1.2, edgecolor="black"),
-        whiskerprops=dict(linewidth=1.2, color="black"),
-        capprops=dict(linewidth=1.2, color="black"),
-        medianprops=dict(linewidth=1.5, color="black"),
+        boxprops=dict(linewidth=1.5),
+        whiskerprops=dict(linewidth=1.5),
+        capprops=dict(linewidth=1.5),
+        medianprops=dict(linewidth=2, color="black"),
     )
 
-    bp["boxes"][0].set_facecolor("none")
-    bp["boxes"][0].set_edgecolor("black")
-    bp["boxes"][0].set_linewidth(1.2)
-    bp["boxes"][1].set_facecolor("none")
-    bp["boxes"][1].set_edgecolor("black")
-    bp["boxes"][1].set_linewidth(1.2)
+    # Magnetblock-like style: unfilled boxes with black outlines.
+    for patch in bp["boxes"]:
+        patch.set_facecolor("none")
+        patch.set_alpha(1.0)
+        patch.set_edgecolor("black")
+        patch.set_linewidth(1.5)
 
-    jitter = 0.08
-    x0 = np.random.normal(0, jitter, size=len(control_values))
-    x1 = np.random.normal(1, jitter, size=len(target_values))
-    ax.scatter(x0, control_values, s=10, alpha=0.75, c=control_color, edgecolors="black", linewidths=0.3)
-    ax.scatter(x1, target_values, s=10, alpha=0.75, c=target_color, edgecolors="black", linewidths=0.3)
+    x0 = np.random.normal(positions[0], style["jitter_amount"] * box_width, size=len(control_plot_values))
+    x1 = np.random.normal(positions[1], style["jitter_amount"] * box_width, size=len(target_plot_values))
+    ax.scatter(
+        x0,
+        control_plot_values,
+        s=style["scatter_size"],
+        alpha=0.48,
+        c=control_color,
+        edgecolors="none",
+        linewidths=0,
+        zorder=3,
+    )
+    ax.scatter(
+        x1,
+        target_plot_values,
+        s=style["scatter_size"],
+        alpha=0.8,
+        c=target_color,
+        edgecolors="none",
+        linewidths=0,
+        zorder=3,
+    )
 
     p_value = permutation_test_1d(control_values, target_values, n_permutations=n_permutations, random_state=42)
     sig = significance_label(p_value)
 
-    y_max = max(np.max(control_values), np.max(target_values))
-    y_min = min(np.min(control_values), np.min(target_values))
-    y_range = max(y_max - y_min, 1e-9)
+    if shared_metric_settings is not None:
+        y_lower = float(shared_metric_settings["y_lower"])
+        y_upper = float(shared_metric_settings["y_upper"])
+        y_range = max(y_upper - y_lower, 1e-9)
+        y_max_for_annotation = float(shared_metric_settings["clip_upper"])
+    else:
+        y_max_for_annotation = max(np.max(control_plot_values), np.max(target_plot_values))
+        y_min_for_limits = min(np.min(control_plot_values), np.min(target_plot_values))
+        y_range = max(y_max_for_annotation - y_min_for_limits, 1e-9)
+        y_lower = y_min_for_limits - 0.05 * y_range
+        y_upper = y_max_for_annotation + 0.15 * y_range
+        if y_min_for_limits >= 0 and y_lower < 0:
+            y_lower = 0
+    ax.set_ylim(y_lower, y_upper)
 
-    bar_height = y_max + 0.08 * y_range
-    ax.plot([0, 1], [bar_height, bar_height], "k-", linewidth=1.2)
-    ax.text(0.5, bar_height + 0.02 * y_range, sig, ha="center", va="bottom", fontsize=7, fontweight="bold")
+    # Significant-only annotation, no bar and no p-value textbox.
+    if p_value < 0.05:
+        sig_y = y_max_for_annotation + 0.08 * y_range
+        ax.text(
+            float(np.mean(positions)),
+            sig_y,
+            sig,
+            ha="center",
+            va="bottom",
+            fontsize=FONT_SIZE_ANNOTATIONS,
+            fontweight="bold",
+            color="red",
+        )
 
-    p_text = f"p = {format_p_value(p_value)}"
-    ax.text(
-        0.02,
-        0.98,
-        p_text,
-        transform=ax.transAxes,
-        fontsize=6,
-        verticalalignment="top",
-        horizontalalignment="left",
-        bbox=dict(boxstyle="round", facecolor="white", edgecolor="gray", alpha=0.8, linewidth=0.8),
-    )
-
-    ax.set_xticks([0, 1])
+    ax.set_xticks(positions)
     ax.set_xticklabels(
         [f"{control_name}\n(n={len(control_values)})", f"{target_name}\n(n={len(target_values)})"],
-        fontsize=6,
+        fontsize=FONT_SIZE_TICKS,
     )
-    ax.set_ylabel(metric, fontsize=7)
-    ax.tick_params(axis="y", labelsize=6)
-    ax.tick_params(axis="both", which="major", direction="out", length=3, width=1.0)
+    ax.set_ylabel(metric_display_name(metric), fontsize=FONT_SIZE_LABELS)
+    ax.tick_params(axis="y", labelsize=FONT_SIZE_TICKS)
+    ax.tick_params(axis="both", which="major", direction="out", length=3, width=1.0, labelsize=FONT_SIZE_TICKS)
 
     ax.set_facecolor("white")
     fig.patch.set_facecolor("white")
@@ -328,13 +487,16 @@ def plot_metric_box_jitter(
     metric_safe = sanitize_name(metric)
     pdf_path = output_dir / f"{metric_safe}.pdf"
     png_path = output_dir / f"{metric_safe}.png"
-    plt.savefig(pdf_path, dpi=300, bbox_inches="tight")
-    plt.savefig(png_path, dpi=300, bbox_inches="tight")
+    svg_path = output_dir / f"{metric_safe}.svg"
+    plt.savefig(pdf_path, dpi=DPI, bbox_inches="tight")
+    plt.savefig(png_path, dpi=DPI, bbox_inches="tight")
+    plt.savefig(svg_path, format="svg", bbox_inches="tight")
     plt.close(fig)
 
     d_value = cohens_d(target_values, control_values)
     return {
         "metric": metric,
+        "metric_display_name": metric_display_name(metric),
         "n_control": len(control_values),
         "n_target": len(target_values),
         "control_mean": float(np.mean(control_values)),
@@ -345,6 +507,7 @@ def plot_metric_box_jitter(
         "significance": sig,
         "plot_pdf": str(pdf_path),
         "plot_png": str(png_path),
+        "plot_svg": str(svg_path),
     }
 
 
@@ -366,6 +529,12 @@ def main():
         help="Control selection mode (default: emptysplit)",
     )
     parser.add_argument("--n-permutations", type=int, default=10000, help="Number of permutations")
+    parser.add_argument(
+        "--y-clip-percentile",
+        type=float,
+        default=99.0,
+        help="Upper percentile for shared y-axis clipping per metric (default: 99)",
+    )
     args = parser.parse_args()
 
     metrics = parse_list_args(args.metrics) if args.metrics else []
@@ -390,6 +559,17 @@ def main():
     if not metrics:
         print("❌ No valid metrics found in dataset")
         return
+
+    shared_metric_settings = compute_shared_metric_plot_settings(
+        df,
+        metrics,
+        upper_clip_percentile=args.y_clip_percentile,
+    )
+
+    if shared_metric_settings:
+        print(
+            f"📏 Shared y-axis enabled using full dataset with upper clipping at {args.y_clip_percentile:.1f}th percentile"
+        )
 
     output_root = Path(args.output_root)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -448,6 +628,7 @@ def main():
                 n_permutations=args.n_permutations,
                 control_color=control_color,
                 target_color=target_color,
+                shared_metric_settings=shared_metric_settings.get(metric),
             )
             result.update(
                 {

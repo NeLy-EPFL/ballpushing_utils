@@ -727,6 +727,12 @@ class BallPushingMetrics:
                     metrics_dict["distance_moved"] = safe_call(
                         self.get_distance_moved, fly_idx, ball_idx, subset=filtered_events
                     )
+                for _t_min in [10, 20, 30, 40, 50, 60]:
+                    _metric_name = f"distance_moved_{_t_min}min"
+                    if self.is_metric_enabled(_metric_name):
+                        metrics_dict[_metric_name] = safe_call(
+                            self.get_distance_moved_at_timepoint, fly_idx, ball_idx, float(3600 + _t_min * 60)
+                        )
                 if self.is_metric_enabled("raw_distance_moved"):
                     metrics_dict["raw_distance_moved"] = safe_call(
                         self.get_raw_distance_moved, fly_idx, ball_idx, subset=filtered_events
@@ -1802,6 +1808,66 @@ class BallPushingMetrics:
             # Sum all frame-to-frame distances for this event
             event_distance = np.sum(frame_distances)
             total_distance += event_distance
+
+        return total_distance
+
+    def get_distance_moved_at_timepoint(self, fly_idx, ball_idx, time_cutoff_s):
+        """
+        Compute cumulative distance moved by the ball up to a raw time cutoff,
+        using the exact same frame-to-frame 2D displacement logic as
+        get_distance_moved().
+
+        For F1 experiments the test phase spans roughly 3600–7200 s from experiment
+        start, so pass cutoffs like 4200, 4800, … 7200 to get cumulative distances
+        at 10-min intervals through the second hour.  The 7200 s value should equal
+        get_distance_moved() exactly (all events included).
+
+        Events that start before the cutoff are included; events that span the
+        cutoff are clipped so only frames up to the cutoff contribute.
+
+        Parameters
+        ----------
+        fly_idx : int
+        ball_idx : int
+        time_cutoff_s : float
+            Cutoff in raw seconds from experiment start.
+
+        Returns
+        -------
+        float
+            Total cumulative 2D ball displacement in pixels up to the cutoff.
+            Divide by PIXELS_PER_MM to convert to mm.
+        """
+        fps = self.fly.experiment.fps
+        ball_data = self.tracking_data.balltrack.objects[ball_idx].dataset
+        events = self.tracking_data.interaction_events[fly_idx][ball_idx]
+
+        frame_cutoff = int(time_cutoff_s * fps)
+
+        total_distance = 0.0
+
+        for event in events:
+            start_idx, end_idx = event[0], event[1]
+
+            # Skip events that start after the cutoff
+            if start_idx > frame_cutoff:
+                continue
+
+            # Clip event end to the cutoff frame
+            clipped_end = min(end_idx, frame_cutoff)
+            if clipped_end <= start_idx:
+                continue
+
+            # Same computation as get_distance_moved
+            event_x = ball_data["x_centre"].iloc[start_idx : clipped_end + 1].values
+            event_y = ball_data["y_centre"].iloc[start_idx : clipped_end + 1].values
+
+            if len(event_x) < 2:
+                continue
+
+            dx = np.diff(event_x)
+            dy = np.diff(event_y)
+            total_distance += float(np.sum(np.sqrt(dx**2 + dy**2)))
 
         return total_distance
 

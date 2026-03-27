@@ -30,8 +30,12 @@ import argparse
 import random
 from pathlib import Path
 
+import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
+
+matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts in PDFs
+matplotlib.rcParams["font.family"] = "Arial"
 
 
 PX_PER_MM = 500 / 30
@@ -61,10 +65,11 @@ def load_dataset(feather_path: Path) -> pd.DataFrame:
     if data.empty:
         raise ValueError(f"Dataset is empty: {feather_path}")
 
-    data["distance_ball_0_mm"] = data["distance_ball_0"] / PX_PER_MM
-    data["distance_ball_0_mm_aligned"] = data.groupby("fly")["distance_ball_0_mm"].transform(
-        lambda values: values - values.iloc[0]
-    )
+    # Use signed y-axis displacement (y_ball_0 decreases when ball is pushed forward
+    # → negate so pushing = positive, pulling = negative).
+    data["distance_ball_0_mm"] = data.groupby("fly")["y_ball_0"].transform(lambda y: -(y - y.iloc[0]) / PX_PER_MM)
+    # Already aligned to 0 at t=0 per fly
+    data["distance_ball_0_mm_aligned"] = data["distance_ball_0_mm"]
 
     return data
 
@@ -128,10 +133,8 @@ def load_sampled_dataset(
     print(f"Sampled {len(sampled_flies)} flies.")
     data = combined[combined["fly"].isin(sampled_flies)].copy()
 
-    data["distance_ball_0_mm"] = data["distance_ball_0"] / PX_PER_MM
-    data["distance_ball_0_mm_aligned"] = data.groupby("fly")["distance_ball_0_mm"].transform(
-        lambda values: values - values.iloc[0]
-    )
+    data["distance_ball_0_mm"] = data.groupby("fly")["y_ball_0"].transform(lambda y: -(y - y.iloc[0]) / PX_PER_MM)
+    data["distance_ball_0_mm_aligned"] = data["distance_ball_0_mm"]
 
     return data
 
@@ -359,10 +362,11 @@ def plot_trajectories_with_histogram(
     Typography: axis labels 7 pt, tick labels 6 pt.
     """
     # ---- Geometry --------------------------------------------------------
-    MAIN_W_MM, MAIN_H_MM = 52.5, 36.6
-    HIST_W_MM = 15.0  # width of the histogram side panel
-    TOTAL_W = (MAIN_W_MM + HIST_W_MM) / 25.4  # inches
-    TOTAL_H = MAIN_H_MM / 25.4
+    TOTAL_W_MM, TOTAL_H_MM = 63.3, 33.7  # full figure
+    HIST_W_MM = 14.0  # width of the histogram side panel
+    MAIN_W_MM = TOTAL_W_MM - HIST_W_MM  # 65.0 mm for trajectory panel
+    TOTAL_W = TOTAL_W_MM / 25.4  # inches
+    TOTAL_H = TOTAL_H_MM / 25.4  # inches
 
     # Contact marker: 0.5 mm diameter → area in pt²
     # 1 pt = 25.4/72 mm  →  0.5 mm = 0.5*72/25.4 pt
@@ -373,7 +377,7 @@ def plot_trajectories_with_histogram(
         1,
         2,
         figsize=(TOTAL_W, TOTAL_H),
-        gridspec_kw={"width_ratios": [MAIN_W_MM, HIST_W_MM], "wspace": 0.25},
+        gridspec_kw={"width_ratios": [MAIN_W_MM, HIST_W_MM], "wspace": 0.06},
         sharey=False,
     )
 
@@ -388,7 +392,7 @@ def plot_trajectories_with_histogram(
         ax_traj.plot(
             fly_data["time"] / 60.0,
             fly_data["distance_ball_0_mm_aligned"],
-            color="gray",
+            color="#6d6e71",
             alpha=0.3,
             linewidth=0.4,
         )
@@ -414,54 +418,54 @@ def plot_trajectories_with_histogram(
             label="Contact onset",
         )
 
-    ax_traj.set_xlabel("Time (min)", fontsize=7)
-    ax_traj.set_ylabel("Ball position (mm)", fontsize=7)
-    ax_traj.tick_params(labelsize=6, width=0.5, length=2)
+    Y_MIN, Y_MAX = -5.0, 14.5
+    Y_TICKS = [-5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5]
+
+    ax_traj.set_xlabel("Time (min)", fontsize=7, labelpad=2)
+    ax_traj.set_ylabel("Ball position (mm)", fontsize=7, labelpad=2)
+    ax_traj.set_ylim(Y_MIN, Y_MAX)
+    ax_traj.set_yticks(Y_TICKS)
+    ax_traj.xaxis.set_major_locator(plt.MultipleLocator(30))
+    ax_traj.xaxis.set_minor_locator(plt.MultipleLocator(10))
+    ax_traj.tick_params(axis="x", which="major", labelsize=6, width=0.4, length=1.35)
+    ax_traj.tick_params(axis="x", which="minor", labelsize=0, width=0.4, length=0.8)
+    ax_traj.tick_params(axis="y", which="major", labelsize=6, width=0.4, length=1.35)
     for spine in ax_traj.spines.values():
-        spine.set_linewidth(0.5)
+        spine.set_linewidth(0.4)
     ax_traj.spines[["top", "right"]].set_visible(False)
 
     # ---- Histogram panel (horizontal bars, y shared with trajectory) -----
-    y_min = min(final_positions.min(), data["distance_ball_0_mm_aligned"].min())
-    y_max = max(final_positions.max(), data["distance_ball_0_mm_aligned"].max())
-    y_pad = (y_max - y_min) * 0.04
-    y_lim = (y_min - y_pad, y_max + y_pad)
-
     import numpy as np
 
-    n_bins = 20
-    counts, edges = np.histogram(final_positions, bins=n_bins, range=(y_lim[0], y_lim[1]))
+    # 20 bins over -5..14.5 → ~1 mm per bin, bars touching (height=bin_width)
+    n_bins = 25
+    counts, edges = np.histogram(final_positions, bins=n_bins, range=(Y_MIN, Y_MAX))
 
     ax_hist.barh(
         (edges[:-1] + edges[1:]) / 2,
         counts,
-        height=(edges[1] - edges[0]) * 0.85,
+        height=(edges[1] - edges[0]),
         color="gray",
-        edgecolor="white",
-        linewidth=0.3,
+        edgecolor="none",
         alpha=0.85,
     )
 
-    ax_hist.tick_params(labelsize=6, width=0.5, length=2)
-    ax_hist.set_xlabel("n", fontsize=7)
+    ax_hist.set_ylim(Y_MIN, Y_MAX)
+    ax_hist.set_xlim(0, 10)
+    ax_hist.set_xticks([0, 5, 10])
+    ax_hist.set_xticklabels(["0", "", "10"])
+    ax_hist.tick_params(labelsize=6, width=0.4, length=1.35)
+    ax_hist.set_xlabel("count", fontsize=7, labelpad=2)
     for spine in ax_hist.spines.values():
-        spine.set_linewidth(0.5)
+        spine.set_linewidth(0.4)
     ax_hist.spines[["top", "right"]].set_visible(False)
     ax_hist.yaxis.set_visible(False)
 
-    # Sync y limits
-    shared_ylim = (
-        min(y_lim[0], ax_traj.get_ylim()[0]),
-        max(y_lim[1], ax_traj.get_ylim()[1]),
-    )
-    ax_traj.set_ylim(shared_ylim)
-    ax_hist.set_ylim(shared_ylim)
-
-    plt.tight_layout(pad=0.3)
+    fig.subplots_adjust(left=0.15, right=0.985, bottom=0.19, top=0.975)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
-    fig.savefig(output_path.with_suffix(".pdf"), format="pdf", bbox_inches="tight")
+    fig.savefig(output_path.with_suffix(".svg"), format="svg")
+    fig.savefig(output_path.with_suffix(".pdf"), format="pdf")
     plt.close(fig)
 
 
@@ -595,6 +599,27 @@ def main():
     plot_trajectories_with_histogram(data, representative_fly_id, pub_base)
     print(f"Saved: {pub_base.with_suffix('.svg')}")
     print(f"Saved: {pub_base.with_suffix('.pdf')}")
+
+    # ---- Plot 5: same publication figure with exactly 53 starved_noWater flies,
+    #             always including the same representative fly as fly #1 of the set.
+    print("\nGenerating starved_noWater-only histogram plot...")
+    # Load all starved_noWater data so we can guarantee the rep fly is included.
+    snw_all = load_sampled_dataset(
+        args.coordinates_dir,
+        filters={"FeedingState": "starved_noWater"},
+        n_flies=999999,  # load all
+        seed=args.seed,
+    )
+    snw_all_flies = [f for f in snw_all["fly"].dropna().unique() if f != representative_fly_id]
+    rng = random.Random(args.seed)
+    extra = rng.sample(snw_all_flies, min(52, len(snw_all_flies)))
+    snw_flies = [representative_fly_id] + extra
+    snw_data = snw_all[snw_all["fly"].isin(snw_flies)].copy()
+    print(f"starved_noWater sample: {len(snw_flies)} flies (rep fly guaranteed).")
+    snw_pub_base = args.output_dir / f"{args.base_name}_WithHistogram_starved_noWater"
+    plot_trajectories_with_histogram(snw_data, representative_fly_id, snw_pub_base)
+    print(f"Saved: {snw_pub_base.with_suffix('.svg')}")
+    print(f"Saved: {snw_pub_base.with_suffix('.pdf')}")
 
 
 if __name__ == "__main__":

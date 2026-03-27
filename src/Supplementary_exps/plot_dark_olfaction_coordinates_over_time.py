@@ -28,6 +28,10 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 
+# Global conversion constant used by plotting and CSV export helpers
+PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
+
+
 def filter_data_by_time_window(data, time_col, start_time=-10, end_time=30):
     """Filter data to a specific time window."""
     return data[(data[time_col] >= start_time) & (data[time_col] <= end_time)]
@@ -437,6 +441,25 @@ def preprocess_data_for_permutation(
     return grouped, bin_edges
 
 
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95, random_state=42):
+    """Bootstrap confidence interval for mean(group2) - mean(group1)."""
+    if len(group1_data) == 0 or len(group2_data) == 0 or n_bootstrap <= 0:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(random_state)
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = rng.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = rng.choice(group2_data, size=len(group2_data), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    ci_lower = float(np.percentile(bootstrap_diffs, alpha / 2))
+    ci_upper = float(np.percentile(bootstrap_diffs, 100 - alpha / 2))
+    return ci_lower, ci_upper
+
+
 def compute_permutation_test_genotype(
     processed_data,
     metric="avg_distance_ball_0",
@@ -444,6 +467,8 @@ def compute_permutation_test_genotype(
     control_group="TNTxEmptyGal4",
     n_permutations=10000,
     alpha=0.05,
+    n_bootstrap=10000,
+    collect_detailed_stats=False,
     progress=True,
 ):
     """
@@ -491,11 +516,16 @@ def compute_permutation_test_genotype(
     # Store results for each bin
     observed_diffs = []
     p_values = []
+    detailed_rows = []
 
     iterator = tqdm(time_bins, desc=f"  {test_group} vs {control_group}") if progress else time_bins
 
     for time_bin in iterator:
         bin_data = processed_data[processed_data["time_bin"] == time_bin]
+
+        bin_center = float(bin_data["bin_center"].iloc[0]) if len(bin_data) > 0 and "bin_center" in bin_data else np.nan
+        bin_start = float(bin_data["bin_start"].iloc[0]) if len(bin_data) > 0 and "bin_start" in bin_data else np.nan
+        bin_end = float(bin_data["bin_end"].iloc[0]) if len(bin_data) > 0 and "bin_end" in bin_data else np.nan
 
         # Get control and test values
         control_vals = bin_data[bin_data[group_col] == control_group][metric].values
@@ -504,6 +534,31 @@ def compute_permutation_test_genotype(
         if len(control_vals) == 0 or len(test_vals) == 0:
             observed_diffs.append(np.nan)
             p_values.append(1.0)
+            if collect_detailed_stats:
+                detailed_rows.append(
+                    {
+                        "time_bin": int(time_bin),
+                        "bin_center": bin_center,
+                        "bin_start": bin_start,
+                        "bin_end": bin_end,
+                        "n_control": int(len(control_vals)),
+                        "n_test": int(len(test_vals)),
+                        "control_mean": np.nan,
+                        "test_mean": np.nan,
+                        "control_median": np.nan,
+                        "test_median": np.nan,
+                        "mean_diff_test_minus_control": np.nan,
+                        "median_diff_test_minus_control": np.nan,
+                        "effect_size_raw": np.nan,
+                        "pct_change": np.nan,
+                        "ci_lower": np.nan,
+                        "ci_upper": np.nan,
+                        "pct_ci_lower": np.nan,
+                        "pct_ci_upper": np.nan,
+                        "cohens_d": np.nan,
+                        "p_value_raw": 1.0,
+                    }
+                )
             continue
 
         # Observed difference
@@ -526,13 +581,83 @@ def compute_permutation_test_genotype(
 
         perm_diffs = np.array(perm_diffs)
 
-        # Two-tailed p-value
-        p_value = np.mean(np.abs(perm_diffs) >= np.abs(obs_diff))
+        # Two-tailed p-value with permutation-resolution floor.
+        # This avoids exact 0.0 values and keeps p-values reportable in CSV outputs.
+        extreme_count = int(np.sum(np.abs(perm_diffs) >= np.abs(obs_diff)))
+        p_value = (extreme_count + 1) / (n_permutations + 1)
         p_values.append(p_value)
+
+        if collect_detailed_stats:
+            control_mean = float(np.mean(control_vals))
+            test_mean = float(np.mean(test_vals))
+            control_median = float(np.median(control_vals))
+            test_median = float(np.median(test_vals))
+            mean_diff = test_mean - control_mean
+            median_diff = test_median - control_median
+
+            pooled_std = np.sqrt((np.var(control_vals, ddof=1) + np.var(test_vals, ddof=1)) / 2)
+            cohens_d = mean_diff / pooled_std if np.isfinite(pooled_std) and pooled_std > 0 else np.nan
+
+            ci_lower, ci_upper = bootstrap_ci_difference(
+                control_vals,
+                test_vals,
+                n_bootstrap=n_bootstrap,
+                ci=95,
+                random_state=42 + int(time_bin),
+            )
+
+            if np.isfinite(control_mean) and control_mean != 0:
+                pct_change = (mean_diff / control_mean) * 100.0
+                pct_ci_lower = (ci_lower / control_mean) * 100.0 if np.isfinite(ci_lower) else np.nan
+                pct_ci_upper = (ci_upper / control_mean) * 100.0 if np.isfinite(ci_upper) else np.nan
+            else:
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
+
+            detailed_rows.append(
+                {
+                    "time_bin": int(time_bin),
+                    "bin_center": bin_center,
+                    "bin_start": bin_start,
+                    "bin_end": bin_end,
+                    "n_control": int(len(control_vals)),
+                    "n_test": int(len(test_vals)),
+                    "control_mean": control_mean,
+                    "test_mean": test_mean,
+                    "control_median": control_median,
+                    "test_median": test_median,
+                    "mean_diff_test_minus_control": mean_diff,
+                    "median_diff_test_minus_control": median_diff,
+                    "effect_size_raw": mean_diff,
+                    "pct_change": pct_change,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "pct_ci_lower": pct_ci_lower,
+                    "pct_ci_upper": pct_ci_upper,
+                    "cohens_d": cohens_d,
+                    "p_value_raw": float(p_value),
+                }
+            )
 
     # Apply FDR correction across all time bins
     p_values_raw = np.array(p_values)
     rejected, p_values_corrected, _, _ = multipletests(p_values_raw, alpha=alpha, method="fdr_bh")
+
+    if collect_detailed_stats:
+        for i, row in enumerate(detailed_rows):
+            row["p_value_fdr"] = float(p_values_corrected[i])
+            row["significant_fdr"] = bool(rejected[i])
+
+            p_fdr = float(p_values_corrected[i])
+            if p_fdr < 0.001:
+                row["significance_label"] = "***"
+            elif p_fdr < 0.01:
+                row["significance_label"] = "**"
+            elif p_fdr < 0.05:
+                row["significance_label"] = "*"
+            else:
+                row["significance_label"] = ""
 
     results = {
         "test_group": test_group,
@@ -547,10 +672,90 @@ def compute_permutation_test_genotype(
         "n_significant_raw": np.sum(p_values_raw < alpha),
     }
 
+    if collect_detailed_stats:
+        results["bin_stats"] = detailed_rows
+
     print(f"    Raw significant bins: {results['n_significant_raw']}/{n_bins}")
     print(f"    FDR significant bins: {results['n_significant']}/{n_bins} (α={alpha})")
 
     return results
+
+
+def format_bin_stats_for_publication(
+    bin_stats,
+    comparison,
+    condition_a,
+    condition_b,
+    pixels_per_mm=PIXELS_PER_MM,
+):
+    """Convert internal bin stats to standardized, mm-based publication CSV schema."""
+    if not bin_stats:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(bin_stats).copy()
+
+    if "time_bin" in df.columns:
+        df = df.rename(columns={"time_bin": "Time_Bin"})
+    if "bin_start" in df.columns:
+        df = df.rename(columns={"bin_start": "Bin_Start_min"})
+    if "bin_end" in df.columns:
+        df = df.rename(columns={"bin_end": "Bin_End_min"})
+    if "bin_center" in df.columns:
+        df = df.rename(columns={"bin_center": "Bin_Center_min"})
+
+    df["Comparison"] = comparison
+    df["ConditionA"] = condition_a
+    df["ConditionB"] = condition_b
+
+    df["N_Control"] = df.get("n_control", np.nan)
+    df["N_Test"] = df.get("n_test", np.nan)
+
+    df["Mean_Control_mm"] = df.get("control_mean", np.nan) / pixels_per_mm
+    df["Mean_Test_mm"] = df.get("test_mean", np.nan) / pixels_per_mm
+    df["Difference_mm"] = df.get("mean_diff_test_minus_control", np.nan) / pixels_per_mm
+    df["CI_Lower_mm"] = df.get("ci_lower", np.nan) / pixels_per_mm
+    df["CI_Upper_mm"] = df.get("ci_upper", np.nan) / pixels_per_mm
+
+    df["Pct_Change"] = df.get("pct_change", np.nan)
+    df["Pct_CI_Lower"] = df.get("pct_ci_lower", np.nan)
+    df["Pct_CI_Upper"] = df.get("pct_ci_upper", np.nan)
+    df["Cohens_D"] = df.get("cohens_d", np.nan)
+    df["P_Value_Raw"] = df.get("p_value_raw", np.nan)
+    df["P_Value_FDR"] = df.get("p_value_fdr", np.nan)
+
+    if "significance_label" in df.columns:
+        df["Significant_FDR"] = df["significance_label"].replace({"": "ns"})
+    elif "significant_fdr" in df.columns:
+        df["Significant_FDR"] = np.where(df["significant_fdr"], "*", "ns")
+    else:
+        df["Significant_FDR"] = "ns"
+
+    keep_cols = [
+        "Comparison",
+        "ConditionA",
+        "ConditionB",
+        "Time_Bin",
+        "Bin_Start_min",
+        "Bin_End_min",
+        "Bin_Center_min",
+        "N_Control",
+        "N_Test",
+        "Mean_Control_mm",
+        "Mean_Test_mm",
+        "Difference_mm",
+        "CI_Lower_mm",
+        "CI_Upper_mm",
+        "Pct_Change",
+        "Pct_CI_Lower",
+        "Pct_CI_Upper",
+        "Cohens_D",
+        "P_Value_Raw",
+        "P_Value_FDR",
+        "Significant_FDR",
+    ]
+
+    keep_cols = [c for c in keep_cols if c in df.columns]
+    return df[keep_cols]
 
 
 def create_trajectory_plot_with_permutation(
@@ -791,6 +996,8 @@ def create_ir8a_light_trajectory_plot_with_permutation(
     linestyle_mapping=None,
     ax=None,
     bin_edges=None,
+    show_legend=True,
+    show_ylabel=True,
 ):
     """
     Create a trajectory plot comparing Light conditions within IR8a only.
@@ -949,10 +1156,12 @@ def create_ir8a_light_trajectory_plot_with_permutation(
                 )
 
     ax.set_xlabel("Time (min)", fontsize=14)
-    ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
+    if show_ylabel:
+        ax.set_ylabel("Relative ball distance (mm)", fontsize=14)
     ax.tick_params(axis="both", labelsize=10)
     ax.grid(False)
-    ax.legend(loc="upper left", fontsize=12)
+    if show_legend:
+        ax.legend(loc="upper left", fontsize=12)
 
 
 def main():
@@ -966,8 +1175,17 @@ def main():
         default="/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Datasets/251106_08_summary_TNT_Olfaction_Dark_Data/coordinates/pooled_coordinates.feather",
         help="Path to dark olfaction coordinates dataset",
     )
+    parser.add_argument(
+        "--n-bootstrap",
+        type=int,
+        default=10000,
+        help="Number of bootstrap iterations for confidence intervals in detailed stats",
+    )
 
     args = parser.parse_args()
+
+    if args.n_bootstrap <= 0:
+        raise ValueError("--n-bootstrap must be a positive integer")
 
     # Dataset path
     coordinates_dataset_path = args.coordinates_path
@@ -1110,6 +1328,10 @@ def main():
     all_light_conditions = sorted(pooled_data_trimmed[light_col].unique())
     light_conditions_pooled = sorted(all_light_conditions, key=lambda x: (x != "on", x))
 
+    output_dir = Path("/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Plots/Trajectories")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    pooled_stats_tables = []
+
     # Create side-by-side subplots
     fig7, axes7 = plt.subplots(1, len(light_conditions_pooled), figsize=(10 * len(light_conditions_pooled), 6))
     if len(light_conditions_pooled) == 1:
@@ -1149,8 +1371,33 @@ def main():
             control_group="TNTxEmptyGal4",
             n_permutations=n_permutations,
             alpha=0.05,
+            n_bootstrap=args.n_bootstrap,
+            collect_detailed_stats=True,
             progress=True,
         )
+
+        # Save standardized mm-based binwise stats for this light condition
+        pooled_bin_stats = perm_results.get("bin_stats", [])
+        pooled_stats_df = format_bin_stats_for_publication(
+            pooled_bin_stats,
+            comparison=f"pooled_genotype_{light_condition}",
+            condition_a="TNTxEmptyGal4",
+            condition_b=perm_results.get("test_group", "TNTxIR8a"),
+            pixels_per_mm=PIXELS_PER_MM,
+        )
+        if not pooled_stats_df.empty:
+            pooled_stats_df["Light_Condition"] = light_condition
+            pooled_stats_df["Metric"] = f"avg_{ball_distance_col}"
+            pooled_stats_df["N_Permutations"] = n_permutations
+            pooled_stats_df["N_Bootstrap"] = args.n_bootstrap
+            pooled_stats_df["Value_Unit"] = "mm"
+
+            per_light_csv = (
+                output_dir / f"dark_olfaction_pooled_genotype_binwise_statistics_light_{light_condition}.csv"
+            )
+            pooled_stats_df.to_csv(per_light_csv, index=False, float_format="%.6f")
+            print(f"  Saved pooled-genotype stats CSV: {per_light_csv}")
+            pooled_stats_tables.append(pooled_stats_df)
 
         # Create trajectory plot with permutation annotations
         create_trajectory_plot_with_permutation(
@@ -1210,8 +1457,6 @@ def main():
     )
 
     plt.tight_layout()
-    output_dir = Path("/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Plots/Trajectories")
-    output_dir.mkdir(parents=True, exist_ok=True)
     output_path_pooled_genotype = output_dir / "dark_olfaction_coordinates_pooled_genotype_permutation.png"
     plt.savefig(output_path_pooled_genotype, dpi=300, bbox_inches="tight")
     # Also save as PDF and SVG
@@ -1221,28 +1466,59 @@ def main():
     plt.savefig(svg_path, dpi=300, bbox_inches="tight")
     print(f"\nPooled BallTypes plots (Genotype with permutation tests) saved to: {output_path_pooled_genotype}")
 
+    if pooled_stats_tables:
+        pooled_combined_df = pd.concat(pooled_stats_tables, ignore_index=True)
+        pooled_combined_csv = output_dir / "dark_olfaction_pooled_genotype_binwise_statistics_all_lights.csv"
+        pooled_combined_df.to_csv(pooled_combined_csv, index=False, float_format="%.6f")
+        print(f"Combined pooled-genotype stats CSV saved to: {pooled_combined_csv}")
+
     # =============================================================================
-    # IMPLEMENTATION 3: IR8A ONLY, LIGHT EFFECT (ON VS OFF)
+    # IMPLEMENTATION 3: GENOTYPE-WISE LIGHT EFFECT (ON VS OFF)
     # =============================================================================
     print(f"\n{'='*60}")
-    print("IMPLEMENTATION 3: IR8a ONLY (Light Effect with Permutation Tests)")
+    print("IMPLEMENTATION 3: GENOTYPE-WISE LIGHT EFFECT (Light on vs off)")
     print(f"{'='*60}")
 
-    ir8a_data_trimmed = pooled_data_trimmed[pooled_data_trimmed[genotype_col] == "TNTxIR8a"].copy()
-    print(f"IR8a-only dataset shape: {ir8a_data_trimmed.shape}")
+    preferred_genotype_order = ["TNTxEmptyGal4", "TNTxIR8a"]
+    available_genotypes = pooled_data_trimmed[genotype_col].dropna().unique().tolist()
+    genotype_order = [g for g in preferred_genotype_order if g in available_genotypes]
 
-    if ir8a_data_trimmed.empty:
-        print("⚠️ No IR8a data available; skipping IR8a light comparison trajectory plot.")
+    if len(genotype_order) == 0:
+        print("⚠️ No genotype data available; skipping genotype-wise light comparison trajectory plot.")
     else:
-        ir8a_lights = sorted(ir8a_data_trimmed[light_col].unique(), key=lambda x: (x != "off", x))
-        print(f"IR8a light conditions: {ir8a_lights}")
+        print(f"Genotypes selected for light comparison: {genotype_order}")
+        genotype_light_output_dir = output_dir / "genotype_light_comparison"
+        genotype_light_output_dir.mkdir(parents=True, exist_ok=True)
 
-        if len(ir8a_lights) != 2:
-            print("⚠️ Expected exactly two light conditions for IR8a; skipping IR8a light comparison trajectory plot.")
-        else:
-            print(f"  Preprocessing IR8a data into {n_permutation_bins} time bins...")
-            ir8a_processed, ir8a_bin_edges = preprocess_data_for_permutation(
-                ir8a_data_trimmed,
+        fig_light, axes_light = plt.subplots(1, len(genotype_order), figsize=(10 * len(genotype_order), 6), sharey=True)
+        if len(genotype_order) == 1:
+            axes_light = [axes_light]
+
+        genotype_light_stats_tables = []
+
+        for idx, genotype in enumerate(genotype_order):
+            genotype_data = pooled_data_trimmed[pooled_data_trimmed[genotype_col] == genotype].copy()
+            print(f"\nProcessing genotype for light comparison: {genotype} (shape={genotype_data.shape})")
+
+            genotype_lights = sorted(genotype_data[light_col].dropna().unique(), key=lambda x: (x != "off", x))
+            print(f"  Light conditions: {genotype_lights}")
+
+            if len(genotype_lights) != 2 or "off" not in genotype_lights or "on" not in genotype_lights:
+                print(f"  ⚠️ Skipping {genotype}: expected both 'off' and 'on' light conditions.")
+                axes_light[idx].text(
+                    0.5,
+                    0.5,
+                    f"Insufficient data for {genotype}",
+                    ha="center",
+                    va="center",
+                    transform=axes_light[idx].transAxes,
+                )
+                axes_light[idx].set_title(f"{genotype}: Light effect", fontsize=14)
+                continue
+
+            print(f"  Preprocessing {genotype} data into {n_permutation_bins} time bins...")
+            genotype_processed, genotype_bin_edges = preprocess_data_for_permutation(
+                genotype_data,
                 time_col=time_col,
                 value_col=ball_distance_col,
                 group_col=light_col,
@@ -1250,49 +1526,82 @@ def main():
                 n_bins=n_permutation_bins,
             )
 
-            print(f"  Computing IR8a Light on vs off permutation test ({n_permutations} permutations)...")
-            ir8a_perm_results = compute_permutation_test_genotype(
-                ir8a_processed,
+            print(f"  Computing {genotype} Light on vs off permutation test ({n_permutations} permutations)...")
+            genotype_perm_results = compute_permutation_test_genotype(
+                genotype_processed,
                 metric=f"avg_{ball_distance_col}",
                 group_col=light_col,
                 control_group="off",
                 n_permutations=n_permutations,
                 alpha=0.05,
+                n_bootstrap=args.n_bootstrap,
+                collect_detailed_stats=True,
                 progress=True,
             )
 
-            fig_ir8a, ax_ir8a = plt.subplots(1, 1, figsize=(10, 6))
-            light_colors = {"off": "#9467bd", "on": "#9467bd"}
+            genotype_color = genotype_colors.get(genotype, "#7f7f7f")
+            light_colors = {"off": genotype_color, "on": genotype_color}
             light_alphas = {"off": 0.5, "on": 0.95}
             light_linestyles = {"off": "dashed", "on": "solid"}
 
             create_ir8a_light_trajectory_plot_with_permutation(
-                ir8a_data_trimmed,
+                genotype_data,
                 time_col=time_col,
                 value_col=ball_distance_col,
                 light_col=light_col,
                 subject_col="fly",
-                permutation_results=ir8a_perm_results,
+                permutation_results=genotype_perm_results,
                 color_mapping=light_colors,
                 alpha_mapping=light_alphas,
                 linestyle_mapping=light_linestyles,
-                ax=ax_ir8a,
-                bin_edges=ir8a_bin_edges,
+                ax=axes_light[idx],
+                bin_edges=genotype_bin_edges,
+                show_legend=True,
+                show_ylabel=(idx == 0),
             )
 
-            ax_ir8a.set_title("IR8a: Light effect", fontsize=14)
-            plt.tight_layout()
+            axes_light[idx].set_title(f"{genotype}: Light effect", fontsize=14)
 
-            ir8a_output_dir = output_dir / "IR8a_light_comparison"
-            ir8a_output_dir.mkdir(parents=True, exist_ok=True)
+            genotype_bin_stats = genotype_perm_results.get("bin_stats", [])
+            if genotype_bin_stats:
+                genotype_stats_df = format_bin_stats_for_publication(
+                    genotype_bin_stats,
+                    comparison=f"{genotype}_light_on_vs_off",
+                    condition_a="off",
+                    condition_b=genotype_perm_results.get("test_group", "on"),
+                    pixels_per_mm=PIXELS_PER_MM,
+                )
+                genotype_stats_df["Genotype"] = genotype
+                genotype_stats_df["Metric"] = f"avg_{ball_distance_col}"
+                genotype_stats_df["N_Permutations"] = n_permutations
+                genotype_stats_df["N_Bootstrap"] = args.n_bootstrap
+                genotype_stats_df["Value_Unit"] = "mm"
+                genotype_light_stats_tables.append(genotype_stats_df)
 
-            output_path_ir8a = ir8a_output_dir / "dark_olfaction_coordinates_ir8a_light_permutation.png"
-            plt.savefig(output_path_ir8a, dpi=300, bbox_inches="tight")
-            plt.savefig(output_path_ir8a.with_suffix(".pdf"), dpi=300, bbox_inches="tight")
-            plt.savefig(output_path_ir8a.with_suffix(".svg"), dpi=300, bbox_inches="tight")
-            plt.close(fig_ir8a)
+                per_genotype_stats_path = (
+                    genotype_light_output_dir / f"dark_olfaction_{genotype}_light_binwise_statistics_mm.csv"
+                )
+                genotype_stats_df.to_csv(per_genotype_stats_path, index=False, float_format="%.6f")
+                print(f"  {genotype} light-comparison detailed stats saved to: {per_genotype_stats_path}")
 
-            print(f"\nIR8a light-comparison trajectory plot saved to: {output_path_ir8a}")
+        plt.tight_layout()
+        output_path_genotype_light = (
+            genotype_light_output_dir / "dark_olfaction_coordinates_genotype_light_permutation.png"
+        )
+        plt.savefig(output_path_genotype_light, dpi=300, bbox_inches="tight")
+        plt.savefig(output_path_genotype_light.with_suffix(".pdf"), dpi=300, bbox_inches="tight")
+        plt.savefig(output_path_genotype_light.with_suffix(".svg"), dpi=300, bbox_inches="tight")
+        plt.close(fig_light)
+
+        if genotype_light_stats_tables:
+            combined_genotype_light_stats = pd.concat(genotype_light_stats_tables, ignore_index=True)
+            combined_genotype_light_stats_path = (
+                genotype_light_output_dir / "dark_olfaction_genotype_light_binwise_statistics_mm.csv"
+            )
+            combined_genotype_light_stats.to_csv(combined_genotype_light_stats_path, index=False, float_format="%.6f")
+            print(f"Combined genotype light-comparison detailed stats saved to: {combined_genotype_light_stats_path}")
+
+        print(f"\nGenotype-wise light-comparison trajectory plot saved to: {output_path_genotype_light}")
 
     # =============================================================================
     # SUMMARY
@@ -1315,8 +1624,14 @@ def main():
     print(f"\nGenerated plots:")
     print(f"  - Pooled BallTypes with permutation tests (side-by-side by Light condition)")
     print(f"    Saved as PNG, PDF, and SVG in: {output_dir}")
-    print(f"  - IR8a-only Light comparison trajectory plot (single panel: on vs off)")
-    print(f"    Saved as PNG, PDF, and SVG in: {output_dir / 'IR8a_light_comparison'}")
+    print(f"  - Pooled BallTypes detailed binwise statistics (CSV, mm, standardized schema)")
+    print(f"    Saved in: {output_dir / 'dark_olfaction_pooled_genotype_binwise_statistics_all_lights.csv'}")
+    print(f"  - Genotype-wise Light comparison trajectory plot (EmptyGal4 and IR8a side by side; each: on vs off)")
+    print(f"    Saved as PNG, PDF, and SVG in: {output_dir / 'genotype_light_comparison'}")
+    print(f"  - Genotype-wise Light comparison detailed binwise statistics (CSV, mm, standardized schema)")
+    print(
+        f"    Saved in: {output_dir / 'genotype_light_comparison' / 'dark_olfaction_genotype_light_binwise_statistics_mm.csv'}"
+    )
 
     print(f"\n✅ All plots generated successfully!")
 

@@ -11,7 +11,7 @@ Usage:
     python f1_tnt_genotype_comparison.py --show  # Display plots instead of just saving
     python f1_tnt_genotype_comparison.py --metrics interaction_rate,interaction_duration
     python f1_tnt_genotype_comparison.py --no-stats  # Generate plots without statistical annotations
-    python f1_tnt_genotype_comparison.py --generate-all-combinations  # Run Visual, Dopaminergic, MB, All in one pass
+    python f1_tnt_genotype_comparison.py --generate-all-combinations  # Run all predefined combinations in one pass
 """
 
 import argparse
@@ -71,14 +71,17 @@ SELECTED_GENOTYPES = [
     "TNTxMB247",
     #'PRxMB247',
     "TNTxLC10-2",
-    "TNTxLC16-1",
+    # "TNTxLC16-1",
     #'PRxLC16-1',
 ]
 
 # Predefined genotype combinations for one-shot batch generation
 PREDEFINED_GENOTYPE_COMBINATIONS = {
     "Visual": ["TNTxEmptySplit", "TNTxLC10-2", "TNTxLC16-1"],
+    "Visual_LC10-2_Only": ["TNTxEmptySplit", "TNTxLC10-2"],
     "Dopaminergic": ["TNTxEmptySplit", "TNTxDDC", "TNTxTH", "TNTxTRH"],
+    "Dopaminergic_DDC_Only": ["TNTxEmptySplit", "TNTxDDC"],
+    "Dopaminergic_TH_TRH": ["TNTxEmptySplit", "TNTxTH", "TNTxTRH"],
     "MB": ["TNTxEmptySplit", "TNTxMB247"],
     "All": [
         "TNTxEmptySplit",
@@ -223,9 +226,9 @@ PRETRAINING_STYLES = {
 
 # Plot configuration - Base values (will be adapted based on number of genotypes)
 # Paper-style figure geometry (compact, mm-based)
-PAPER_FIGURE_HEIGHT_MM = 25 * 5
-PAPER_FIGURE_WIDTH_MM_MIN = 25 * 5
-PAPER_FIGURE_WIDTH_MM_MAX = 125 * 5
+PAPER_FIGURE_HEIGHT_MM = 85
+PAPER_FIGURE_WIDTH_MM_MIN = 85
+PAPER_FIGURE_WIDTH_MM_MAX = 85
 
 # Typography tuned for compact paper panels
 FONT_SIZE_TICKS = 6
@@ -241,6 +244,20 @@ PLOT_FORMATS = ["png", "pdf", "svg"]  # Save plots in multiple formats
 JITTER_AMOUNT = 0.06  # Amount of jitter for scatter points (baseline - adapted per analysis)
 SCATTER_SIZE = 10  # Baseline scatter point size (adapted per analysis)
 SCATTER_ALPHA = 0.6
+
+# Additional facet-style layout (saved on top of existing combination outputs)
+FACET_LAYOUT_GENOTYPE_ORDER = [
+    "TNTxEmptySplit",
+    "TNTxLC10-2",
+    "TNTxMB247",
+    "TNTxDDC",
+    "TNTxTH",
+    "TNTxTRH",
+]
+FACET_PANEL_WIDTH_MM = 30
+FACET_PANEL_HEIGHT_MM = 85
+FACET_CONTROL_BACKGROUND = "#f5f5f5"
+FACET_SEPARATOR_COLOR = "black"
 
 # Y-axis limits for handling outliers
 YLIM_PERCENTILE_LOW = 0  # Lower percentile for y-axis (0 = minimum)
@@ -265,6 +282,7 @@ TEST_DATE_EFFECT = True  # Test whether Date has a significant effect on metrics
 
 # Permutation test settings
 N_PERMUTATIONS = 10000  # Number of permutations for permutation tests
+N_BOOTSTRAP = 2000  # Number of bootstrap resamples for effect-size confidence intervals
 
 # ============================================================================
 # ADAPTIVE STYLING AND ANALYSIS METHOD SELECTION
@@ -490,6 +508,123 @@ def format_pretraining_label(value):
     elif value_str in ["n", "no", "false", "0"]:
         return "Naive"
     return str(value)
+
+
+def ensure_reportable_p_value(p_value, min_value=None):
+    """Return finite p-values bounded away from exact zero for CSV/reporting."""
+    if pd.isna(p_value):
+        return np.nan
+
+    try:
+        p_float = float(p_value)
+    except (TypeError, ValueError):
+        return np.nan
+
+    if not np.isfinite(p_float):
+        return np.nan
+
+    smallest_positive = float(np.nextafter(0.0, 1.0))
+    floor = smallest_positive if min_value is None else max(float(min_value), smallest_positive)
+    return float(min(max(p_float, floor), 1.0))
+
+
+def bootstrap_ci_difference(data_naive, data_pretrained, n_bootstrap=2000, confidence=0.95, random_seed=42):
+    """Bootstrap CIs for raw difference and percent change (pretrained - naive)."""
+    naive = np.asarray(data_naive, dtype=float)
+    pretrained = np.asarray(data_pretrained, dtype=float)
+    naive = naive[np.isfinite(naive)]
+    pretrained = pretrained[np.isfinite(pretrained)]
+
+    if len(naive) < 2 or len(pretrained) < 2 or n_bootstrap < 1:
+        return np.nan, np.nan, np.nan, np.nan
+
+    rng = np.random.default_rng(random_seed)
+    diff_boot = np.empty(n_bootstrap, dtype=float)
+    pct_boot = np.full(n_bootstrap, np.nan, dtype=float)
+
+    for i in range(n_bootstrap):
+        naive_sample = rng.choice(naive, size=len(naive), replace=True)
+        pretrained_sample = rng.choice(pretrained, size=len(pretrained), replace=True)
+
+        naive_mean = float(np.mean(naive_sample))
+        pretrained_mean = float(np.mean(pretrained_sample))
+        diff = pretrained_mean - naive_mean
+        diff_boot[i] = diff
+
+        if naive_mean != 0:
+            pct_boot[i] = (diff / naive_mean) * 100.0
+
+    alpha = 1.0 - confidence
+    lower_q = 100.0 * (alpha / 2.0)
+    upper_q = 100.0 * (1.0 - alpha / 2.0)
+
+    raw_ci_bounds = np.asarray(np.percentile(diff_boot, [lower_q, upper_q]), dtype=float).reshape(-1)
+    raw_ci_lower = float(raw_ci_bounds[0]) if raw_ci_bounds.size > 0 else np.nan
+    raw_ci_upper = float(raw_ci_bounds[1]) if raw_ci_bounds.size > 1 else np.nan
+    pct_valid = pct_boot[np.isfinite(pct_boot)]
+
+    if len(pct_valid) > 0:
+        pct_ci_bounds = np.asarray(np.percentile(pct_valid, [lower_q, upper_q]), dtype=float).reshape(-1)
+        pct_ci_lower = float(pct_ci_bounds[0]) if pct_ci_bounds.size > 0 else np.nan
+        pct_ci_upper = float(pct_ci_bounds[1]) if pct_ci_bounds.size > 1 else np.nan
+    else:
+        pct_ci_lower, pct_ci_upper = np.nan, np.nan
+
+    return (
+        raw_ci_lower,
+        raw_ci_upper,
+        float(pct_ci_lower) if np.isfinite(pct_ci_lower) else np.nan,
+        float(pct_ci_upper) if np.isfinite(pct_ci_upper) else np.nan,
+    )
+
+
+def compute_detailed_effect_statistics(data_naive, data_pretrained, n_bootstrap=2000, random_seed=42):
+    """Compute detailed descriptive/effect statistics used in comprehensive CSV exports."""
+    naive = np.asarray(data_naive, dtype=float)
+    pretrained = np.asarray(data_pretrained, dtype=float)
+    naive = naive[np.isfinite(naive)]
+    pretrained = pretrained[np.isfinite(pretrained)]
+
+    if len(naive) == 0 or len(pretrained) == 0:
+        return {
+            "mean_naive": np.nan,
+            "mean_pretrained": np.nan,
+            "median_naive": np.nan,
+            "median_pretrained": np.nan,
+            "raw_difference": np.nan,
+            "percent_change": np.nan,
+            "raw_ci_lower": np.nan,
+            "raw_ci_upper": np.nan,
+            "percent_ci_lower": np.nan,
+            "percent_ci_upper": np.nan,
+            "bootstrap_n": int(max(0, n_bootstrap)),
+        }
+
+    mean_naive = float(np.mean(naive))
+    mean_pretrained = float(np.mean(pretrained))
+    raw_difference = float(mean_pretrained - mean_naive)
+    percent_change = float((raw_difference / mean_naive) * 100.0) if mean_naive != 0 else np.nan
+
+    raw_ci_lower, raw_ci_upper, percent_ci_lower, percent_ci_upper = bootstrap_ci_difference(
+        naive,
+        pretrained,
+        n_bootstrap=n_bootstrap,
+        random_seed=random_seed,
+    )
+
+    return {
+        "mean_naive": mean_naive,
+        "mean_pretrained": mean_pretrained,
+        "median_naive": float(np.median(naive)),
+        "median_pretrained": float(np.median(pretrained)),
+        "raw_difference": raw_difference,
+        "percent_change": percent_change,
+        "raw_ci_lower": raw_ci_lower,
+        "raw_ci_upper": raw_ci_upper,
+        "percent_ci_lower": percent_ci_lower,
+        "percent_ci_upper": percent_ci_upper,
+        "bootstrap_n": int(max(0, n_bootstrap)),
+    }
 
 
 def save_model_diagnostic_plots(model, metric, output_dir):
@@ -831,7 +966,14 @@ def check_blocking_factor_balance(df, genotype_col, pretraining_col, blocking_co
         return None
 
 
-def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, metrics=None, n_permutations=10000):
+def perform_residual_permutation_analysis(
+    df,
+    genotype_col,
+    pretraining_col,
+    metrics=None,
+    n_permutations=10000,
+    n_bootstrap=2000,
+):
     """
     Permutation test on residuals after removing blocking factors (Date, Arena, Side).
 
@@ -1014,8 +1156,10 @@ def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, met
 
             perm_diffs = np.array(perm_diffs)
 
-            # Two-tailed p-value on residuals
-            p_value_resid = np.sum(np.abs(perm_diffs) >= np.abs(observed_diff_resid)) / n_permutations
+            # Two-tailed p-value on residuals (plus-one correction avoids exact zeros)
+            extreme_count_resid = int(np.sum(np.abs(perm_diffs) >= np.abs(observed_diff_resid)))
+            p_value_resid = (extreme_count_resid + 1) / (n_permutations + 1)
+            p_value_resid = ensure_reportable_p_value(p_value_resid, min_value=1.0 / (n_permutations + 1))
 
             # Permutation test directly on original data (for comparison)
             data_orig_naive = df_geno[df_geno[pretraining_col] == pretrain_naive][metric].values
@@ -1034,7 +1178,15 @@ def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, met
                 perm_diffs_orig.append(perm_diff)
 
             perm_diffs_orig = np.array(perm_diffs_orig)
-            p_value_orig = np.sum(np.abs(perm_diffs_orig) >= np.abs(observed_diff_orig)) / n_permutations
+            extreme_count_orig = int(np.sum(np.abs(perm_diffs_orig) >= np.abs(observed_diff_orig)))
+            p_value_orig = (extreme_count_orig + 1) / (n_permutations + 1)
+            p_value_orig = ensure_reportable_p_value(p_value_orig, min_value=1.0 / (n_permutations + 1))
+
+            detailed_stats = compute_detailed_effect_statistics(
+                data_orig_naive,
+                data_orig_pretrained,
+                n_bootstrap=n_bootstrap,
+            )
 
             test_results.append(
                 {
@@ -1047,6 +1199,7 @@ def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, met
                     "p_value_original": p_value_orig,
                     "n_naive": len(resid_naive),
                     "n_pretrained": len(resid_pretrained),
+                    **detailed_stats,
                 }
             )
 
@@ -1062,7 +1215,7 @@ def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, met
                 print(f"\n  No FDR correction (single genotype)")
 
             for i, result in enumerate(test_results):
-                result["p_value_corrected"] = p_corrected[i]
+                result["p_value_corrected"] = ensure_reportable_p_value(p_corrected[i])
                 genotype_effects[result["genotype"]] = result
 
                 sig_resid = (
@@ -1108,7 +1261,7 @@ def perform_residual_permutation_analysis(df, genotype_col, pretraining_col, met
     return results
 
 
-def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=None):
+def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=None, n_bootstrap=2000):
     """
     Perform Linear Mixed-Effects Model analysis on continuous metrics.
 
@@ -1411,11 +1564,16 @@ def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=N
                     effect_stderr = geno_model.bse["pretraining_numeric"]
                     effect_ci = geno_model.conf_int().loc["pretraining_numeric"].values
 
-                    # Calculate means for naive vs pretrained
-                    mean_naive = df_geno[df_geno["pretraining_numeric"] == 0][metric].mean()
-                    mean_pretrained = df_geno[df_geno["pretraining_numeric"] == 1][metric].mean()
-                    n_naive = len(df_geno[df_geno["pretraining_numeric"] == 0])
-                    n_pretrained = len(df_geno[df_geno["pretraining_numeric"] == 1])
+                    # Calculate descriptive statistics on original scale for export tables
+                    data_naive = df_geno[df_geno["pretraining_numeric"] == 0][metric].values
+                    data_pretrained = df_geno[df_geno["pretraining_numeric"] == 1][metric].values
+                    n_naive = len(data_naive)
+                    n_pretrained = len(data_pretrained)
+                    detailed_stats = compute_detailed_effect_statistics(
+                        data_naive,
+                        data_pretrained,
+                        n_bootstrap=n_bootstrap,
+                    )
 
                     genotype_effects[genotype] = {
                         "effect_size": effect_size,
@@ -1423,13 +1581,9 @@ def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=N
                         "pvalue": effect_pval,
                         "ci_lower": effect_ci[0],
                         "ci_upper": effect_ci[1],
-                        "mean_naive": mean_naive,
-                        "mean_pretrained": mean_pretrained,
                         "n_naive": n_naive,
                         "n_pretrained": n_pretrained,
-                        "percent_change": (
-                            ((mean_pretrained - mean_naive) / mean_naive * 100) if mean_naive != 0 else np.nan
-                        ),
+                        **detailed_stats,
                     }
 
                     # Format output with control highlighting
@@ -1445,7 +1599,7 @@ def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=N
                         f"   {marker} {genotype:20s}: β={effect_size:7.3f} (SE={effect_stderr:.3f}), p={effect_pval:.4f} {sig:3s}, "
                     )
                     print(
-                        f"      {'':23s}  Naive={mean_naive:.2f} (n={n_naive}), Pretrained={mean_pretrained:.2f} (n={n_pretrained}), Δ={genotype_effects[genotype]['percent_change']:+.1f}%"
+                        f"      {'':23s}  Naive={detailed_stats['mean_naive']:.2f} (n={n_naive}), Pretrained={detailed_stats['mean_pretrained']:.2f} (n={n_pretrained}), Δ={genotype_effects[genotype]['percent_change']:+.1f}%"
                     )
 
                 except Exception as e:
@@ -1468,7 +1622,14 @@ def perform_lmm_continuous_analysis(df, genotype_col, pretraining_col, metrics=N
     return results
 
 
-def perform_permutation_continuous_analysis(df, genotype_col, pretraining_col, metrics=None, n_permutations=10000):
+def perform_permutation_continuous_analysis(
+    df,
+    genotype_col,
+    pretraining_col,
+    metrics=None,
+    n_permutations=10000,
+    n_bootstrap=2000,
+):
     """
     Perform permutation test analysis on continuous metrics.
 
@@ -1546,8 +1707,16 @@ def perform_permutation_continuous_analysis(df, genotype_col, pretraining_col, m
 
             permuted_diffs = np.array(permuted_diffs)
 
-            # Two-tailed p-value
-            p_value = np.sum(np.abs(permuted_diffs) >= np.abs(observed_diff)) / n_permutations
+            # Two-tailed p-value (plus-one correction avoids exact zeros)
+            extreme_count = int(np.sum(np.abs(permuted_diffs) >= np.abs(observed_diff)))
+            p_value = (extreme_count + 1) / (n_permutations + 1)
+            p_value = ensure_reportable_p_value(p_value, min_value=1.0 / (n_permutations + 1))
+
+            detailed_stats = compute_detailed_effect_statistics(
+                data_naive,
+                data_pretrained,
+                n_bootstrap=n_bootstrap,
+            )
 
             # Effect size (Cohen's d)
             pooled_std = np.sqrt(
@@ -1565,10 +1734,9 @@ def perform_permutation_continuous_analysis(df, genotype_col, pretraining_col, m
                     "observed_diff": observed_diff,
                     "p_value": p_value,
                     "cohens_d": cohens_d,
-                    "mean_naive": np.mean(data_naive),
-                    "mean_pretrained": np.mean(data_pretrained),
                     "n_naive": len(data_naive),
                     "n_pretrained": len(data_pretrained),
+                    **detailed_stats,
                 }
             )
 
@@ -1586,7 +1754,7 @@ def perform_permutation_continuous_analysis(df, genotype_col, pretraining_col, m
                 print(f"\n  No FDR correction (single genotype)")
 
             for i, result in enumerate(test_results):
-                result["p_corrected"] = p_corrected[i]
+                result["p_corrected"] = ensure_reportable_p_value(p_corrected[i])
                 genotype_effects[result["genotype"]] = result
 
                 sig = (
@@ -1596,7 +1764,7 @@ def perform_permutation_continuous_analysis(df, genotype_col, pretraining_col, m
                 )
                 print(
                     f"  {result['genotype']}: Δ={result['observed_diff']:.3f}, "
-                    f"p={result['p_value']:.4f}, p_FDR={p_corrected[i]:.4f} {sig}, d={result['cohens_d']:.3f}"
+                    f"p={result['p_value']:.4f}, p_FDR={result['p_corrected']:.4f} {sig}, d={result['cohens_d']:.3f}"
                 )
 
             # Store results with genotype_effects structure (matching residual permutation format)
@@ -1631,6 +1799,378 @@ def create_grouped_positions(n_genotypes, n_pretraining):
             positions.append(pos)
 
     return positions, box_width
+
+
+def _pretraining_sort_key(pretraining_value):
+    """Keep naive before pretrained in facet layouts."""
+    value = str(pretraining_value).strip().lower()
+    if value in ["n", "no", "false", "0", "naive"]:
+        return (0, value)
+    if value in ["y", "yes", "true", "1", "pretrained", "trained"]:
+        return (1, value)
+    return (2, value)
+
+
+def _significance_stars(p_value):
+    if p_value < 0.001:
+        return "***"
+    if p_value < 0.01:
+        return "**"
+    if p_value < 0.05:
+        return "*"
+    return ""
+
+
+def _collect_stat_results_for_metric(
+    metric,
+    genotypes,
+    lmm_results=None,
+    permutation_results=None,
+    regular_permutation_results=None,
+):
+    """Collect per-genotype corrected p-values using the same decision tree as standard continuous plots."""
+    lmm_genotype_results = {}
+    perm_genotype_results = {}
+    regular_perm_genotype_results = {}
+
+    if lmm_results and metric in lmm_results and "genotype_effects" in lmm_results[metric]:
+        lmm_genotype_results = lmm_results[metric]["genotype_effects"]
+
+    if permutation_results and metric in permutation_results and "genotype_effects" in permutation_results[metric]:
+        perm_genotype_results = permutation_results[metric]["genotype_effects"]
+
+    if (
+        regular_permutation_results
+        and metric in regular_permutation_results
+        and "genotype_effects" in regular_permutation_results[metric]
+    ):
+        regular_perm_genotype_results = regular_permutation_results[metric]["genotype_effects"]
+
+    lmm_adequate = True
+    if lmm_results is None or metric not in lmm_results:
+        lmm_adequate = False
+    else:
+        lmm_adequate = bool(lmm_results[metric].get("lmm_adequate", True))
+
+    small_genotype_mode = len(genotypes) <= 3
+
+    source_results = None
+    method_label = ""
+
+    if FORCE_REGULAR_PERMUTATION and regular_perm_genotype_results:
+        source_results = regular_perm_genotype_results
+        method_label = "Regular Permutation"
+    elif (not lmm_adequate or small_genotype_mode) and regular_perm_genotype_results:
+        source_results = regular_perm_genotype_results
+        method_label = "Regular Permutation"
+    elif lmm_adequate and perm_genotype_results:
+        source_results = perm_genotype_results
+        method_label = "Residual Permutation"
+    elif perm_genotype_results:
+        source_results = perm_genotype_results
+        method_label = "Residual Permutation"
+    elif regular_perm_genotype_results:
+        source_results = regular_perm_genotype_results
+        method_label = "Regular Permutation"
+
+    if source_results is None:
+        return []
+
+    collected = []
+    for genotype in genotypes:
+        if genotype not in source_results:
+            continue
+
+        effect_row = source_results[genotype]
+        p_value_corrected = effect_row.get("p_value_corrected")
+        if p_value_corrected is None:
+            p_value_corrected = effect_row.get("p_corrected")
+        if p_value_corrected is None:
+            p_value_corrected = effect_row.get("p_value")
+
+        collected.append(
+            {
+                "genotype": genotype,
+                "p_value_corrected": p_value_corrected,
+                "method": method_label,
+            }
+        )
+
+    return collected
+
+
+def _facet_genotype_label(genotype):
+    """Compact labels for facet titles."""
+    label_map = {
+        "TNTxEmptySplit": "EmptySplit",
+        "TNTxLC10-2": "LC10-2",
+        "TNTxMB247": "MB247",
+        "TNTxDDC": "DDC",
+        "TNTxTH": "TH",
+        "TNTxTRH": "TRH",
+    }
+    return label_map.get(genotype, genotype)
+
+
+def plot_continuous_metric_facet_layout(
+    df,
+    genotype_col,
+    pretraining_col,
+    metric,
+    output_dir,
+    facet_genotypes,
+    lmm_results=None,
+    permutation_results=None,
+    regular_permutation_results=None,
+    show_stats=True,
+):
+    """Save one facet-style layout (shared y-axis) with naive/pretrained boxes per genotype."""
+    if metric not in df.columns:
+        print(f"Warning: Metric '{metric}' not found in dataset")
+        return None
+
+    if not facet_genotypes:
+        return None
+
+    df_plot = df[df[genotype_col].isin(facet_genotypes)].copy()
+    if df_plot.empty:
+        return None
+
+    converted_col = f"{metric}_converted"
+    df_plot[converted_col] = convert_metric_data(df_plot[metric], metric)
+
+    pretrain_values = sorted(df_plot[pretraining_col].dropna().unique().tolist(), key=_pretraining_sort_key)
+    if len(pretrain_values) < 2:
+        print(f"Warning: need at least two pretraining conditions for facet layout of '{metric}'")
+        return None
+
+    facet_positions, facet_box_width = create_grouped_positions(1, len(pretrain_values))
+    adaptive_params = get_adaptive_styling_params(len(facet_genotypes), n_pretraining=len(pretrain_values))
+    jitter_amount = adaptive_params["jitter_amount"] * facet_box_width
+    scatter_size = max(12, adaptive_params["scatter_size"] + 2)
+
+    panel_data = {}
+    all_values = []
+
+    for genotype in facet_genotypes:
+        panel_data[genotype] = {}
+        subset_genotype = df_plot[df_plot[genotype_col] == genotype]
+        for pretrain_val in pretrain_values:
+            values = (
+                subset_genotype[subset_genotype[pretraining_col] == pretrain_val][converted_col]
+                .dropna()
+                .to_numpy(dtype=float)
+            )
+            panel_data[genotype][pretrain_val] = values
+            if len(values) > 0:
+                all_values.append(values)
+
+    if all_values:
+        all_metric_values = np.concatenate(all_values)
+        y_low = float(np.percentile(all_metric_values, YLIM_PERCENTILE_LOW))
+        y_high = float(np.percentile(all_metric_values, YLIM_PERCENTILE_HIGH))
+        y_range = max(y_high - y_low, 1e-9)
+        y_min = float(y_low - y_range * YLIM_MARGIN)
+        y_max = float(y_high + y_range * 0.15)
+        if y_low >= 0 and y_min < 0:
+            y_min = 0.0
+    else:
+        y_min, y_max = 0.0, 1.0
+
+    y_range = max(y_max - y_min, 1e-9)
+
+    fig_width = mm_to_inches(FACET_PANEL_WIDTH_MM * len(facet_genotypes))
+    fig_height = mm_to_inches(FACET_PANEL_HEIGHT_MM)
+    fig, axes = plt.subplots(1, len(facet_genotypes), figsize=(fig_width, fig_height), sharey=True)
+    if len(facet_genotypes) == 1:
+        axes = [axes]
+
+    stat_rows = _collect_stat_results_for_metric(
+        metric,
+        facet_genotypes,
+        lmm_results=lmm_results,
+        permutation_results=permutation_results,
+        regular_permutation_results=regular_permutation_results,
+    )
+    stat_by_genotype = {row["genotype"]: row for row in stat_rows}
+
+    for idx, (ax, genotype) in enumerate(zip(axes, facet_genotypes)):
+        is_control = idx == 0 or genotype == "TNTxEmptySplit"
+        ax.set_facecolor(FACET_CONTROL_BACKGROUND if is_control else "white")
+
+        genotype_values = [panel_data[genotype].get(pretrain_val, np.array([])) for pretrain_val in pretrain_values]
+        genotype_color = get_genotype_color(genotype)
+
+        bp = ax.boxplot(
+            genotype_values,
+            positions=facet_positions,
+            widths=facet_box_width * 0.6,
+            patch_artist=True,
+            showfliers=False,
+            boxprops=dict(linewidth=1.5),
+            whiskerprops=dict(linewidth=1.5),
+            capprops=dict(linewidth=1.5),
+            medianprops=dict(linewidth=2, color="black"),
+        )
+
+        for patch, pretrain_val in zip(bp["boxes"], pretrain_values):
+            style = PRETRAINING_STYLES.get(str(pretrain_val).lower(), PRETRAINING_STYLES["n"])
+            patch.set_facecolor("none")
+            patch.set_alpha(style["alpha"])
+            patch.set_edgecolor(style["edgecolor"])
+            patch.set_linewidth(style["linewidth"])
+
+        for values, pos, pretrain_val in zip(genotype_values, facet_positions, pretrain_values):
+            if len(values) == 0:
+                continue
+
+            style = PRETRAINING_STYLES.get(str(pretrain_val).lower(), PRETRAINING_STYLES["n"])
+            x_jitter = np.random.normal(pos, jitter_amount, size=len(values))
+            ax.scatter(
+                x_jitter,
+                values,
+                alpha=min(1.0, style["alpha"] * 0.8),
+                s=scatter_size,
+                color=genotype_color,
+                edgecolors="none",
+                linewidths=0,
+                zorder=3,
+            )
+
+        # Hide x ticks/labels for cleaner facets; legend already encodes naive vs pretrained.
+        ax.set_xticks([])
+        ax.tick_params(axis="x", bottom=False, labelbottom=False, length=0)
+        ax.set_xlim(float(np.min(facet_positions) - facet_box_width), float(np.max(facet_positions) + facet_box_width))
+        ax.set_ylim(y_min, y_max)
+        ax.set_title(_facet_genotype_label(genotype), fontsize=FONT_SIZE_TITLE, pad=4)
+
+        if show_stats:
+            stat_row = stat_by_genotype.get(genotype)
+            if stat_row is not None:
+                p_value = stat_row.get("p_value_corrected")
+                if p_value is not None and np.isfinite(p_value) and p_value < 0.05:
+                    ax.text(
+                        float(np.mean(facet_positions)),
+                        float(y_max - 0.04 * y_range),
+                        _significance_stars(float(p_value)),
+                        ha="center",
+                        va="top",
+                        fontsize=FONT_SIZE_ANNOTATIONS,
+                        fontweight="bold",
+                        color="red",
+                    )
+
+        ax.grid(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_linewidth(1.0)
+        ax.tick_params(axis="both", which="major", direction="out", length=3, width=1.0, labelsize=FONT_SIZE_TICKS)
+
+        if idx == 0:
+            ax.spines["left"].set_visible(True)
+            ax.spines["left"].set_linewidth(1.0)
+            ax.tick_params(axis="y", left=True, labelleft=True, labelsize=FONT_SIZE_TICKS)
+        else:
+            ax.spines["left"].set_visible(False)
+            ax.tick_params(axis="y", left=False, labelleft=False)
+
+        if idx < len(facet_genotypes) - 1:
+            ax.plot(
+                [1.0, 1.0],
+                [0.04, 0.96],
+                transform=ax.transAxes,
+                color=FACET_SEPARATOR_COLOR,
+                linewidth=0.8,
+                clip_on=False,
+            )
+
+    metric_label = str(format_metric_label(metric))
+    axes[0].set_ylabel(metric_label, fontsize=FONT_SIZE_LABELS)
+
+    legend_elements = []
+    for pretrain_val in pretrain_values:
+        style = PRETRAINING_STYLES.get(str(pretrain_val).lower(), PRETRAINING_STYLES["n"])
+        legend_elements.append(
+            Rectangle(
+                (0, 0),
+                1,
+                1,
+                facecolor="gray",
+                alpha=style["alpha"],
+                edgecolor=style["edgecolor"],
+                linewidth=style["linewidth"],
+                label=format_pretraining_label(pretrain_val),
+            )
+        )
+
+    if legend_elements:
+        fig.legend(
+            handles=legend_elements,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.97),
+            frameon=False,
+            fontsize=FONT_SIZE_LEGEND,
+            ncol=min(2, len(legend_elements)),
+        )
+
+    fig.suptitle(str(get_elegant_metric_name(metric)), fontsize=FONT_SIZE_TITLE, y=0.995)
+    fig.subplots_adjust(left=0.07, right=0.995, top=0.84, bottom=0.2, wspace=0.08)
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for fmt in PLOT_FORMATS:
+        output_path = output_dir / f"{metric}_facet_pretraining.{fmt}"
+        plt.savefig(output_path, dpi=DPI, bbox_inches="tight", format=fmt)
+
+    print(f"Saved: {metric}_facet_pretraining ({', '.join(PLOT_FORMATS)})")
+    return fig
+
+
+def plot_continuous_metrics_facet_layouts(
+    df,
+    genotype_col,
+    pretraining_col,
+    metrics,
+    output_dir,
+    facet_genotypes,
+    lmm_results=None,
+    permutation_results=None,
+    regular_permutation_results=None,
+    show_stats=True,
+):
+    """Generate facet-style naive/pretrained layouts in addition to regular continuous plots."""
+    if not facet_genotypes:
+        print("Skipping facet layouts: no eligible genotypes for requested facet order")
+        return
+
+    metrics = [m for m in metrics if m in df.columns]
+    if not metrics:
+        print("Skipping facet layouts: no valid metrics")
+        return
+
+    facet_output_dir = Path(output_dir) / "facet_layouts"
+    facet_output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\nGenerating {len(metrics)} facet naive/pretrained layouts...")
+    print(f"  Facet order: {facet_genotypes}")
+
+    for metric in metrics:
+        fig = plot_continuous_metric_facet_layout(
+            df,
+            genotype_col,
+            pretraining_col,
+            metric,
+            facet_output_dir,
+            facet_genotypes,
+            lmm_results=lmm_results,
+            permutation_results=permutation_results,
+            regular_permutation_results=regular_permutation_results,
+            show_stats=show_stats,
+        )
+        if fig is not None:
+            plt.close(fig)
+
+    print(f"Completed {len(metrics)} facet naive/pretrained layouts")
 
 
 def plot_binary_metric_single(
@@ -1739,27 +2279,25 @@ def plot_binary_metric_single(
             if result and "p_value" in result:
                 p_val = result["p_value"]
 
-                # Determine significance marker
-                if p_val < 0.001:
-                    sig_text = "***"
-                elif p_val < 0.01:
-                    sig_text = "**"
-                elif p_val < 0.05:
-                    sig_text = "*"
-                else:
-                    sig_text = "ns"
+                # Significant-only red annotation (no ns labels).
+                if p_val < 0.05:
+                    if p_val < 0.001:
+                        sig_text = "***"
+                    elif p_val < 0.01:
+                        sig_text = "**"
+                    else:
+                        sig_text = "*"
 
-                # Add annotation above the genotype group
-                ax.text(
-                    i,
-                    annotation_height,
-                    sig_text,
-                    ha="center",
-                    va="bottom",
-                    fontsize=FONT_SIZE_ANNOTATIONS,
-                    fontweight="bold",
-                    color="red" if p_val < 0.05 else "gray",
-                )
+                    ax.text(
+                        i,
+                        annotation_height,
+                        sig_text,
+                        ha="center",
+                        va="bottom",
+                        fontsize=FONT_SIZE_ANNOTATIONS,
+                        fontweight="bold",
+                        color="red",
+                    )
 
     ax.grid(False)
     ax.spines["top"].set_visible(False)
@@ -1981,7 +2519,7 @@ def plot_continuous_metric_single(
 
     # Style boxes with genotype colors and pretraining styles
     for patch, color, style in zip(bp["boxes"], all_colors, all_styles):
-        patch.set_facecolor(color)
+        patch.set_facecolor("none")
         patch.set_alpha(style["alpha"])
         patch.set_edgecolor(style["edgecolor"])
         patch.set_linewidth(style["linewidth"])
@@ -1997,8 +2535,8 @@ def plot_continuous_metric_single(
                 alpha=min(1.0, style["alpha"] * 0.8),
                 s=scatter_size_adaptive,
                 color=color,
-                edgecolors="black",
-                linewidths=0.5,
+                edgecolors="none",
+                linewidths=0,
                 zorder=3,
             )
 
@@ -2031,27 +2569,25 @@ def plot_continuous_metric_single(
             if result and "p_value_corrected" in result:
                 p_val = result["p_value_corrected"]
 
-                # Determine significance marker
-                if p_val < 0.001:
-                    sig_text = "***"
-                elif p_val < 0.01:
-                    sig_text = "**"
-                elif p_val < 0.05:
-                    sig_text = "*"
-                else:
-                    sig_text = "ns"
+                # Significant-only red annotation (no ns labels).
+                if p_val < 0.05:
+                    if p_val < 0.001:
+                        sig_text = "***"
+                    elif p_val < 0.01:
+                        sig_text = "**"
+                    else:
+                        sig_text = "*"
 
-                # Add annotation above the genotype group
-                ax.text(
-                    i,
-                    annotation_height,
-                    sig_text,
-                    ha="center",
-                    va="bottom",
-                    fontsize=FONT_SIZE_ANNOTATIONS,
-                    fontweight="bold",
-                    color="red" if p_val < 0.05 else "gray",
-                )
+                    ax.text(
+                        i,
+                        annotation_height,
+                        sig_text,
+                        ha="center",
+                        va="bottom",
+                        fontsize=FONT_SIZE_ANNOTATIONS,
+                        fontweight="bold",
+                        color="red",
+                    )
 
     # Set x-axis labels with sample sizes
     ax.set_xticks(xtick_positions)
@@ -2346,6 +2882,38 @@ def export_comprehensive_statistics_csv(
     """Export a broad, review-friendly CSV containing all tested conditions and methods."""
     rows = []
 
+    def _base_row(metric, genotype, method, analysis_type):
+        return {
+            "analysis_type": analysis_type,
+            "method": method,
+            "metric": metric,
+            "metric_label": get_elegant_metric_name(metric),
+            "genotype": genotype,
+            "comparison": "pretrained_vs_naive",
+            "effect_estimate": np.nan,
+            "effect_estimate_secondary": np.nan,
+            "cohens_d": np.nan,
+            "stderr": np.nan,
+            "ci_lower": np.nan,
+            "ci_upper": np.nan,
+            "test_statistic": np.nan,
+            "p_value": np.nan,
+            "p_value_fdr": np.nan,
+            "n_naive": np.nan,
+            "n_pretrained": np.nan,
+            "mean_naive": np.nan,
+            "mean_pretrained": np.nan,
+            "median_naive": np.nan,
+            "median_pretrained": np.nan,
+            "raw_difference": np.nan,
+            "percent_change": np.nan,
+            "raw_ci_lower": np.nan,
+            "raw_ci_upper": np.nan,
+            "percent_ci_lower": np.nan,
+            "percent_ci_upper": np.nan,
+            "bootstrap_n": np.nan,
+        }
+
     # ---------------------------------------------------------------------
     # Binary metrics: pretraining effect within each genotype
     # ---------------------------------------------------------------------
@@ -2361,27 +2929,22 @@ def export_comprehensive_statistics_csv(
                 elif "chi2" in result:
                     test_statistic = result.get("chi2", np.nan)
 
-                rows.append(
+                row = _base_row(
+                    metric,
+                    result.get("genotype", "unknown"),
+                    result.get("method", "unknown"),
+                    "binary",
+                )
+                row.update(
                     {
-                        "analysis_type": "binary",
-                        "method": result.get("method", "unknown"),
-                        "metric": metric,
-                        "metric_label": get_elegant_metric_name(metric),
-                        "genotype": result.get("genotype", "unknown"),
-                        "comparison": "pretrained_vs_naive",
-                        "effect_estimate": np.nan,
-                        "effect_estimate_secondary": np.nan,
-                        "cohens_d": np.nan,
-                        "stderr": np.nan,
-                        "ci_lower": np.nan,
-                        "ci_upper": np.nan,
                         "test_statistic": test_statistic,
-                        "p_value": result.get("p_value", np.nan),
-                        "p_value_fdr": result.get("p_corrected", np.nan),
+                        "p_value": ensure_reportable_p_value(result.get("p_value", np.nan)),
+                        "p_value_fdr": ensure_reportable_p_value(result.get("p_corrected", np.nan)),
                         "n_naive": n_naive,
                         "n_pretrained": n_pretrained,
                     }
                 )
+                rows.append(row)
 
     # ---------------------------------------------------------------------
     # Continuous metrics: LMM per genotype
@@ -2390,27 +2953,31 @@ def export_comprehensive_statistics_csv(
         for metric, metric_data in lmm_stats.items():
             genotype_effects = metric_data.get("genotype_effects", {})
             for genotype, effects in genotype_effects.items():
-                rows.append(
+                row = _base_row(metric, genotype, "lmm", "continuous")
+                row.update(
                     {
-                        "analysis_type": "continuous",
-                        "method": "lmm",
-                        "metric": metric,
-                        "metric_label": get_elegant_metric_name(metric),
-                        "genotype": genotype,
-                        "comparison": "pretrained_vs_naive",
                         "effect_estimate": effects.get("effect_size", np.nan),
                         "effect_estimate_secondary": effects.get("percent_change", np.nan),
-                        "cohens_d": np.nan,
                         "stderr": effects.get("stderr", np.nan),
                         "ci_lower": effects.get("ci_lower", np.nan),
                         "ci_upper": effects.get("ci_upper", np.nan),
-                        "test_statistic": np.nan,
-                        "p_value": effects.get("pvalue", np.nan),
-                        "p_value_fdr": np.nan,
+                        "p_value": ensure_reportable_p_value(effects.get("pvalue", np.nan)),
                         "n_naive": effects.get("n_naive", np.nan),
                         "n_pretrained": effects.get("n_pretrained", np.nan),
+                        "mean_naive": effects.get("mean_naive", np.nan),
+                        "mean_pretrained": effects.get("mean_pretrained", np.nan),
+                        "median_naive": effects.get("median_naive", np.nan),
+                        "median_pretrained": effects.get("median_pretrained", np.nan),
+                        "raw_difference": effects.get("raw_difference", effects.get("effect_size", np.nan)),
+                        "percent_change": effects.get("percent_change", np.nan),
+                        "raw_ci_lower": effects.get("raw_ci_lower", np.nan),
+                        "raw_ci_upper": effects.get("raw_ci_upper", np.nan),
+                        "percent_ci_lower": effects.get("percent_ci_lower", np.nan),
+                        "percent_ci_upper": effects.get("percent_ci_upper", np.nan),
+                        "bootstrap_n": effects.get("bootstrap_n", np.nan),
                     }
                 )
+                rows.append(row)
 
     # ---------------------------------------------------------------------
     # Continuous metrics: residual permutation (blocking-aware)
@@ -2419,27 +2986,30 @@ def export_comprehensive_statistics_csv(
         for metric, metric_data in residual_permutation_stats.items():
             genotype_effects = metric_data.get("genotype_effects", {})
             for genotype, effects in genotype_effects.items():
-                rows.append(
+                row = _base_row(metric, genotype, "residual_permutation", "continuous")
+                row.update(
                     {
-                        "analysis_type": "continuous",
-                        "method": "residual_permutation",
-                        "metric": metric,
-                        "metric_label": get_elegant_metric_name(metric),
-                        "genotype": genotype,
-                        "comparison": "pretrained_vs_naive",
                         "effect_estimate": effects.get("observed_diff_original", np.nan),
                         "effect_estimate_secondary": effects.get("observed_diff_residual", np.nan),
                         "cohens_d": effects.get("cohens_d_residual", np.nan),
-                        "stderr": np.nan,
-                        "ci_lower": np.nan,
-                        "ci_upper": np.nan,
-                        "test_statistic": np.nan,
-                        "p_value": effects.get("p_value_residual", np.nan),
-                        "p_value_fdr": effects.get("p_value_corrected", np.nan),
+                        "p_value": ensure_reportable_p_value(effects.get("p_value_residual", np.nan)),
+                        "p_value_fdr": ensure_reportable_p_value(effects.get("p_value_corrected", np.nan)),
                         "n_naive": effects.get("n_naive", np.nan),
                         "n_pretrained": effects.get("n_pretrained", np.nan),
+                        "mean_naive": effects.get("mean_naive", np.nan),
+                        "mean_pretrained": effects.get("mean_pretrained", np.nan),
+                        "median_naive": effects.get("median_naive", np.nan),
+                        "median_pretrained": effects.get("median_pretrained", np.nan),
+                        "raw_difference": effects.get("raw_difference", effects.get("observed_diff_original", np.nan)),
+                        "percent_change": effects.get("percent_change", np.nan),
+                        "raw_ci_lower": effects.get("raw_ci_lower", np.nan),
+                        "raw_ci_upper": effects.get("raw_ci_upper", np.nan),
+                        "percent_ci_lower": effects.get("percent_ci_lower", np.nan),
+                        "percent_ci_upper": effects.get("percent_ci_upper", np.nan),
+                        "bootstrap_n": effects.get("bootstrap_n", np.nan),
                     }
                 )
+                rows.append(row)
 
     # ---------------------------------------------------------------------
     # Continuous metrics: regular permutation (fallback)
@@ -2448,27 +3018,29 @@ def export_comprehensive_statistics_csv(
         for metric, metric_data in regular_permutation_stats.items():
             genotype_effects = metric_data.get("genotype_effects", {})
             for genotype, effects in genotype_effects.items():
-                rows.append(
+                row = _base_row(metric, genotype, "regular_permutation", "continuous")
+                row.update(
                     {
-                        "analysis_type": "continuous",
-                        "method": "regular_permutation",
-                        "metric": metric,
-                        "metric_label": get_elegant_metric_name(metric),
-                        "genotype": genotype,
-                        "comparison": "pretrained_vs_naive",
                         "effect_estimate": effects.get("observed_diff", np.nan),
-                        "effect_estimate_secondary": np.nan,
                         "cohens_d": effects.get("cohens_d", np.nan),
-                        "stderr": np.nan,
-                        "ci_lower": np.nan,
-                        "ci_upper": np.nan,
-                        "test_statistic": np.nan,
-                        "p_value": effects.get("p_value", np.nan),
-                        "p_value_fdr": effects.get("p_value_corrected", np.nan),
+                        "p_value": ensure_reportable_p_value(effects.get("p_value", np.nan)),
+                        "p_value_fdr": ensure_reportable_p_value(effects.get("p_value_corrected", np.nan)),
                         "n_naive": effects.get("n_naive", np.nan),
                         "n_pretrained": effects.get("n_pretrained", np.nan),
+                        "mean_naive": effects.get("mean_naive", np.nan),
+                        "mean_pretrained": effects.get("mean_pretrained", np.nan),
+                        "median_naive": effects.get("median_naive", np.nan),
+                        "median_pretrained": effects.get("median_pretrained", np.nan),
+                        "raw_difference": effects.get("raw_difference", effects.get("observed_diff", np.nan)),
+                        "percent_change": effects.get("percent_change", np.nan),
+                        "raw_ci_lower": effects.get("raw_ci_lower", np.nan),
+                        "raw_ci_upper": effects.get("raw_ci_upper", np.nan),
+                        "percent_ci_lower": effects.get("percent_ci_lower", np.nan),
+                        "percent_ci_upper": effects.get("percent_ci_upper", np.nan),
+                        "bootstrap_n": effects.get("bootstrap_n", np.nan),
                     }
                 )
+                rows.append(row)
 
     if not rows:
         print(f"⚠️ No statistical rows available for comprehensive export: {output_file}")
@@ -2553,7 +3125,11 @@ def run_analysis_for_configuration(
         print("LINEAR MIXED-EFFECTS MODEL ANALYSIS")
         print("=" * 80)
         lmm_stats = perform_lmm_continuous_analysis(
-            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            metrics=metrics_to_analyze,
+            n_bootstrap=args.n_bootstrap,
         )
 
     # Check blocking factor balance early in analysis
@@ -2572,7 +3148,12 @@ def run_analysis_for_configuration(
         print("Distribution-free inference accounting for blocking factors (Date, Arena, Side)")
         print("=" * 80)
         permutation_stats = perform_residual_permutation_analysis(
-            df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            metrics=metrics_to_analyze,
+            n_permutations=N_PERMUTATIONS,
+            n_bootstrap=args.n_bootstrap,
         )
 
     # Perform regular permutation test analysis
@@ -2581,7 +3162,12 @@ def run_analysis_for_configuration(
     print("Distribution-free inference on original data (no blocking correction)")
     print("=" * 80)
     regular_permutation_stats = perform_permutation_continuous_analysis(
-        df_filtered, genotype_col, pretraining_col, metrics=metrics_to_analyze, n_permutations=N_PERMUTATIONS
+        df_filtered,
+        genotype_col,
+        pretraining_col,
+        metrics=metrics_to_analyze,
+        n_permutations=N_PERMUTATIONS,
+        n_bootstrap=args.n_bootstrap,
     )
 
     # Create plots
@@ -2613,6 +3199,24 @@ def run_analysis_for_configuration(
         regular_permutation_results=regular_permutation_stats,
         show_stats=not args.no_stats,
     )
+
+    available_genotypes = set(df_filtered[genotype_col].dropna().unique().tolist())
+    facet_genotypes = [g for g in FACET_LAYOUT_GENOTYPE_ORDER if g in available_genotypes]
+    if "TNTxEmptySplit" in facet_genotypes and len(facet_genotypes) >= 2:
+        plot_continuous_metrics_facet_layouts(
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            metrics=metrics_to_analyze,
+            output_dir=output_dir,
+            facet_genotypes=facet_genotypes,
+            lmm_results=lmm_stats,
+            permutation_results=permutation_stats,
+            regular_permutation_results=regular_permutation_stats,
+            show_stats=not args.no_stats,
+        )
+    else:
+        print("Skipping facet layouts: need control plus at least one requested genotype in current configuration")
 
     if args.show and not args.generate_all_combinations:
         plt.show()
@@ -2693,7 +3297,11 @@ def run_analysis_for_configuration(
 
         if USE_LMM and not FORCE_REGULAR_PERMUTATION:
             supplementary_lmm_stats = perform_lmm_continuous_analysis(
-                df_filtered, genotype_col, pretraining_col, metrics=available_supplementary_metrics
+                df_filtered,
+                genotype_col,
+                pretraining_col,
+                metrics=available_supplementary_metrics,
+                n_bootstrap=args.n_bootstrap,
             )
 
         if USE_RESIDUAL_PERMUTATION and not FORCE_REGULAR_PERMUTATION:
@@ -2703,6 +3311,7 @@ def run_analysis_for_configuration(
                 pretraining_col,
                 metrics=available_supplementary_metrics,
                 n_permutations=N_PERMUTATIONS,
+                n_bootstrap=args.n_bootstrap,
             )
 
         supplementary_regular_permutation_stats = perform_permutation_continuous_analysis(
@@ -2711,6 +3320,7 @@ def run_analysis_for_configuration(
             pretraining_col,
             metrics=available_supplementary_metrics,
             n_permutations=N_PERMUTATIONS,
+            n_bootstrap=args.n_bootstrap,
         )
 
         plot_continuous_metrics(
@@ -2774,9 +3384,23 @@ def main():
     parser.add_argument(
         "--generate-all-combinations",
         action="store_true",
-        help="Run Visual, Dopaminergic, MB, and All predefined genotype combinations in one execution",
+        help="(Deprecated) Kept for backwards compatibility — all combinations are now the default.",
+    )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Run only the SELECTED_GENOTYPES single configuration instead of all predefined combinations",
+    )
+    parser.add_argument(
+        "--n-bootstrap",
+        type=int,
+        default=N_BOOTSTRAP,
+        help="Bootstrap resamples used for CI fields in comprehensive statistics CSV",
     )
     args = parser.parse_args()
+
+    if args.n_bootstrap < 1:
+        raise ValueError("--n-bootstrap must be >= 1")
 
     # Update global configuration if force-regular-permutation flag is set
     global FORCE_REGULAR_PERMUTATION
@@ -2827,29 +3451,8 @@ def main():
 
     print(f"Pretraining column: {pretraining_col}")
 
-    if args.generate_all_combinations:
-        if args.show:
-            print("\n⚠️ --show is ignored when --generate-all-combinations is enabled")
-
-        batch_root = Path(OUTPUT_DIR).parent
-        print("\n" + "=" * 80)
-        print("BATCH MODE: GENERATING ALL PREDEFINED COMBINATIONS")
-        print("=" * 80)
-        print(f"Output root: {batch_root}")
-
-        for combo_name, combo_genotypes in PREDEFINED_GENOTYPE_COMBINATIONS.items():
-            combo_output_dir = batch_root / combo_name
-            run_analysis_for_configuration(
-                df,
-                genotype_col,
-                pretraining_col,
-                args,
-                combo_genotypes,
-                combo_output_dir,
-                combo_name,
-            )
-    else:
-        # Check if genotypes are selected for single-run mode
+    if args.single:
+        # Single-configuration mode: use SELECTED_GENOTYPES and OUTPUT_DIR
         if not SELECTED_GENOTYPES or SELECTED_GENOTYPES == ["Empty", "EmptySplit", "TNTxPR"]:
             print("\n" + "!" * 80)
             print("WARNING: SELECTED_GENOTYPES is empty or only contains placeholders!")
@@ -2868,6 +3471,28 @@ def main():
             Path(OUTPUT_DIR),
             "Single",
         )
+    else:
+        # Default: run all predefined genotype combinations
+        if args.show:
+            print("\n⚠️ --show is ignored in all-combinations mode")
+
+        batch_root = Path(OUTPUT_DIR).parent
+        print("\n" + "=" * 80)
+        print("BATCH MODE: GENERATING ALL PREDEFINED COMBINATIONS")
+        print("=" * 80)
+        print(f"Output root: {batch_root}")
+
+        for combo_name, combo_genotypes in PREDEFINED_GENOTYPE_COMBINATIONS.items():
+            combo_output_dir = batch_root / combo_name
+            run_analysis_for_configuration(
+                df,
+                genotype_col,
+                pretraining_col,
+                args,
+                combo_genotypes,
+                combo_output_dir,
+                combo_name,
+            )
 
 
 if __name__ == "__main__":

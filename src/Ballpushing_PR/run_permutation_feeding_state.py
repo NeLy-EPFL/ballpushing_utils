@@ -35,6 +35,71 @@ from statsmodels.stats.multitest import multipletests
 
 
 # ---------------------------------------------------------------------------
+# Statistical helper functions
+# ---------------------------------------------------------------------------
+
+
+def cohens_d(group1, group2):
+    """Calculate Cohen's d effect size between two groups.
+
+    Parameters
+    ----------
+    group1, group2 : array-like
+        Data for each group
+
+    Returns
+    -------
+    float
+        Cohen's d effect size (positive = group2 > group1)
+    """
+    n1, n2 = len(group1), len(group2)
+    if n1 < 2 or n2 < 2:
+        return np.nan
+
+    var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+
+    if pooled_std == 0:
+        return np.nan
+
+    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+
+def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_state=42):
+    """Calculate bootstrapped confidence interval for difference between groups.
+
+    Parameters
+    ----------
+    group1, group2 : array-like
+        Data for each group
+    n_bootstrap : int
+        Number of bootstrap resamples
+    ci : float
+        Confidence interval level (e.g., 95 for 95% CI)
+    random_state : int
+        Random seed for reproducibility
+
+    Returns
+    -------
+    tuple
+        (lower_bound, upper_bound) of the CI for group2 - group1
+    """
+    rng = np.random.default_rng(random_state)
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = rng.choice(group1, size=len(group1), replace=True)
+        sample2 = rng.choice(group2, size=len(group2), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+
+    return lower, upper
+
+
+# ---------------------------------------------------------------------------
 # Core plotting + statistics function
 # ---------------------------------------------------------------------------
 
@@ -156,6 +221,7 @@ def generate_feeding_state_permutation_plots(
                 continue
 
             try:
+                # Permutation test on median difference
                 obs_stat = float(np.median(vals_b) - np.median(vals_a))
                 combined = np.concatenate([vals_a.values, vals_b.values])
                 n_a = len(vals_a)
@@ -168,12 +234,43 @@ def generate_feeding_state_permutation_plots(
                 pval = float(np.mean(np.abs(perm_diffs) >= np.abs(obs_stat)))
                 direction = "increased" if obs_stat > 0 else ("decreased" if obs_stat < 0 else "none")
                 test_name = f"permutation({n_permutations})"
+
+                # Calculate effect size (Cohen's d)
+                cohens_d_val = cohens_d(vals_a.values, vals_b.values)
+
+                # Calculate bootstrapped CI for mean difference
+                mean_diff = float(np.mean(vals_b) - np.mean(vals_a))
+                ci_lower, ci_upper = bootstrap_ci_difference(
+                    vals_a.values, vals_b.values, n_bootstrap=10000, ci=95, random_state=42
+                )
+
+                # Calculate percentage change
+                mean_a = float(np.mean(vals_a))
+                mean_b = float(np.mean(vals_b))
+                if mean_a != 0:
+                    pct_change = (mean_diff / mean_a) * 100
+                    pct_ci_lower = (ci_lower / mean_a) * 100
+                    pct_ci_upper = (ci_upper / mean_a) * 100
+                else:
+                    pct_change = np.nan
+                    pct_ci_lower = np.nan
+                    pct_ci_upper = np.nan
+
             except Exception as e:
                 print(f"  Error in permutation test for {cond_a} vs {cond_b}: {e}")
                 pval = 1.0
                 obs_stat = np.nan
                 direction = "none"
                 test_name = f"permutation({n_permutations}) (failed)"
+                cohens_d_val = np.nan
+                mean_diff = np.nan
+                ci_lower = np.nan
+                ci_upper = np.nan
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
+                mean_a = np.nan
+                mean_b = np.nan
 
             pvals.append(pval)
             pair_results.append(
@@ -183,11 +280,18 @@ def generate_feeding_state_permutation_plots(
                     "Metric": metric,
                     "pval_raw": pval,
                     "direction": direction,
-                    "effect_size": obs_stat,
+                    "effect_size_median_diff": obs_stat,
+                    "cohens_d": cohens_d_val,
                     "median_a": vals_a.median(),
                     "median_b": vals_b.median(),
-                    "mean_a": vals_a.mean(),
-                    "mean_b": vals_b.mean(),
+                    "mean_a": mean_a,
+                    "mean_b": mean_b,
+                    "mean_diff": mean_diff,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "pct_change": pct_change,
+                    "pct_ci_lower": pct_ci_lower,
+                    "pct_ci_upper": pct_ci_upper,
                     "n_a": len(vals_a),
                     "n_b": len(vals_b),
                     "test_type": test_name,
@@ -369,9 +473,82 @@ def generate_feeding_state_permutation_plots(
     stats_df = pd.DataFrame(all_stats)
 
     if not stats_df.empty:
+        # Save detailed statistics CSV with publication-quality formatting
         stats_file = output_dir / "feedingstate_permutation_statistics.csv"
-        stats_df.to_csv(stats_file, index=False)
-        print(f"\nStatistics saved: {stats_file}")
+
+        # Select and reorder columns for better readability
+        columns_ordered = [
+            "Metric",
+            "ConditionA",
+            "ConditionB",
+            "N_A",
+            "N_B",
+            "Mean_A",
+            "Mean_B",
+            "Median_A",
+            "Median_B",
+            "Mean_Diff",
+            "CI_Lower",
+            "CI_Upper",
+            "Pct_Change",
+            "Pct_CI_Lower",
+            "Pct_CI_Upper",
+            "Cohens_d",
+            "Median_Diff",
+            "P_Value_Raw",
+            "P_Value_FDR",
+            "Significant",
+            "Direction",
+        ]
+
+        # Rename columns in stats_df to match ordered list
+        rename_map = {
+            "n_a": "N_A",
+            "n_b": "N_B",
+            "mean_a": "Mean_A",
+            "mean_b": "Mean_B",
+            "median_a": "Median_A",
+            "median_b": "Median_B",
+            "mean_diff": "Mean_Diff",
+            "ci_lower": "CI_Lower",
+            "ci_upper": "CI_Upper",
+            "pct_change": "Pct_Change",
+            "pct_ci_lower": "Pct_CI_Lower",
+            "pct_ci_upper": "Pct_CI_Upper",
+            "cohens_d": "Cohens_d",
+            "effect_size_median_diff": "Median_Diff",
+            "pval_raw": "P_Value_Raw",
+            "pval_corrected": "P_Value_FDR",
+            "direction": "Direction",
+        }
+        stats_df_out = stats_df.rename(columns=rename_map)
+
+        # Select only the columns we want and in the right order
+        columns_to_save = [c for c in columns_ordered if c in stats_df_out.columns]
+        stats_df_out = stats_df_out[columns_to_save]
+
+        # Format numeric columns
+        for col in [
+            "Mean_A",
+            "Mean_B",
+            "Median_A",
+            "Median_B",
+            "Mean_Diff",
+            "CI_Lower",
+            "CI_Upper",
+            "Pct_Change",
+            "Pct_CI_Lower",
+            "Pct_CI_Upper",
+            "Cohens_d",
+            "Median_Diff",
+            "P_Value_Raw",
+            "P_Value_FDR",
+        ]:
+            if col in stats_df_out.columns:
+                stats_df_out[col] = stats_df_out[col].apply(lambda x: f"{x:.6f}" if pd.notna(x) else "NaN")
+
+        stats_df_out.to_csv(stats_file, index=False)
+        print(f"\nDetailed statistics saved: {stats_file}")
 
         report_file = output_dir / "feedingstate_permutation_report.md"
         generate_text_report(stats_df, data, control_condition, report_file)
@@ -401,6 +578,8 @@ def generate_text_report(stats_df, data, control_condition, report_file):
         "",
         "**Dataset filter:** Light ON only",
         "**Comparisons:** all pairwise (FDR-BH corrected per metric)",
+        "**Effect sizes:** Cohen's d (standardized mean difference)",
+        "**Confidence intervals:** Bootstrapped 95% CI (10,000 resamples)",
         "",
     ]
 
@@ -410,14 +589,35 @@ def generate_text_report(stats_df, data, control_condition, report_file):
         lines.append("")
 
         for _, row in metric_stats.iterrows():
-            sig = row["sig_level"]
-            lines.append(
-                f"- **{row['ConditionA']} vs {row['ConditionB']}**: "
-                f"median_a={row['median_a']:.3f} (n={row['n_a']}), "
-                f"median_b={row['median_b']:.3f} (n={row['n_b']}), "
-                f"Δmedian={row['effect_size']:+.3f}, "
-                f"p_raw={row['pval_raw']:.4f}, p_corr={row['pval_corrected']:.4f} {sig}"
-            )
+            sig = row.get("sig_level", "ns")
+            cond_a = row["ConditionA"]
+            cond_b = row["ConditionB"]
+
+            # Build comprehensive statistics line
+            line_parts = [
+                f"**{cond_a} vs {cond_b}**:",
+                f"Mean {cond_a}={row['mean_a']:.3f} (n={row['n_a']})",
+                f"Mean {cond_b}={row['mean_b']:.3f} (n={row['n_b']})",
+            ]
+
+            # Add effect size and CI if available
+            if pd.notna(row.get("mean_diff")):
+                line_parts.append(f"ΔMean={row['mean_diff']:+.3f}")
+            if pd.notna(row.get("ci_lower")) and pd.notna(row.get("ci_upper")):
+                line_parts.append(f"95% CI [{row['ci_lower']:.3f}, {row['ci_upper']:.3f}]")
+            if pd.notna(row.get("cohens_d")):
+                line_parts.append(f"d={row['cohens_d']:.3f}")
+
+            # Add p-values
+            p_raw = row.get("pval_raw", np.nan)
+            p_fdr = row.get("pval_corrected", np.nan)
+            if pd.notna(p_raw):
+                line_parts.append(f"p={p_raw:.4f}")
+            if pd.notna(p_fdr):
+                line_parts.append(f"p_FDR={p_fdr:.4f}")
+
+            line_parts.append(sig)
+            lines.append("- " + " | ".join(line_parts))
 
         lines.append("")
         lines.append("---")
@@ -426,13 +626,16 @@ def generate_text_report(stats_df, data, control_condition, report_file):
     # Summary
     total = len(stats_df)
     sig_total = int(stats_df["significant"].sum())
+    n_increased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "increased")])
+    n_decreased = len(stats_df[(stats_df["significant"]) & (stats_df["direction"] == "decreased")])
+
     lines += [
         "## Summary",
         "",
         f"- Total pairwise comparisons: {total}",
         f"- Significant: {sig_total} ({100 * sig_total / total:.1f}%)",
-        f"  - B > A: {len(stats_df[(stats_df['significant']) & (stats_df['direction'] == 'increased')])}",
-        f"  - B < A: {len(stats_df[(stats_df['significant']) & (stats_df['direction'] == 'decreased')])}",
+        f"  - ConditionB > ConditionA: {n_increased}",
+        f"  - ConditionB < ConditionA: {n_decreased}",
         f"- Non-significant: {total - sig_total} ({100 * (total - sig_total) / total:.1f}%)",
         "",
         f"- Metrics with at least one significant pair: "

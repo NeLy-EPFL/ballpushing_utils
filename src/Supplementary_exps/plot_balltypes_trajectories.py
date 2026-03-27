@@ -42,6 +42,42 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 
+# Pixel to mm conversion factor (500 px = 30 mm)
+PIXELS_PER_MM = 500 / 30
+
+
+def cohens_d(group1, group2):
+    """Calculate Cohen's d effect size (group2 - group1)."""
+    n1, n2 = len(group1), len(group2)
+    if n1 < 2 or n2 < 2:
+        return np.nan
+
+    var1, var2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+    pooled_std = np.sqrt(((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2))
+    if pooled_std == 0:
+        return np.nan
+
+    return (np.mean(group2) - np.mean(group1)) / pooled_std
+
+
+def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_state=42):
+    """Bootstrap CI for mean(group2) - mean(group1)."""
+    if len(group1) == 0 or len(group2) == 0:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(random_state)
+    diffs = np.empty(n_bootstrap, dtype=float)
+    for i in range(n_bootstrap):
+        s1 = rng.choice(group1, size=len(group1), replace=True)
+        s2 = rng.choice(group2, size=len(group2), replace=True)
+        diffs[i] = np.mean(s2) - np.mean(s1)
+
+    alpha = 100 - ci
+    lower = np.percentile(diffs, alpha / 2)
+    upper = np.percentile(diffs, 100 - alpha / 2)
+    return lower, upper
+
+
 def load_dark_olfaction_data(coordinates_path, test_mode=False):
     """
     Load dark olfaction coordinates dataset.
@@ -239,6 +275,19 @@ def compute_permutation_test_with_fdr(
         # Store results for each bin
         observed_diffs = []
         p_values_raw = []
+        n_control_values = []
+        n_test_values = []
+        mean_control_values = []
+        mean_test_values = []
+        ci_lower_values = []
+        ci_upper_values = []
+        pct_change_values = []
+        pct_ci_lower_values = []
+        pct_ci_upper_values = []
+        cohens_d_values = []
+        bin_center_values = []
+        bin_start_values = []
+        bin_end_values = []
 
         iterator = tqdm(time_bins, desc=f"  {test_group} vs {control_group}") if progress else time_bins
 
@@ -254,11 +303,60 @@ def compute_permutation_test_with_fdr(
             if len(control_vals) == 0 or len(test_vals) == 0:
                 observed_diffs.append(np.nan)
                 p_values_raw.append(1.0)
+                n_control_values.append(0)
+                n_test_values.append(0)
+                mean_control_values.append(np.nan)
+                mean_test_values.append(np.nan)
+                ci_lower_values.append(np.nan)
+                ci_upper_values.append(np.nan)
+                pct_change_values.append(np.nan)
+                pct_ci_lower_values.append(np.nan)
+                pct_ci_upper_values.append(np.nan)
+                cohens_d_values.append(np.nan)
+                if len(bin_data) > 0:
+                    bin_center_values.append(float(bin_data["bin_center"].iloc[0]))
+                    bin_start_values.append(float(bin_data["bin_start"].iloc[0]))
+                    bin_end_values.append(float(bin_data["bin_end"].iloc[0]))
+                else:
+                    bin_center_values.append(np.nan)
+                    bin_start_values.append(np.nan)
+                    bin_end_values.append(np.nan)
                 continue
 
             # Observed difference (test - control)
-            obs_diff = np.mean(test_vals) - np.mean(control_vals)
+            mean_control = np.mean(control_vals)
+            mean_test = np.mean(test_vals)
+            obs_diff = mean_test - mean_control
             observed_diffs.append(obs_diff)
+
+            n_control_values.append(len(control_vals))
+            n_test_values.append(len(test_vals))
+            mean_control_values.append(mean_control)
+            mean_test_values.append(mean_test)
+
+            ci_low, ci_high = bootstrap_ci_difference(
+                control_vals, test_vals, n_bootstrap=10000, ci=95, random_state=42
+            )
+            ci_lower_values.append(ci_low)
+            ci_upper_values.append(ci_high)
+
+            if mean_control != 0:
+                pct_change = (obs_diff / mean_control) * 100
+                pct_ci_lower = (ci_low / mean_control) * 100
+                pct_ci_upper = (ci_high / mean_control) * 100
+            else:
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
+
+            pct_change_values.append(pct_change)
+            pct_ci_lower_values.append(pct_ci_lower)
+            pct_ci_upper_values.append(pct_ci_upper)
+            cohens_d_values.append(cohens_d(control_vals, test_vals))
+
+            bin_center_values.append(float(bin_data["bin_center"].iloc[0]))
+            bin_start_values.append(float(bin_data["bin_start"].iloc[0]))
+            bin_end_values.append(float(bin_data["bin_end"].iloc[0]))
 
             # Permutation test
             combined = np.concatenate([control_vals, test_vals])
@@ -289,7 +387,20 @@ def compute_permutation_test_with_fdr(
         # Store results
         results[test_group] = {
             "time_bins": time_bins,
+            "bin_center": bin_center_values,
+            "bin_start": bin_start_values,
+            "bin_end": bin_end_values,
             "observed_diffs": observed_diffs,
+            "n_control": n_control_values,
+            "n_test": n_test_values,
+            "mean_control": mean_control_values,
+            "mean_test": mean_test_values,
+            "ci_lower": ci_lower_values,
+            "ci_upper": ci_upper_values,
+            "pct_change": pct_change_values,
+            "pct_ci_lower": pct_ci_lower_values,
+            "pct_ci_upper": pct_ci_upper_values,
+            "cohens_d": cohens_d_values,
             "p_values_raw": p_values_raw,
             "p_values_corrected": p_values_corrected,
             "significant_timepoints": np.where(rejected)[0],
@@ -752,6 +863,46 @@ def generate_all_trajectory_plots(
                 f.write(f"  Bin {time_bin}: diff={obs_diff:.2f}, p_raw={p_raw:.4f}, p_FDR={p_corr:.4f} {sig}\n")
 
     print(f"\n✅ Statistical results saved to: {stats_file}")
+
+    # Save concatenated CSV across all balltype-vs-control comparisons
+    csv_rows = []
+    for test_condition in sorted(test_conditions):
+        if test_condition not in permutation_results:
+            continue
+
+        result = permutation_results[test_condition]
+        df_comp = pd.DataFrame(
+            {
+                "Comparison": f"{test_condition} vs {control_condition}",
+                "ConditionA": control_condition,
+                "ConditionB": test_condition,
+                "Time_Bin": result["time_bins"],
+                "Bin_Start_min": result.get("bin_start", [np.nan] * len(result["time_bins"])),
+                "Bin_End_min": result.get("bin_end", [np.nan] * len(result["time_bins"])),
+                "Bin_Center_min": result.get("bin_center", [np.nan] * len(result["time_bins"])),
+                "N_Control": result.get("n_control", [np.nan] * len(result["time_bins"])),
+                "N_Test": result.get("n_test", [np.nan] * len(result["time_bins"])),
+                "Mean_Control_mm": np.array(result.get("mean_control", [np.nan] * len(result["time_bins"])))
+                / PIXELS_PER_MM,
+                "Mean_Test_mm": np.array(result.get("mean_test", [np.nan] * len(result["time_bins"]))) / PIXELS_PER_MM,
+                "Difference_mm": np.array(result["observed_diffs"]) / PIXELS_PER_MM,
+                "CI_Lower_mm": np.array(result.get("ci_lower", [np.nan] * len(result["time_bins"]))) / PIXELS_PER_MM,
+                "CI_Upper_mm": np.array(result.get("ci_upper", [np.nan] * len(result["time_bins"]))) / PIXELS_PER_MM,
+                "Pct_Change": result.get("pct_change", [np.nan] * len(result["time_bins"])),
+                "Pct_CI_Lower": result.get("pct_ci_lower", [np.nan] * len(result["time_bins"])),
+                "Pct_CI_Upper": result.get("pct_ci_upper", [np.nan] * len(result["time_bins"])),
+                "Cohens_D": result.get("cohens_d", [np.nan] * len(result["time_bins"])),
+                "P_Value_Raw": result["p_values_raw"],
+                "P_Value_FDR": result["p_values_corrected"],
+            }
+        )
+        df_comp["Significant_FDR"] = np.where(df_comp["P_Value_FDR"] < 0.05, "*", "ns")
+        csv_rows.append(df_comp)
+
+    if csv_rows:
+        stats_csv = output_dir / "trajectory_balltype_permutation_statistics.csv"
+        pd.concat(csv_rows, ignore_index=True).to_csv(stats_csv, index=False, float_format="%.6f")
+        print(f"✅ Concatenated CSV saved to: {stats_csv}")
 
     print(f"\n{'='*60}")
     print("✅ All trajectory plots generated successfully!")

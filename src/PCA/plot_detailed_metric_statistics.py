@@ -807,11 +807,8 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             control_n = len(control_arr)
             genotype_mean = float(np.mean(group_arr))
             control_mean = float(np.mean(control_arr))
-            genotype_median = float(np.median(group_arr))
-            control_median = float(np.median(control_arr))
 
             mean_diff = genotype_mean - control_mean
-            median_diff = genotype_median - control_median
 
             ci_lower, ci_upper = bootstrap_ci_difference(
                 group_arr,
@@ -823,12 +820,8 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
 
             if control_mean != 0:
                 pct_change = (mean_diff / control_mean) * 100
-                pct_ci_lower = (ci_lower / control_mean) * 100
-                pct_ci_upper = (ci_upper / control_mean) * 100
             else:
                 pct_change = np.nan
-                pct_ci_lower = np.nan
-                pct_ci_upper = np.nan
 
             # Compute test fresh from raw data (not pre-computed)
             if USE_PERMUTATION_PER_PC:
@@ -852,15 +845,9 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
                 "genotype_mean": genotype_mean,
                 "control_mean": control_mean,
                 "mean_diff": mean_diff,
-                "genotype_median": genotype_median,
-                "control_median": control_median,
-                "median_diff": median_diff,
                 "ci_lower": ci_lower,
                 "ci_upper": ci_upper,
                 "pct_change": pct_change,
-                "pct_ci_lower": pct_ci_lower,
-                "pct_ci_upper": pct_ci_upper,
-                "n_bootstrap": 10000,
             }
 
         if len(ppc_pvals) > 0:
@@ -876,8 +863,7 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         result_dict = {
             "genotype": nickname,
             "control": control_name,
-            "MannWhitney_any_metric_significant": ppc_any,
-            "MannWhitney_significant_metrics": significant_metrics,
+            "significant_metrics": significant_metrics,
             "num_significant_metrics": len(significant_metrics),
             "significant": ppc_any,  # Use per-metric test results as main criterion
         }
@@ -887,7 +873,7 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             if i < len(ppc_pvals) and i < len(pvals_corr):
                 result_dict[f"{metric}_pval"] = ppc_pvals[i]
                 result_dict[f"{metric}_pval_corrected"] = pvals_corr[i]
-                result_dict[f"{metric}_significant"] = metric in significant_metrics
+                result_dict[f"{metric}_significant"] = bool(rejected[i]) if i < len(rejected) else False
                 result_dict[f"{metric}_direction"] = directions.get(metric, 0)
                 result_dict[f"{metric}_cohens_d"] = effect_sizes.get(metric, 0.0)
                 stats = metric_stats.get(metric, {})
@@ -896,15 +882,9 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
                 result_dict[f"{metric}_genotype_mean"] = stats.get("genotype_mean", np.nan)
                 result_dict[f"{metric}_control_mean"] = stats.get("control_mean", np.nan)
                 result_dict[f"{metric}_mean_diff"] = stats.get("mean_diff", np.nan)
-                result_dict[f"{metric}_genotype_median"] = stats.get("genotype_median", np.nan)
-                result_dict[f"{metric}_control_median"] = stats.get("control_median", np.nan)
-                result_dict[f"{metric}_median_diff"] = stats.get("median_diff", np.nan)
                 result_dict[f"{metric}_ci_lower"] = stats.get("ci_lower", np.nan)
                 result_dict[f"{metric}_ci_upper"] = stats.get("ci_upper", np.nan)
                 result_dict[f"{metric}_pct_change"] = stats.get("pct_change", np.nan)
-                result_dict[f"{metric}_pct_ci_lower"] = stats.get("pct_ci_lower", np.nan)
-                result_dict[f"{metric}_pct_ci_upper"] = stats.get("pct_ci_upper", np.nan)
-                result_dict[f"{metric}_n_bootstrap"] = stats.get("n_bootstrap", np.nan)
 
         results.append(result_dict)
 

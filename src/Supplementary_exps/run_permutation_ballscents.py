@@ -51,6 +51,23 @@ def mm_to_inches(mm_value):
     return mm_value / 25.4
 
 
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
+    """Calculate bootstrapped CI for mean(group2) - mean(group1)."""
+    if len(group1_data) == 0 or len(group2_data) == 0:
+        return np.nan, np.nan
+
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+    for i in range(n_bootstrap):
+        sample1 = np.random.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = np.random.choice(group2_data, size=len(group2_data), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    lower = np.percentile(bootstrap_diffs, alpha / 2)
+    upper = np.percentile(bootstrap_diffs, 100 - alpha / 2)
+    return float(lower), float(upper)
+
+
 def is_distance_metric(metric_name):
     """Check if a metric represents distance (in pixels)"""
     distance_keywords = [
@@ -308,6 +325,7 @@ def generate_BallScent_permutation_plots(
             continue
 
         control_median = control_vals.median()  # Calculate control median once
+        control_mean = control_vals.mean()
 
         # Perform permutation tests for all ball scents vs control
         pvals = []
@@ -322,6 +340,7 @@ def generate_BallScent_permutation_plots(
             try:
                 # Permutation test using median difference as statistic
                 test_median = test_vals.median()
+                test_mean = test_vals.mean()
                 obs_diff = test_median - control_median
 
                 n1 = len(control_vals)
@@ -344,11 +363,36 @@ def generate_BallScent_permutation_plots(
                 direction = "increased" if test_median > control_median else "decreased"
                 effect_size = test_median - control_median
 
+                # Bootstrap CI for mean difference (test - control)
+                ci_lower, ci_upper = bootstrap_ci_difference(
+                    control_vals.values,
+                    test_vals.values,
+                    n_bootstrap=n_permutations,
+                    ci=95,
+                )
+                mean_diff = test_mean - control_mean
+
+                if control_mean != 0:
+                    pct_change = (mean_diff / control_mean) * 100
+                    pct_ci_lower = (ci_lower / control_mean) * 100
+                    pct_ci_upper = (ci_upper / control_mean) * 100
+                else:
+                    pct_change = np.nan
+                    pct_ci_lower = np.nan
+                    pct_ci_upper = np.nan
+
             except Exception as e:
                 print(f"Error in permutation test for {ball_scent} vs {control_BallScent}: {e}")
                 pval = 1.0
                 direction = "none"
                 effect_size = 0.0
+                test_mean = test_vals.mean() if len(test_vals) > 0 else np.nan
+                mean_diff = np.nan
+                ci_lower = np.nan
+                ci_upper = np.nan
+                pct_change = np.nan
+                pct_ci_lower = np.nan
+                pct_ci_upper = np.nan
 
             pvals.append(pval)
             test_results.append(
@@ -361,9 +405,18 @@ def generate_BallScent_permutation_plots(
                     "effect_size": effect_size,
                     "test_median": test_vals.median() if len(test_vals) > 0 else np.nan,
                     "control_median": control_median,
+                    "test_mean": test_mean,
+                    "control_mean": control_mean,
+                    "mean_diff": mean_diff,
+                    "ci_lower": ci_lower,
+                    "ci_upper": ci_upper,
+                    "pct_change": pct_change,
+                    "pct_ci_lower": pct_ci_lower,
+                    "pct_ci_upper": pct_ci_upper,
                     "test_n": len(test_vals),
                     "control_n": len(control_vals),
                     "n_permutations": n_permutations,
+                    "n_bootstrap": n_permutations,
                 }
             )
 

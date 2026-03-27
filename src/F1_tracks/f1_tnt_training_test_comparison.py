@@ -6,7 +6,8 @@ What this script does (pretrained flies only):
 1) Training-ball jitter boxplots with permutation stats (TNTxEmptySplit vs each genotype)
 2) Test-ball jitter boxplots with permutation stats (TNTxEmptySplit vs each genotype)
 3) Training-vs-test scatterplots per metric (paired by fly)
-4) CSV outputs with permutation stats and training->test correlation (R²)
+4) CSV outputs with permutation stats and training->test rank correlation
+   (control baseline + genotype comparisons)
 
 Usage examples:
     python f1_tnt_training_test_comparison.py
@@ -18,12 +19,12 @@ Usage examples:
 from pathlib import Path
 import argparse
 import warnings
+
 import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-from scipy.stats import linregress
+from scipy.stats import norm, spearmanr
 from statsmodels.stats.multitest import multipletests
 
 warnings.filterwarnings("ignore")
@@ -176,6 +177,7 @@ SUPPLEMENTARY_CONTINUOUS_METRICS = [
 ]
 
 DEFAULT_METRICS_WITH_SUPPLEMENTARY = list(dict.fromkeys(DEFAULT_CONTINUOUS_METRICS + SUPPLEMENTARY_CONTINUOUS_METRICS))
+N_BOOTSTRAP = 2000
 
 # ---------------------------------------------------------------------------
 # Utility
@@ -282,6 +284,117 @@ def significance_stars(p):
     return "ns"
 
 
+def ensure_reportable_p_value(p_value, min_value=None):
+    """Ensure exported p-values are finite and never exactly zero."""
+    if pd.isna(p_value):
+        return np.nan
+
+    try:
+        p_float = float(p_value)
+    except (TypeError, ValueError):
+        return np.nan
+
+    if not np.isfinite(p_float):
+        return np.nan
+
+    smallest_positive = float(np.nextafter(0.0, 1.0))
+    floor = smallest_positive if min_value is None else max(float(min_value), smallest_positive)
+    return float(min(max(p_float, floor), 1.0))
+
+
+def bootstrap_ci_difference(control, genotype, n_bootstrap=2000, confidence=0.95, random_seed=42):
+    """Bootstrap CIs for genotype-control difference on raw and percent scales."""
+    control_arr = np.asarray(control, dtype=float)
+    genotype_arr = np.asarray(genotype, dtype=float)
+    control_arr = control_arr[np.isfinite(control_arr)]
+    genotype_arr = genotype_arr[np.isfinite(genotype_arr)]
+
+    if len(control_arr) < 2 or len(genotype_arr) < 2 or n_bootstrap < 1:
+        return np.nan, np.nan, np.nan, np.nan
+
+    rng = np.random.default_rng(random_seed)
+    raw_boot = np.empty(n_bootstrap, dtype=float)
+    pct_boot = np.full(n_bootstrap, np.nan, dtype=float)
+
+    for i in range(n_bootstrap):
+        control_sample = rng.choice(control_arr, size=len(control_arr), replace=True)
+        genotype_sample = rng.choice(genotype_arr, size=len(genotype_arr), replace=True)
+
+        mean_control = float(np.mean(control_sample))
+        mean_genotype = float(np.mean(genotype_sample))
+        diff = mean_genotype - mean_control
+        raw_boot[i] = diff
+
+        if mean_control != 0:
+            pct_boot[i] = (diff / mean_control) * 100.0
+
+    alpha = 1.0 - confidence
+    lower_q = 100.0 * (alpha / 2.0)
+    upper_q = 100.0 * (1.0 - alpha / 2.0)
+    raw_ci_bounds = np.asarray(np.percentile(raw_boot, [lower_q, upper_q]), dtype=float).reshape(-1)
+    raw_ci_lower = float(raw_ci_bounds[0]) if raw_ci_bounds.size > 0 else np.nan
+    raw_ci_upper = float(raw_ci_bounds[1]) if raw_ci_bounds.size > 1 else np.nan
+
+    pct_valid = pct_boot[np.isfinite(pct_boot)]
+    if len(pct_valid) > 0:
+        pct_ci_bounds = np.asarray(np.percentile(pct_valid, [lower_q, upper_q]), dtype=float).reshape(-1)
+        pct_ci_lower = float(pct_ci_bounds[0]) if pct_ci_bounds.size > 0 else np.nan
+        pct_ci_upper = float(pct_ci_bounds[1]) if pct_ci_bounds.size > 1 else np.nan
+    else:
+        pct_ci_lower, pct_ci_upper = np.nan, np.nan
+
+    return (
+        raw_ci_lower,
+        raw_ci_upper,
+        float(pct_ci_lower) if np.isfinite(pct_ci_lower) else np.nan,
+        float(pct_ci_upper) if np.isfinite(pct_ci_upper) else np.nan,
+    )
+
+
+def compute_detailed_group_statistics(control, genotype, n_bootstrap=2000):
+    """Compute mean/median/raw/percent effects and bootstrap CIs for CSV exports."""
+    control_arr = np.asarray(control, dtype=float)
+    genotype_arr = np.asarray(genotype, dtype=float)
+    control_arr = control_arr[np.isfinite(control_arr)]
+    genotype_arr = genotype_arr[np.isfinite(genotype_arr)]
+
+    if len(control_arr) == 0 or len(genotype_arr) == 0:
+        return {
+            "median_control": np.nan,
+            "median_genotype": np.nan,
+            "raw_difference": np.nan,
+            "percent_change_vs_control": np.nan,
+            "raw_ci_lower": np.nan,
+            "raw_ci_upper": np.nan,
+            "percent_ci_lower": np.nan,
+            "percent_ci_upper": np.nan,
+            "bootstrap_n": int(max(0, n_bootstrap)),
+        }
+
+    mean_control = float(np.mean(control_arr))
+    mean_genotype = float(np.mean(genotype_arr))
+    raw_difference = float(mean_genotype - mean_control)
+    pct_change = float((raw_difference / mean_control) * 100.0) if mean_control != 0 else np.nan
+
+    raw_ci_lower, raw_ci_upper, percent_ci_lower, percent_ci_upper = bootstrap_ci_difference(
+        control_arr,
+        genotype_arr,
+        n_bootstrap=n_bootstrap,
+    )
+
+    return {
+        "median_control": float(np.median(control_arr)),
+        "median_genotype": float(np.median(genotype_arr)),
+        "raw_difference": raw_difference,
+        "percent_change_vs_control": pct_change,
+        "raw_ci_lower": raw_ci_lower,
+        "raw_ci_upper": raw_ci_upper,
+        "percent_ci_lower": percent_ci_lower,
+        "percent_ci_upper": percent_ci_upper,
+        "bootstrap_n": int(max(0, n_bootstrap)),
+    }
+
+
 def permutation_test_mean_difference(x, y, n_permutations=10000, rng=None):
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -304,6 +417,7 @@ def permutation_test_mean_difference(x, y, n_permutations=10000, rng=None):
         null_dist[i] = np.mean(perm[n_x:]) - np.mean(perm[:n_x])
 
     p_value = (np.sum(np.abs(null_dist) >= np.abs(observed)) + 1) / (n_permutations + 1)
+    p_value = ensure_reportable_p_value(p_value, min_value=1.0 / (n_permutations + 1))
     return observed, p_value
 
 
@@ -322,7 +436,12 @@ def cohen_d(x, y):
     return (np.mean(y) - np.mean(x)) / pooled_sd
 
 
-def safe_linregress(x, y):
+def to_percentile_ranks(values):
+    series = pd.Series(np.asarray(values, dtype=float))
+    return series.rank(method="average", pct=True).to_numpy(dtype=float)
+
+
+def safe_spearman_rank_correlation(x, y):
     x_arr = np.asarray(x, dtype=float)
     y_arr = np.asarray(y, dtype=float)
     finite = np.isfinite(x_arr) & np.isfinite(y_arr)
@@ -334,7 +453,51 @@ def safe_linregress(x, y):
     if np.nanstd(x_arr) == 0 or np.nanstd(y_arr) == 0:
         return None
 
-    return linregress(x_arr, y_arr)
+    result = spearmanr(x_arr, y_arr)
+    result_arr = np.asarray(result, dtype=float).ravel()
+    if result_arr.size < 2:
+        return None
+
+    rho = float(result_arr[0])
+    p_value = float(result_arr[1])
+
+    if not np.isfinite(rho):
+        return None
+
+    return {
+        "n": int(len(x_arr)),
+        "rho": float(rho),
+        "rho2": float(rho**2),
+        "p_value": ensure_reportable_p_value(p_value),
+    }
+
+
+def compare_correlations_fisher_z(r_control, n_control, r_group, n_group):
+    if not np.isfinite(r_control) or not np.isfinite(r_group):
+        return np.nan, np.nan
+    if n_control < 4 or n_group < 4:
+        return np.nan, np.nan
+
+    r1 = float(np.clip(r_control, -0.999999, 0.999999))
+    r2 = float(np.clip(r_group, -0.999999, 0.999999))
+
+    z1 = np.arctanh(r1)
+    z2 = np.arctanh(r2)
+    se = np.sqrt(1.0 / (n_control - 3) + 1.0 / (n_group - 3))
+    if not np.isfinite(se) or se <= 0:
+        return np.nan, np.nan
+
+    z = (z2 - z1) / se
+    p_value = 2.0 * (1.0 - norm.cdf(abs(z)))
+    return float(z), ensure_reportable_p_value(p_value)
+
+
+def compute_group_rank_correlation(group_df, metric):
+    training = convert_metric_data(group_df["training"].values, metric)
+    test = convert_metric_data(group_df["test"].values, metric)
+    training_rank = to_percentile_ranks(training)
+    test_rank = to_percentile_ranks(test)
+    return safe_spearman_rank_correlation(training_rank, test_rank)
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +591,7 @@ def compute_permutation_stats(
     identity_col,
     subset_identity,
     n_permutations,
+    n_bootstrap,
     active_genotypes,
     control_genotype,
 ):
@@ -447,6 +611,7 @@ def compute_permutation_stats(
         group = subset[subset[genotype_col] == genotype][metric].dropna().values
         effect, p = permutation_test_mean_difference(control, group, n_permutations=n_permutations, rng=rng)
         d = cohen_d(control, group)
+        detailed_stats = compute_detailed_group_statistics(control, group, n_bootstrap=n_bootstrap)
 
         rows.append(
             {
@@ -460,7 +625,9 @@ def compute_permutation_stats(
                 "mean_genotype": float(np.nanmean(group)) if len(group) else np.nan,
                 "effect_mean_diff_genotype_minus_control": effect,
                 "cohen_d": d,
-                "p_value": p,
+                "p_value": ensure_reportable_p_value(p, min_value=1.0 / (n_permutations + 1)),
+                "p_value_floor": float(1.0 / (n_permutations + 1)),
+                **detailed_stats,
             }
         )
 
@@ -470,7 +637,7 @@ def compute_permutation_stats(
         stats_df["p_fdr"] = np.nan
         if valid.any():
             _, p_corr, _, _ = multipletests(stats_df.loc[valid, "p_value"], method="fdr_bh")
-            stats_df.loc[valid, "p_fdr"] = p_corr
+            stats_df.loc[valid, "p_fdr"] = [ensure_reportable_p_value(x) for x in p_corr]
         stats_df["significance"] = stats_df["p_fdr"].apply(lambda x: significance_stars(x) if pd.notna(x) else "na")
 
     return stats_df
@@ -495,35 +662,40 @@ def compute_training_test_correlations(
                     "metric": metric,
                     "group": "control_baseline",
                     "group_genotype": control_genotype,
+                    "correlation_method": "spearman_rank_percentile",
                     "n": 0,
-                    "slope": np.nan,
-                    "intercept": np.nan,
                     "r": np.nan,
                     "r2": np.nan,
+                    "rho": np.nan,
+                    "rho2": np.nan,
                     "p_value": np.nan,
+                    "delta_rho_vs_control": np.nan,
+                    "fisher_z_vs_control": np.nan,
+                    "fisher_p_vs_control": np.nan,
                 }
             )
             continue
 
-        # Control baseline (normal condition)
+        # Control baseline
         control_paired = paired[paired[genotype_col] == control_genotype]
-        if len(control_paired) >= 3:
-            lr = safe_linregress(control_paired["training"], control_paired["test"])
-        else:
-            lr = None
+        control_corr = compute_group_rank_correlation(control_paired, metric) if len(control_paired) >= 3 else None
 
-        if lr is not None:
+        if control_corr is not None:
             rows.append(
                 {
                     "metric": metric,
                     "group": "control_baseline",
                     "group_genotype": control_genotype,
-                    "n": int(len(control_paired)),
-                    "slope": float(lr.slope),
-                    "intercept": float(lr.intercept),
-                    "r": float(lr.rvalue),
-                    "r2": float(lr.rvalue**2),
-                    "p_value": float(lr.pvalue),
+                    "correlation_method": "spearman_rank_percentile",
+                    "n": int(control_corr["n"]),
+                    "r": float(control_corr["rho"]),
+                    "r2": float(control_corr["rho2"]),
+                    "rho": float(control_corr["rho"]),
+                    "rho2": float(control_corr["rho2"]),
+                    "p_value": float(control_corr["p_value"]),
+                    "delta_rho_vs_control": 0.0,
+                    "fisher_z_vs_control": np.nan,
+                    "fisher_p_vs_control": np.nan,
                 }
             )
         else:
@@ -532,35 +704,52 @@ def compute_training_test_correlations(
                     "metric": metric,
                     "group": "control_baseline",
                     "group_genotype": control_genotype,
+                    "correlation_method": "spearman_rank_percentile",
                     "n": int(len(control_paired)),
-                    "slope": np.nan,
-                    "intercept": np.nan,
                     "r": np.nan,
                     "r2": np.nan,
+                    "rho": np.nan,
+                    "rho2": np.nan,
                     "p_value": np.nan,
+                    "delta_rho_vs_control": np.nan,
+                    "fisher_z_vs_control": np.nan,
+                    "fisher_p_vs_control": np.nan,
                 }
             )
 
-        # Per genotype
+        # Per genotype, compared to control
         for genotype in active_genotypes:
-            g = paired[paired[genotype_col] == genotype]
-            if len(g) >= 3:
-                lr = safe_linregress(g["training"], g["test"])
-            else:
-                lr = None
+            if genotype == control_genotype:
+                continue
 
-            if lr is not None:
+            g = paired[paired[genotype_col] == genotype]
+            g_corr = compute_group_rank_correlation(g, metric) if len(g) >= 3 else None
+
+            if g_corr is not None:
+                if control_corr is not None:
+                    fisher_z, fisher_p = compare_correlations_fisher_z(
+                        control_corr["rho"], control_corr["n"], g_corr["rho"], g_corr["n"]
+                    )
+                    delta_rho = float(g_corr["rho"] - control_corr["rho"])
+                else:
+                    fisher_z, fisher_p = np.nan, np.nan
+                    delta_rho = np.nan
+
                 rows.append(
                     {
                         "metric": metric,
                         "group": "genotype",
                         "group_genotype": genotype,
-                        "n": int(len(g)),
-                        "slope": float(lr.slope),
-                        "intercept": float(lr.intercept),
-                        "r": float(lr.rvalue),
-                        "r2": float(lr.rvalue**2),
-                        "p_value": float(lr.pvalue),
+                        "correlation_method": "spearman_rank_percentile",
+                        "n": int(g_corr["n"]),
+                        "r": float(g_corr["rho"]),
+                        "r2": float(g_corr["rho2"]),
+                        "rho": float(g_corr["rho"]),
+                        "rho2": float(g_corr["rho2"]),
+                        "p_value": float(g_corr["p_value"]),
+                        "delta_rho_vs_control": delta_rho,
+                        "fisher_z_vs_control": fisher_z,
+                        "fisher_p_vs_control": fisher_p,
                     }
                 )
             else:
@@ -569,12 +758,16 @@ def compute_training_test_correlations(
                         "metric": metric,
                         "group": "genotype",
                         "group_genotype": genotype,
+                        "correlation_method": "spearman_rank_percentile",
                         "n": int(len(g)),
-                        "slope": np.nan,
-                        "intercept": np.nan,
                         "r": np.nan,
                         "r2": np.nan,
+                        "rho": np.nan,
+                        "rho2": np.nan,
                         "p_value": np.nan,
+                        "delta_rho_vs_control": np.nan,
+                        "fisher_z_vs_control": np.nan,
+                        "fisher_p_vs_control": np.nan,
                     }
                 )
 
@@ -638,18 +831,17 @@ def plot_jitter_box(
         jitter = np.random.uniform(-adaptive["jitter_amount"], adaptive["jitter_amount"], len(vals))
         ax.scatter(np.full(len(vals), pos) + jitter, vals, s=adaptive["scatter_size"], alpha=SCATTER_ALPHA, c=c)
 
-    # n labels
     labels = []
     for genotype, vals in zip(active_genotypes, data_list):
         labels.append(f"{genotype}\n(n={len(vals)})")
 
     ax.set_xticks(positions)
     ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=FONT_SIZE_TICKS)
-    ax.set_ylabel(format_metric_label(metric), fontsize=FONT_SIZE_LABELS)
+    metric_label = str(format_metric_label(metric))
+    ax.set_ylabel(metric_label, fontsize=FONT_SIZE_LABELS)
     ax.set_xlabel("Genotype", fontsize=FONT_SIZE_LABELS)
     ax.set_title(f"{get_elegant_metric_name(metric)} - {subset_identity.capitalize()} ball", fontsize=FONT_SIZE_TITLE)
 
-    # significance annotations (control vs each genotype)
     if stats_df is not None and not stats_df.empty:
         y_max = (
             np.nanmax(np.concatenate([x for x in data_list if len(x) > 0])) if any(len(x) > 0 for x in data_list) else 1
@@ -720,26 +912,37 @@ def plot_training_vs_test_scatter(
     identity_col,
     output_dir,
     active_genotypes,
+    control_genotype,
     show=False,
 ):
     paired = build_paired_dataframe(df, metric, fly_col, genotype_col, identity_col)
     if paired.empty:
         return
 
-    paired_plot = paired.copy()
-    paired_plot["training_conv"] = convert_metric_data(paired_plot["training"].values, metric)
-    paired_plot["test_conv"] = convert_metric_data(paired_plot["test"].values, metric)
-
     adaptive = get_adaptive_styling_params(len(active_genotypes))
     fig, ax = plt.subplots(figsize=adaptive["figure_size"])
 
+    control_corr = None
+    genotype_corr_rows = []
+
     for genotype in active_genotypes:
-        g = paired_plot[paired_plot[genotype_col] == genotype]
+        g = paired[paired[genotype_col] == genotype].copy()
         if g.empty:
             continue
+
+        g["training_conv"] = convert_metric_data(g["training"].values, metric)
+        g["test_conv"] = convert_metric_data(g["test"].values, metric)
+        g["training_rank"] = to_percentile_ranks(g["training_conv"].values)
+        g["test_rank"] = to_percentile_ranks(g["test_conv"].values)
+
+        corr = safe_spearman_rank_correlation(g["training_rank"].values, g["test_rank"].values)
+        genotype_corr_rows.append((genotype, corr))
+        if genotype == control_genotype:
+            control_corr = corr
+
         ax.scatter(
-            g["training_conv"],
-            g["test_conv"],
+            g["training_rank"],
+            g["test_rank"],
             s=adaptive["scatter_size"] + 6,
             alpha=SCATTER_ALPHA,
             c=GENOTYPE_COLORS.get(genotype, "#808080"),
@@ -748,35 +951,60 @@ def plot_training_vs_test_scatter(
             label=f"{genotype} (n={len(g)})",
         )
 
-    # overall regression / annotation
-    if len(paired_plot) >= 3:
-        lr = safe_linregress(paired_plot["training_conv"], paired_plot["test_conv"])
-    else:
-        lr = None
+    # identity line in percentile-rank space
+    ax.plot([0, 1], [0, 1], color="#777777", linestyle=":", linewidth=1)
 
-    if lr is not None:
-        x = np.linspace(paired_plot["training_conv"].min(), paired_plot["training_conv"].max(), 100)
-        y = lr.slope * x + lr.intercept
-        ax.plot(x, y, color="black", linestyle="--", linewidth=1.2)
-        ax.text(
-            0.03,
-            0.97,
-            f"R²={lr.rvalue**2:.3f}, p={lr.pvalue:.3g}, n={len(paired_plot)}",
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-            fontsize=FONT_SIZE_N_TEXT,
+    # control trend line (visual aid)
+    control_points = paired[paired[genotype_col] == control_genotype].copy()
+    if not control_points.empty:
+        control_points["training_conv"] = convert_metric_data(control_points["training"].values, metric)
+        control_points["test_conv"] = convert_metric_data(control_points["test"].values, metric)
+        control_points["training_rank"] = to_percentile_ranks(control_points["training_conv"].values)
+        control_points["test_rank"] = to_percentile_ranks(control_points["test_conv"].values)
+        if len(control_points) >= 3 and np.nanstd(control_points["training_rank"]) > 0:
+            slope, intercept = np.polyfit(control_points["training_rank"], control_points["test_rank"], deg=1)
+            x = np.linspace(0, 1, 100)
+            y = np.clip(slope * x + intercept, 0, 1)
+            ax.plot(x, y, color="black", linestyle="--", linewidth=1.2)
+
+    annotation_lines = ["Rank-aware correlation (within genotype)"]
+    if control_corr is not None:
+        annotation_lines.append(
+            f"{control_genotype}: rho={control_corr['rho']:.2f}, p={control_corr['p_value']:.3g}, n={control_corr['n']}"
         )
 
-    # identity line
-    lo = min(paired_plot["training_conv"].min(), paired_plot["test_conv"].min())
-    hi = max(paired_plot["training_conv"].max(), paired_plot["test_conv"].max())
-    ax.plot([lo, hi], [lo, hi], color="#777777", linestyle=":", linewidth=1)
+    for genotype, corr in genotype_corr_rows:
+        if genotype == control_genotype:
+            continue
+        if corr is None:
+            annotation_lines.append(f"{genotype}: rho=na")
+            continue
+
+        if control_corr is not None:
+            _, p_diff = compare_correlations_fisher_z(control_corr["rho"], control_corr["n"], corr["rho"], corr["n"])
+            delta = corr["rho"] - control_corr["rho"]
+            p_diff_text = f"{p_diff:.3g}" if np.isfinite(p_diff) else "na"
+            annotation_lines.append(f"{genotype}: rho={corr['rho']:.2f}, delta={delta:+.2f}, p(delta)={p_diff_text}")
+        else:
+            annotation_lines.append(f"{genotype}: rho={corr['rho']:.2f}, p={corr['p_value']:.3g}")
+
+    ax.text(
+        0.02,
+        0.98,
+        "\n".join(annotation_lines),
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=FONT_SIZE_N_TEXT,
+    )
+
+    ax.set_xlim(-0.03, 1.03)
+    ax.set_ylim(-0.03, 1.03)
 
     label = format_metric_label(metric)
-    ax.set_xlabel(f"Training ({label})", fontsize=FONT_SIZE_LABELS)
-    ax.set_ylabel(f"Test ({label})", fontsize=FONT_SIZE_LABELS)
-    ax.set_title(f"Training vs Test - {get_elegant_metric_name(metric)}", fontsize=FONT_SIZE_TITLE)
+    ax.set_xlabel(f"Training rank (within genotype) - {label}", fontsize=FONT_SIZE_LABELS)
+    ax.set_ylabel(f"Test rank (within genotype) - {label}", fontsize=FONT_SIZE_LABELS)
+    ax.set_title(f"Training vs Test (rank-aware) - {get_elegant_metric_name(metric)}", fontsize=FONT_SIZE_TITLE)
 
     ax.grid(False)
     ax.spines["top"].set_visible(False)
@@ -914,8 +1142,17 @@ def main():
     parser.add_argument("--metrics", type=str, default=None, help="Comma-separated metrics to analyze")
     parser.add_argument("--all-metrics", action="store_true", help="Analyze all auto-detected continuous metrics")
     parser.add_argument("--n-permutations", type=int, default=10000, help="Number of permutations")
+    parser.add_argument(
+        "--n-bootstrap",
+        type=int,
+        default=N_BOOTSTRAP,
+        help="Bootstrap resamples used for CI columns in permutation statistics CSV",
+    )
     parser.add_argument("--show", action="store_true", help="Display plots interactively")
     args = parser.parse_args()
+
+    if args.n_bootstrap < 1:
+        raise ValueError("--n-bootstrap must be >= 1")
 
     dataset_path = Path(args.dataset)
     if not dataset_path.exists():
@@ -960,14 +1197,40 @@ def main():
     print("Counts by genotype and ball identity:")
     print(df_filt.groupby([genotype_col, identity_col]).size().unstack(fill_value=0))
 
-    if args.metrics:
-        metrics = [m.strip() for m in args.metrics.split(",") if m.strip()]
-    elif args.all_metrics:
-        metrics = auto_detect_metrics(df_filt)
-    else:
-        metrics = [m for m in DEFAULT_METRICS_WITH_SUPPLEMENTARY if m in df_filt.columns]
-
     all_available_metrics = auto_detect_metrics(df_filt)
+    metric_lookup = {m.lower(): m for m in all_available_metrics}
+
+    if args.metrics:
+        requested_metrics = [m.strip() for m in args.metrics.split(",") if m.strip()]
+        metrics = []
+        missing_metrics = []
+        seen = set()
+        for m in requested_metrics:
+            resolved = metric_lookup.get(m.lower())
+            if resolved is None:
+                missing_metrics.append(m)
+                continue
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            metrics.append(resolved)
+
+        if missing_metrics:
+            print("Warning: requested metrics not found after filtering:")
+            print(", ".join(missing_metrics))
+    elif args.all_metrics:
+        metrics = all_available_metrics
+    else:
+        default_metrics = [m for m in DEFAULT_METRICS_WITH_SUPPLEMENTARY if m in df_filt.columns]
+        additional_auto_metrics = [m for m in all_available_metrics if m not in default_metrics]
+        metrics = default_metrics + additional_auto_metrics
+
+        if additional_auto_metrics:
+            print("Including additional auto-detected metrics not in default list:")
+            print(", ".join(additional_auto_metrics[:20]))
+            if len(additional_auto_metrics) > 20:
+                print(f"... and {len(additional_auto_metrics) - 20} more")
+
     metrics_for_stats = sorted(set(metrics).union(all_available_metrics))
 
     print(f"\nAnalyzing {len(metrics)} metrics for plots/scatter")
@@ -986,6 +1249,7 @@ def main():
             identity_col,
             subset_identity="training",
             n_permutations=args.n_permutations,
+            n_bootstrap=args.n_bootstrap,
             active_genotypes=active_genotypes,
             control_genotype=control_genotype,
         )
@@ -996,6 +1260,7 @@ def main():
             identity_col,
             subset_identity="test",
             n_permutations=args.n_permutations,
+            n_bootstrap=args.n_bootstrap,
             active_genotypes=active_genotypes,
             control_genotype=control_genotype,
         )
@@ -1041,6 +1306,7 @@ def main():
             identity_col,
             output_dir=out_root / "training_vs_test_scatterplots",
             active_genotypes=active_genotypes,
+            control_genotype=control_genotype,
             show=args.show,
         )
 
@@ -1072,20 +1338,26 @@ def main():
         active_genotypes,
         control_genotype,
     )
-    corr_csv = out_root / "training_vs_test_correlation_r2.csv"
+    corr_csv = out_root / "training_vs_test_rank_correlation_vs_control.csv"
     corr_df.to_csv(corr_csv, index=False)
     print(f"Saved: {corr_csv}")
 
-    # quick ranked view for 'predictive' metrics
-    ranked = corr_df[
+    # backward-compatible filename
+    legacy_corr_csv = out_root / "training_vs_test_correlation_r2.csv"
+    corr_df.to_csv(legacy_corr_csv, index=False)
+    print(f"Saved: {legacy_corr_csv}")
+
+    ranked = corr_df.loc[
         (corr_df["group"] == "control_baseline") & (corr_df["group_genotype"] == control_genotype)
-    ].sort_values("r2", ascending=False)
-    ranked_csv = out_root / "training_vs_test_correlation_r2_ranked.csv"
+    ].copy()
+    ranked_order = np.argsort(ranked["rho2"].to_numpy(dtype=float))[::-1]
+    ranked = ranked.iloc[ranked_order]
+    ranked_csv = out_root / "training_vs_test_rank_correlation_rho2_ranked.csv"
     ranked.to_csv(ranked_csv, index=False)
     print(f"Saved: {ranked_csv}")
 
-    print(f"\nTop control-baseline R² metrics ({control_genotype}):")
-    print(ranked[["metric", "n", "r2", "p_value"]].head(10).to_string(index=False))
+    print(f"\nTop control-baseline rank-correlation metrics ({control_genotype}):")
+    print(ranked[["metric", "n", "rho", "rho2", "p_value"]].head(10).to_string(index=False))
 
     print("\nDone.")
 

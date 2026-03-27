@@ -135,6 +135,77 @@ def permutation_test(group1_data, group2_data, n_permutations=10000):
     return p_value
 
 
+def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95, random_state=42):
+    """Bootstrap confidence interval for mean(group2) - mean(group1)."""
+    if len(group1_data) == 0 or len(group2_data) == 0 or n_bootstrap <= 0:
+        return np.nan, np.nan
+
+    rng = np.random.default_rng(random_state)
+    bootstrap_diffs = np.empty(n_bootstrap, dtype=float)
+
+    for i in range(n_bootstrap):
+        sample1 = rng.choice(group1_data, size=len(group1_data), replace=True)
+        sample2 = rng.choice(group2_data, size=len(group2_data), replace=True)
+        bootstrap_diffs[i] = np.mean(sample2) - np.mean(sample1)
+
+    alpha = 100 - ci
+    ci_lower = float(np.percentile(bootstrap_diffs, alpha / 2))
+    ci_upper = float(np.percentile(bootstrap_diffs, 100 - alpha / 2))
+    return ci_lower, ci_upper
+
+
+def compute_detailed_effect_statistics(control_data, test_data, n_bootstrap=10000, random_state=42):
+    """Compute detailed raw and percent effect summaries for one comparison."""
+    control_n = int(len(control_data))
+    test_n = int(len(test_data))
+
+    control_mean = float(np.mean(control_data)) if control_n > 0 else np.nan
+    test_mean = float(np.mean(test_data)) if test_n > 0 else np.nan
+    control_median = float(np.median(control_data)) if control_n > 0 else np.nan
+    test_median = float(np.median(test_data)) if test_n > 0 else np.nan
+
+    mean_diff = test_mean - control_mean if np.isfinite(control_mean) and np.isfinite(test_mean) else np.nan
+    median_diff = test_median - control_median if np.isfinite(control_median) and np.isfinite(test_median) else np.nan
+
+    ci_lower, ci_upper = bootstrap_ci_difference(
+        control_data,
+        test_data,
+        n_bootstrap=n_bootstrap,
+        ci=95,
+        random_state=random_state,
+    )
+
+    if np.isfinite(control_mean) and control_mean != 0 and np.isfinite(mean_diff):
+        pct_change = (mean_diff / control_mean) * 100.0
+        pct_ci_lower = (ci_lower / control_mean) * 100.0 if np.isfinite(ci_lower) else np.nan
+        pct_ci_upper = (ci_upper / control_mean) * 100.0 if np.isfinite(ci_upper) else np.nan
+    else:
+        pct_change = np.nan
+        pct_ci_lower = np.nan
+        pct_ci_upper = np.nan
+
+    pooled_std = np.sqrt((np.var(control_data, ddof=1) + np.var(test_data, ddof=1)) / 2)
+    cohens_d = mean_diff / pooled_std if np.isfinite(pooled_std) and pooled_std > 0 else np.nan
+
+    return {
+        "control_n": control_n,
+        "test_n": test_n,
+        "control_mean": control_mean,
+        "test_mean": test_mean,
+        "control_median": control_median,
+        "test_median": test_median,
+        "mean_diff": mean_diff,
+        "median_diff": median_diff,
+        "effect_size_raw": mean_diff,
+        "pct_change": pct_change,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "pct_ci_lower": pct_ci_lower,
+        "pct_ci_upper": pct_ci_upper,
+        "cohens_d": cohens_d,
+    }
+
+
 def generate_dark_olfaction_permutation_plots(
     data,
     metrics,
@@ -150,6 +221,7 @@ def generate_dark_olfaction_permutation_plots(
     output_dir="permutation_plots",
     alpha=0.05,
     n_permutations=10000,
+    n_bootstrap=10000,
     split_by_light=True,
 ):
     """
@@ -224,6 +296,7 @@ def generate_dark_olfaction_permutation_plots(
         # Compare test genotype to control genotype for each light condition separately
         p_values_by_group = {}  # Dictionary mapping group name to p-value
         effect_sizes_by_group = {}
+        detailed_stats_by_group = {}
         medians = {}
 
         control_genotype = control_group["Genotype"]
@@ -245,7 +318,7 @@ def generate_dark_olfaction_permutation_plots(
             # Find test groups in this light condition (all genotypes except control)
             test_groups_in_light = [g for g in groups if g.startswith(f"{light_val}_") and g != control_group_name]
 
-            for test_group in test_groups_in_light:
+            for test_idx, test_group in enumerate(test_groups_in_light):
                 test_data = plot_data[plot_data["Group"] == test_group][metric].values
 
                 if len(test_data) < 2 or len(control_data) < 2:
@@ -256,14 +329,19 @@ def generate_dark_olfaction_permutation_plots(
                 p_value = permutation_test(control_data, test_data, n_permutations=n_permutations)
                 p_values_by_group[test_group] = p_value
 
-                # Calculate effect size (Cohen's d)
-                mean_diff = np.mean(test_data) - np.mean(control_data)
-                pooled_std = np.sqrt((np.var(control_data, ddof=1) + np.var(test_data, ddof=1)) / 2)
-                cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0
-                effect_sizes_by_group[test_group] = cohens_d
+                detailed_stats = compute_detailed_effect_statistics(
+                    control_data,
+                    test_data,
+                    n_bootstrap=n_bootstrap,
+                    random_state=42 + metric_idx * 100 + test_idx,
+                )
+                effect_sizes_by_group[test_group] = detailed_stats["cohens_d"]
 
                 # Store medians
                 medians[test_group] = np.median(test_data)
+
+                # Store detailed stats for output table
+                detailed_stats_by_group[test_group] = detailed_stats
 
         if len(p_values_by_group) == 0:
             print(f"  ⚠️  No valid comparisons for metric '{metric}'. Skipping.")
@@ -280,10 +358,31 @@ def generate_dark_olfaction_permutation_plots(
                     "Metric": metric,
                     "Control_Group": control_group_name_for_this,
                     "Test_Group": test_group,
+                    "Control_n": detailed_stats_by_group[test_group]["control_n"],
+                    "Test_n": detailed_stats_by_group[test_group]["test_n"],
+                    "Control_mean": detailed_stats_by_group[test_group]["control_mean"],
+                    "Test_mean": detailed_stats_by_group[test_group]["test_mean"],
+                    "Control_median": detailed_stats_by_group[test_group]["control_median"],
+                    "Test_median": detailed_stats_by_group[test_group]["test_median"],
+                    "Mean_diff": detailed_stats_by_group[test_group]["mean_diff"],
+                    "Median_diff": detailed_stats_by_group[test_group]["median_diff"],
+                    "Effect_size_raw": detailed_stats_by_group[test_group]["effect_size_raw"],
+                    "Pct_change": detailed_stats_by_group[test_group]["pct_change"],
+                    "CI_lower": detailed_stats_by_group[test_group]["ci_lower"],
+                    "CI_upper": detailed_stats_by_group[test_group]["ci_upper"],
+                    "Pct_CI_lower": detailed_stats_by_group[test_group]["pct_ci_lower"],
+                    "Pct_CI_upper": detailed_stats_by_group[test_group]["pct_ci_upper"],
                     "p_value": p_value,
                     "significant": p_value < alpha,
                     "effect_size": effect_sizes_by_group[test_group],
-                    "direction": "increased" if effect_sizes_by_group[test_group] > 0 else "decreased",
+                    "cohens_d": detailed_stats_by_group[test_group]["cohens_d"],
+                    "direction": (
+                        "increased"
+                        if detailed_stats_by_group[test_group]["mean_diff"] > 0
+                        else "decreased" if detailed_stats_by_group[test_group]["mean_diff"] < 0 else "neutral"
+                    ),
+                    "n_permutations": int(n_permutations),
+                    "n_bootstrap": int(n_bootstrap),
                 }
             )
 
@@ -497,10 +596,10 @@ def generate_dark_olfaction_permutation_plots(
     return stats_df
 
 
-def generate_ir8a_light_permutation_plots(
+def generate_genotype_light_permutation_plots(
     data,
     metrics,
-    ir8a_genotype="TNTxIR8a",
+    genotypes=None,
     light_col="Light",
     genotype_col="Genotype",
     control_light="off",
@@ -510,37 +609,38 @@ def generate_ir8a_light_permutation_plots(
     font_size_ticks=10,
     font_size_labels=14,
     font_size_annotations=16,
-    output_dir="permutation_dark_olfaction_ir8a_light_comparison",
+    output_dir="permutation_dark_olfaction_light_comparison_by_genotype",
     alpha=0.05,
     n_permutations=10000,
+    n_bootstrap=10000,
+    genotype_palette=None,
 ):
     """
-    Generate one-plot-per-metric permutation comparisons for IR8a across Light conditions.
+    Generate one-plot-per-metric permutation comparisons (Light on vs off) for each genotype,
+    displayed side by side with a shared y-axis.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_data_base = data[(data[genotype_col] == ir8a_genotype)].copy()
-    if plot_data_base.empty:
-        print(f"⚠️  No rows found for genotype '{ir8a_genotype}'. Skipping IR8a light comparison plots.")
-        return pd.DataFrame()
+    if genotype_palette is None:
+        genotype_palette = {"TNTxEmptyGal4": "#7f7f7f", "TNTxIR8a": "#9467bd"}
 
-    light_values = sorted(plot_data_base[light_col].dropna().unique(), key=lambda x: (x != "off", x))
-    if control_light not in light_values or test_light not in light_values:
-        print(
-            f"⚠️  Required light conditions '{control_light}' and '{test_light}' not both present for {ir8a_genotype}. "
-            "Skipping IR8a light comparison plots."
-        )
+    if genotypes is None:
+        available_genotypes = [g for g in ["TNTxEmptyGal4", "TNTxIR8a"] if g in data[genotype_col].dropna().unique()]
+        remaining = sorted([g for g in data[genotype_col].dropna().unique() if g not in available_genotypes])
+        genotypes = available_genotypes + remaining
+
+    if len(genotypes) == 0:
+        print("⚠️  No genotypes found. Skipping genotype light comparison plots.")
         return pd.DataFrame()
 
     all_stats = []
-    ir8a_color = "#9467bd"
 
     for metric_idx, metric in enumerate(metrics):
         metric_start_time = time.time()
-        print(f"\n[IR8a light comparison] Processing metric {metric_idx+1}/{len(metrics)}: {metric}")
+        print(f"\n[Genotype light comparison] Processing metric {metric_idx+1}/{len(metrics)}: {metric}")
 
-        metric_data = plot_data_base.dropna(subset=[metric, light_col]).copy()
+        metric_data = data.dropna(subset=[metric, light_col, genotype_col]).copy()
         if metric_data.empty:
             print(f"  ⚠️  No data available for metric '{metric}' after removing NaNs. Skipping.")
             continue
@@ -548,97 +648,175 @@ def generate_ir8a_light_permutation_plots(
         metric_data[metric] = convert_metric_data(metric_data[metric], metric)
         metric_unit = get_metric_unit(metric)
 
-        control_data = metric_data[metric_data[light_col] == control_light][metric].values
-        test_data = metric_data[metric_data[light_col] == test_light][metric].values
+        genotype_results = []
+        for genotype_idx, genotype in enumerate(genotypes):
+            genotype_metric_data = metric_data[metric_data[genotype_col] == genotype].copy()
+            if genotype_metric_data.empty:
+                print(f"  ⚠️  No data for genotype '{genotype}' and metric '{metric}'.")
+                continue
 
-        if len(control_data) < 2 or len(test_data) < 2:
-            print(
-                f"  ⚠️  Insufficient data for comparison '{test_light}' vs '{control_light}' "
-                f"(n={len(test_data)} vs n={len(control_data)}). Skipping."
+            genotype_light_values = sorted(
+                genotype_metric_data[light_col].dropna().unique(), key=lambda x: (x != "off", x)
             )
+            if control_light not in genotype_light_values or test_light not in genotype_light_values:
+                print(
+                    f"  ⚠️  Required light conditions '{control_light}' and '{test_light}' not both present for {genotype}. "
+                    "Skipping this genotype."
+                )
+                continue
+
+            control_data = genotype_metric_data[genotype_metric_data[light_col] == control_light][metric].values
+            test_data = genotype_metric_data[genotype_metric_data[light_col] == test_light][metric].values
+
+            if len(control_data) < 2 or len(test_data) < 2:
+                print(
+                    f"  ⚠️  Insufficient data for {genotype}: '{test_light}' vs '{control_light}' "
+                    f"(n={len(test_data)} vs n={len(control_data)}). Skipping this genotype."
+                )
+                continue
+
+            p_value = permutation_test(control_data, test_data, n_permutations=n_permutations)
+            detailed_stats = compute_detailed_effect_statistics(
+                control_data,
+                test_data,
+                n_bootstrap=n_bootstrap,
+                random_state=4242 + metric_idx * 100 + genotype_idx,
+            )
+
+            genotype_results.append(
+                {
+                    "genotype": genotype,
+                    "p_value": p_value,
+                    "detailed_stats": detailed_stats,
+                    "group_arrays": [control_data, test_data],
+                }
+            )
+
+            all_stats.append(
+                {
+                    "Metric": metric,
+                    "Genotype": genotype,
+                    "Control_Group": f"{control_light}_{genotype}",
+                    "Test_Group": f"{test_light}_{genotype}",
+                    "Control_n": detailed_stats["control_n"],
+                    "Test_n": detailed_stats["test_n"],
+                    "Control_mean": detailed_stats["control_mean"],
+                    "Test_mean": detailed_stats["test_mean"],
+                    "Control_median": detailed_stats["control_median"],
+                    "Test_median": detailed_stats["test_median"],
+                    "Mean_diff": detailed_stats["mean_diff"],
+                    "Median_diff": detailed_stats["median_diff"],
+                    "Effect_size_raw": detailed_stats["effect_size_raw"],
+                    "Pct_change": detailed_stats["pct_change"],
+                    "CI_lower": detailed_stats["ci_lower"],
+                    "CI_upper": detailed_stats["ci_upper"],
+                    "Pct_CI_lower": detailed_stats["pct_ci_lower"],
+                    "Pct_CI_upper": detailed_stats["pct_ci_upper"],
+                    "p_value": p_value,
+                    "significant": p_value < alpha,
+                    "effect_size": detailed_stats["cohens_d"],
+                    "cohens_d": detailed_stats["cohens_d"],
+                    "direction": (
+                        "increased"
+                        if detailed_stats["mean_diff"] > 0
+                        else "decreased" if detailed_stats["mean_diff"] < 0 else "neutral"
+                    ),
+                    "n_permutations": int(n_permutations),
+                    "n_bootstrap": int(n_bootstrap),
+                }
+            )
+
+        if len(genotype_results) == 0:
+            print(f"  ⚠️  No valid genotype-level light comparisons for metric '{metric}'. Skipping figure.")
             continue
 
-        p_value = permutation_test(control_data, test_data, n_permutations=n_permutations)
-        mean_diff = np.mean(test_data) - np.mean(control_data)
-        pooled_std = np.sqrt((np.var(control_data, ddof=1) + np.var(test_data, ddof=1)) / 2)
-        cohens_d = mean_diff / pooled_std if pooled_std > 0 else 0
-
-        all_stats.append(
-            {
-                "Metric": metric,
-                "Control_Group": f"{control_light}_{ir8a_genotype}",
-                "Test_Group": f"{test_light}_{ir8a_genotype}",
-                "p_value": p_value,
-                "significant": p_value < alpha,
-                "effect_size": cohens_d,
-                "direction": "increased" if cohens_d > 0 else "decreased",
-            }
+        n_subplots = len(genotype_results)
+        fig, axes = plt.subplots(
+            1,
+            n_subplots,
+            figsize=(mm_to_inches(fig_width_mm * n_subplots), mm_to_inches(fig_height_mm)),
+            sharey=True,
         )
+        if n_subplots == 1:
+            axes = [axes]
 
-        fig, ax = plt.subplots(figsize=(mm_to_inches(fig_width_mm), mm_to_inches(fig_height_mm)))
-
-        groups = [control_light, test_light]
-        group_arrays = [
-            metric_data[metric_data[light_col] == groups[0]][metric].values,
-            metric_data[metric_data[light_col] == groups[1]][metric].values,
-        ]
-        positions = np.arange(len(groups))
-
-        y_min, y_max = metric_data[metric].min(), metric_data[metric].max()
+        y_min = min(np.min(result["group_arrays"][0]) for result in genotype_results)
+        y_min = min(y_min, min(np.min(result["group_arrays"][1]) for result in genotype_results))
+        y_max = max(np.max(result["group_arrays"][0]) for result in genotype_results)
+        y_max = max(y_max, max(np.max(result["group_arrays"][1]) for result in genotype_results))
         y_range = y_max - y_min if y_max > y_min else 1
         y_bottom = y_min - 0.1 * y_range
         y_top = y_max + 0.2 * y_range
 
-        for pos_idx, group_data_plot in enumerate(group_arrays):
-            ax.boxplot(
-                [group_data_plot],
-                positions=[positions[pos_idx]],
-                widths=0.6,
-                patch_artist=True,
-                showfliers=False,
-                boxprops=dict(facecolor="white", edgecolor="black", linewidth=1.5),
-                whiskerprops=dict(color="black", linewidth=1.5),
-                capprops=dict(color="black", linewidth=1.5),
-                medianprops=dict(color="black", linewidth=2),
-                zorder=2,
-            )
+        groups = [control_light, test_light]
+        positions = np.arange(len(groups))
 
-            np.random.seed(42)
-            jitter = np.random.normal(0, 0.04, size=len(group_data_plot))
-            ax.scatter(positions[pos_idx] + jitter, group_data_plot, alpha=0.6, s=20, color=ir8a_color, zorder=3)
+        for subplot_idx, result in enumerate(genotype_results):
+            ax = axes[subplot_idx]
+            genotype = result["genotype"]
+            group_arrays = result["group_arrays"]
+            p_value = result["p_value"]
+            genotype_color = genotype_palette.get(genotype, "gray")
 
-        if p_value < 0.001:
-            sig_text = "***"
-        elif p_value < 0.01:
-            sig_text = "**"
-        elif p_value < 0.05:
-            sig_text = "*"
-        else:
-            sig_text = ""
+            for pos_idx, group_data_plot in enumerate(group_arrays):
+                ax.boxplot(
+                    [group_data_plot],
+                    positions=[positions[pos_idx]],
+                    widths=0.6,
+                    patch_artist=True,
+                    showfliers=False,
+                    boxprops=dict(facecolor="white", edgecolor="black", linewidth=1.5),
+                    whiskerprops=dict(color="black", linewidth=1.5),
+                    capprops=dict(color="black", linewidth=1.5),
+                    medianprops=dict(color="black", linewidth=2),
+                    zorder=2,
+                )
 
-        if sig_text:
-            center_x = (positions[0] + positions[1]) / 2
-            ax.text(
-                center_x,
-                y_top - 0.05 * y_range,
-                sig_text,
-                ha="center",
-                va="top",
-                fontsize=font_size_annotations,
-                color="red",
-                fontweight="bold",
-            )
+                np.random.seed(42)
+                jitter = np.random.normal(0, 0.04, size=len(group_data_plot))
+                ax.scatter(
+                    positions[pos_idx] + jitter,
+                    group_data_plot,
+                    alpha=0.6,
+                    s=20,
+                    color=genotype_color,
+                    zorder=3,
+                )
 
-        ax.set_xticks(positions)
-        ax.set_xticklabels(groups, rotation=0, fontsize=font_size_ticks)
-        ax.tick_params(axis="y", labelsize=font_size_ticks)
-        ax.set_ylim(y_bottom, y_top)
-        ax.set_title(f"{ir8a_genotype}: Light effect", fontsize=font_size_labels, pad=10)
-        ylabel = f"{metric} {metric_unit}".strip()
-        ax.set_ylabel(ylabel, fontsize=font_size_labels)
+            if p_value < 0.001:
+                sig_text = "***"
+            elif p_value < 0.01:
+                sig_text = "**"
+            elif p_value < 0.05:
+                sig_text = "*"
+            else:
+                sig_text = ""
+
+            if sig_text:
+                center_x = (positions[0] + positions[1]) / 2
+                ax.text(
+                    center_x,
+                    y_top - 0.05 * y_range,
+                    sig_text,
+                    ha="center",
+                    va="top",
+                    fontsize=font_size_annotations,
+                    color="red",
+                    fontweight="bold",
+                )
+
+            ax.set_xticks(positions)
+            ax.set_xticklabels(groups, rotation=0, fontsize=font_size_ticks)
+            ax.tick_params(axis="y", labelsize=font_size_ticks)
+            ax.set_ylim(y_bottom, y_top)
+            ax.set_title(f"{genotype}: Light effect", fontsize=font_size_labels, pad=10)
+
+            if subplot_idx == 0:
+                ylabel = f"{metric} {metric_unit}".strip()
+                ax.set_ylabel(ylabel, fontsize=font_size_labels)
 
         plt.tight_layout()
-        output_path = output_dir / f"{metric}_ir8a_light_permutation_test.pdf"
+        output_path = output_dir / f"{metric}_genotype_light_permutation_test.pdf"
         plt.savefig(output_path, bbox_inches="tight", dpi=300)
         plt.close()
 
@@ -647,9 +825,9 @@ def generate_ir8a_light_permutation_plots(
 
     stats_df = pd.DataFrame(all_stats)
     if not stats_df.empty:
-        stats_path = output_dir / "dark_olfaction_ir8a_light_permutation_statistics.csv"
+        stats_path = output_dir / "dark_olfaction_genotype_light_permutation_statistics.csv"
         stats_df.to_csv(stats_path, index=False)
-        print(f"\n✅ IR8a light comparison statistics saved to: {stats_path}")
+        print(f"\n✅ Genotype light comparison statistics saved to: {stats_path}")
 
     return stats_df
 
@@ -824,7 +1002,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
     return dataset
 
 
-def main(overwrite=True, test_mode=False):
+def main(overwrite=True, test_mode=False, n_bootstrap=10000):
     """Main function to run permutation test plots for all metrics.
 
     Parameters:
@@ -851,11 +1029,11 @@ def main(overwrite=True, test_mode=False):
     condition_dir.mkdir(parents=True, exist_ok=True)
     print(f"  Created/verified: {condition_dir}")
 
-    # Create dedicated IR8a light-comparison subdirectory
-    ir8a_light_subdir = "permutation_dark_olfaction_ir8a_light_comparison"
-    ir8a_light_dir = base_output_dir / ir8a_light_subdir
-    ir8a_light_dir.mkdir(parents=True, exist_ok=True)
-    print(f"  Created/verified: {ir8a_light_dir}")
+    # Create dedicated genotype light-comparison subdirectory
+    genotype_light_subdir = "permutation_dark_olfaction_light_comparison_by_genotype"
+    genotype_light_dir = base_output_dir / genotype_light_subdir
+    genotype_light_dir.mkdir(parents=True, exist_ok=True)
+    print(f"  Created/verified: {genotype_light_dir}")
 
     # Load the dataset
     print("\nLoading dark olfaction dataset...")
@@ -944,14 +1122,15 @@ def main(overwrite=True, test_mode=False):
         output_dir=str(condition_dir),
         alpha=0.05,
         n_permutations=10000,
+        n_bootstrap=n_bootstrap,
         split_by_light=True,
     )
 
-    print(f"\nGenerating IR8a-only light comparison permutation plots...")
-    ir8a_light_stats_df = generate_ir8a_light_permutation_plots(
+    print(f"\nGenerating genotype-wise light comparison permutation plots (EmptyGal4 and IR8a side by side)...")
+    genotype_light_stats_df = generate_genotype_light_permutation_plots(
         data=dataset,
         metrics=available_metrics,
-        ir8a_genotype="TNTxIR8a",
+        genotypes=["TNTxEmptyGal4", "TNTxIR8a"],
         light_col="Light",
         genotype_col="Genotype",
         control_light="off",
@@ -961,9 +1140,11 @@ def main(overwrite=True, test_mode=False):
         font_size_ticks=10,
         font_size_labels=14,
         font_size_annotations=16,
-        output_dir=str(ir8a_light_dir),
+        output_dir=str(genotype_light_dir),
         alpha=0.05,
         n_permutations=10000,
+        n_bootstrap=n_bootstrap,
+        genotype_palette=genotype_palette,
     )
 
     print("\n" + "=" * 80)
@@ -986,14 +1167,23 @@ def main(overwrite=True, test_mode=False):
             print(f"  - {metric}: {len(metric_sig)} significant comparison(s)")
 
     print(f"\n✅ Main plots saved to: {condition_dir}")
-    print(f"✅ IR8a light-comparison plots saved to: {ir8a_light_dir}")
+    print(f"✅ Genotype-wise light-comparison plots saved to: {genotype_light_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate permutation test plots for dark olfaction experiments")
     parser.add_argument("--no-overwrite", action="store_true", help="Skip existing plots (default: overwrite)")
     parser.add_argument("--test", action="store_true", help="Test mode: process only 3 metrics with limited data")
+    parser.add_argument(
+        "--n-bootstrap",
+        type=int,
+        default=10000,
+        help="Number of bootstrap samples used for CI and percent-change statistics (default: 10000)",
+    )
 
     args = parser.parse_args()
 
-    main(overwrite=not args.no_overwrite, test_mode=args.test)
+    if args.n_bootstrap <= 0:
+        raise ValueError("--n-bootstrap must be a positive integer")
+
+    main(overwrite=not args.no_overwrite, test_mode=args.test, n_bootstrap=args.n_bootstrap)
