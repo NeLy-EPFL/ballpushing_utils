@@ -55,7 +55,7 @@ DEFAULT_FEATHER = Path(
 DEFAULT_COORDINATES_DIR = Path(
     "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets" "/260220_10_summary_control_folders_Data/coordinates"
 )
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/wildtype_trajectories")
+DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
 
 
 def load_dataset(feather_path: Path) -> pd.DataFrame:
@@ -209,8 +209,8 @@ def plot_aligned_trajectories(data: pd.DataFrame, representative_fly_id: str, ou
     ax.set_ylabel("ball distance to start (mm)")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
-    fig.savefig(output_path.with_suffix(".eps"), format="eps", bbox_inches="tight")
+    # fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
+    # fig.savefig(output_path.with_suffix(".eps"), format="eps", bbox_inches="tight")
     fig.savefig(output_path.with_suffix(".pdf"), format="pdf", bbox_inches="tight")
     plt.close(fig)
 
@@ -270,7 +270,7 @@ def plot_interaction_colored_trajectories(data: pd.DataFrame, representative_fly
     ax.legend(loc="upper left")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
+    # fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
     fig.savefig(output_path.with_suffix(".pdf"), format="pdf", bbox_inches="tight")
     plt.close(fig)
 
@@ -340,7 +340,7 @@ def plot_colored_trajectories(
     ax.legend(loc="upper left", fontsize=8, title=color_col)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
+    # fig.savefig(output_path.with_suffix(".svg"), format="svg", bbox_inches="tight")
     fig.savefig(output_path.with_suffix(".pdf"), format="pdf", bbox_inches="tight")
     plt.close(fig)
 
@@ -464,7 +464,7 @@ def plot_trajectories_with_histogram(
     fig.subplots_adjust(left=0.15, right=0.985, bottom=0.19, top=0.975)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path.with_suffix(".svg"), format="svg")
+    # fig.savefig(output_path.with_suffix(".svg"), format="svg")
     fig.savefig(output_path.with_suffix(".pdf"), format="pdf")
     plt.close(fig)
 
@@ -570,56 +570,12 @@ def main():
     representative_fly_id = choose_representative_fly(data, args.representative_fly)
     print(f"Using representative fly: {representative_fly_id}")
 
-    # ---- Output paths ----------------------------------------------------
-    aligned_base = args.output_dir / args.base_name
-    interactions_base = args.output_dir / f"{args.base_name}_Withinteractions"
-    colored_base = args.output_dir / f"{args.base_name}_ColoredBy_{args.color_by}"
+    # ---- Output path (only the publication histogram figure for Fig 1e) ---
+    fig1e_path = args.output_dir / "Fig1_e_wildtypeTrajectories"
 
-    # ---- Plot 1: aligned, gray background --------------------------------
-    plot_aligned_trajectories(data, representative_fly_id, aligned_base)
-    print(f"Saved: {aligned_base.with_suffix('.svg')}")
-    print(f"Saved: {aligned_base.with_suffix('.eps')}")
-    print(f"Saved: {aligned_base.with_suffix('.pdf')}")
-
-    # ---- Plot 2: interaction-colored representative -----------------------
-    plot_interaction_colored_trajectories(data, representative_fly_id, interactions_base)
-    print(f"Saved: {interactions_base.with_suffix('.svg')}")
-    print(f"Saved: {interactions_base.with_suffix('.pdf')}")
-
-    # ---- Plot 3: trajectories colored by column (if column present) ------
-    if args.color_by in data.columns:
-        plot_colored_trajectories(data, representative_fly_id, args.color_by, colored_base)
-        print(f"Saved: {colored_base.with_suffix('.svg')}")
-        print(f"Saved: {colored_base.with_suffix('.pdf')}")
-    else:
-        print(f"Skipping colored plot: column '{args.color_by}' not found in data.")
-
-    # ---- Plot 4: publication figure – trajectories + final-position histogram
-    pub_base = args.output_dir / f"{args.base_name}_WithHistogram"
-    plot_trajectories_with_histogram(data, representative_fly_id, pub_base)
-    print(f"Saved: {pub_base.with_suffix('.svg')}")
-    print(f"Saved: {pub_base.with_suffix('.pdf')}")
-
-    # ---- Plot 5: same publication figure with exactly 53 starved_noWater flies,
-    #             always including the same representative fly as fly #1 of the set.
-    print("\nGenerating starved_noWater-only histogram plot...")
-    # Load all starved_noWater data so we can guarantee the rep fly is included.
-    snw_all = load_sampled_dataset(
-        args.coordinates_dir,
-        filters={"FeedingState": "starved_noWater"},
-        n_flies=999999,  # load all
-        seed=args.seed,
-    )
-    snw_all_flies = [f for f in snw_all["fly"].dropna().unique() if f != representative_fly_id]
-    rng = random.Random(args.seed)
-    extra = rng.sample(snw_all_flies, min(52, len(snw_all_flies)))
-    snw_flies = [representative_fly_id] + extra
-    snw_data = snw_all[snw_all["fly"].isin(snw_flies)].copy()
-    print(f"starved_noWater sample: {len(snw_flies)} flies (rep fly guaranteed).")
-    snw_pub_base = args.output_dir / f"{args.base_name}_WithHistogram_starved_noWater"
-    plot_trajectories_with_histogram(snw_data, representative_fly_id, snw_pub_base)
-    print(f"Saved: {snw_pub_base.with_suffix('.svg')}")
-    print(f"Saved: {snw_pub_base.with_suffix('.pdf')}")
+    # ---- Plot: publication figure – trajectories + final-position histogram
+    plot_trajectories_with_histogram(data, representative_fly_id, fig1e_path)
+    print(f"Saved: {fig1e_path.with_suffix('.pdf')}")
 
 
 if __name__ == "__main__":

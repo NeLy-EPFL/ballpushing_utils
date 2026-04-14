@@ -26,12 +26,18 @@ from pathlib import Path
 # Add src directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
 
+import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
+
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+matplotlib.rcParams["font.family"] = "sans-serif"
+matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -451,47 +457,99 @@ def create_trajectory_plot(
     data_ds = data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :]).reset_index(drop=True)
     print(f"  Downsampled from {len(data)} to {len(data_ds)} points")
 
-    # Create figure
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Convert time to minutes for plotting
+    time_col_min = "time_min"
+    data_ds[time_col_min] = data_ds[time_col] / 60.0
 
-    # Color palette - blue for Magnet block, orange for Control (matching notebook)
-    # Note: label_colors keys must match the actual labels with sample sizes
-    label_colors = {f"Magnet block (n={n_test})": "blue", f"Control (n={n_control})": "orange"}
+    # Create figure — start with a placeholder size; will be resized to exact axes dimensions
+    fig, ax = plt.subplots(figsize=(6, 3))
 
-    # Plot using seaborn lineplot (gives mean ± CI automatically)
-    sns.lineplot(data=data_ds, x=time_col, y=value_col, hue=group_col_plot, palette=label_colors, ax=ax)
+    # Color palette matching other Fig2 scripts
+    COLOR_TEST = "#3953A4"  # blue  — Access to immobile ball
+    COLOR_CTRL = "#FAA41A"  # orange — No initial access to ball (trajectory line)
+    LABEL_COLOR_CTRL = "#cb7c29"  # darker orange — for text labels only
+    label_colors = {f"Magnet block (n={n_test})": COLOR_TEST, f"Control (n={n_control})": COLOR_CTRL}
 
-    # Set x-axis limits first (3600 to 7200 seconds = 60 to 120 minutes)
-    ax.set_xlim(3600, 7200)
+    # Calculate time bin edges in minutes
+    time_min_sec = data[time_col].min()
+    time_max_sec = data[time_col].max()
+    bin_width_min = (time_max_sec - time_min_sec) / n_bins / 60.0
+    time_min_min = time_min_sec / 60.0
 
-    # Get current y-axis limits and extend them to make room for significance annotations
-    y_min, y_max = ax.get_ylim()
-    y_range = y_max - y_min
+    # Gray shading for first two time bins with a white gap between shades
+    GAP_MIN = 0.2
+    ax.axvspan(
+        time_min_min, time_min_min + bin_width_min - GAP_MIN / 2, color="lightgray", alpha=0.5, zorder=0, linewidth=0
+    )
+    ax.axvspan(
+        time_min_min + bin_width_min + GAP_MIN / 2,
+        time_min_min + 2 * bin_width_min,
+        color="lightgray",
+        alpha=0.5,
+        zorder=0,
+        linewidth=0,
+    )
 
-    # Extend y-axis by 20% to make room for significance stars and p-values
-    ax.set_ylim(y_min, y_max + 0.20 * y_range)
+    # Compute bootstrapped 95% CI per timepoint across flies, then plot manually.
+    # 1. Get the sorted unique timepoints (in minutes) present after downsampling.
+    # 2. For each timepoint, collect per-fly values and bootstrap the mean CI.
+    N_BOOT = 2000
+    rng_boot = np.random.default_rng(42)
 
-    # Update y_max after extension
-    y_max_extended = y_max + 0.20 * y_range
+    def _boot_ci(values, n_boot=N_BOOT, ci=95):
+        if len(values) < 2:
+            m = float(np.mean(values))
+            return m, m, m
+        boot_means = np.sort([np.mean(rng_boot.choice(values, size=len(values), replace=True)) for _ in range(n_boot)])
+        lo = np.percentile(boot_means, (100 - ci) / 2)
+        hi = np.percentile(boot_means, 100 - (100 - ci) / 2)
+        return float(np.mean(values)), lo, hi
 
-    # Calculate time bin edges
-    time_min = data[time_col].min()
-    time_max = data[time_col].max()
-    bin_width = (time_max - time_min) / n_bins
+    groups_order = [f"Magnet block (n={n_test})", f"Control (n={n_control})"]
+    group_colors = {groups_order[0]: COLOR_TEST, groups_order[1]: COLOR_CTRL}
 
-    # Draw vertical dotted lines for time bins and annotate significance
+    for grp_lbl in groups_order:
+        grp_data = data_ds[data_ds[group_col_plot] == grp_lbl]
+        timepoints = np.sort(grp_data[time_col_min].unique())
+
+        means, ci_lo, ci_hi = [], [], []
+        for t in timepoints:
+            # Per-fly mean at this timepoint to keep the unit of observation = fly
+            fly_vals = grp_data[grp_data[time_col_min] == t].groupby(subject_col)[value_col].mean().values
+            m, lo, hi = _boot_ci(fly_vals)
+            means.append(m)
+            ci_lo.append(lo)
+            ci_hi.append(hi)
+
+        means = np.array(means)
+        ci_lo = np.array(ci_lo)
+        ci_hi = np.array(ci_hi)
+        color = group_colors[grp_lbl]
+
+        ax.fill_between(timepoints, ci_lo, ci_hi, color=color, alpha=0.3, linewidth=0, zorder=1)
+        ax.plot(timepoints, means, color=color, linewidth=1.0, zorder=2)
+
+    # Axis limits and ticks
+    ax.set_xlim(60, 120)
+    ax.set_ylim(0, 4.5)
+    ax.set_yticks([0, 1, 2, 3, 4])
+    ax.set_yticklabels(["0", "1", "2", "3", "4"])
+
+    xticks = list(range(60, 121, 10))
+    xticklabels = [str(x) if x in (60, 120) else "" for x in xticks]
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(xticklabels)
+
+    # Black significance asterisks — inside the gray shadings, at the top of the shaded area
     if permutation_results is not None:
         significant_bins = permutation_results["significant_timepoints"]
+        y_star = 4.3  # near top of ylim (0–4.5), inside the gray bands
 
         for time_bin in range(n_bins):
-            bin_start = time_min + time_bin * bin_width
-            bin_end = bin_start + bin_width
-
-            # Draw faint dotted lines for bins
-            ax.axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
-            ax.axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
-
-            # Annotate significance levels and p-values for all bins
+            # Only annotate the first two bins (shaded region)
+            if time_bin >= 2:
+                break
+            bin_center_min = time_min_min + time_bin * bin_width_min + bin_width_min / 2
             p_value = permutation_results["p_values"][time_bin]
 
             if p_value < 0.001:
@@ -503,58 +561,121 @@ def create_trajectory_plot(
             else:
                 significance = ""
 
-            # Add significance stars if significant
             if significance and time_bin in significant_bins:
-                # Position stars at top of plot
-                y_star = y_max + 0.05 * y_range
                 ax.text(
-                    bin_start + bin_width / 2,
+                    bin_center_min,
                     y_star,
                     significance,
                     ha="center",
-                    va="bottom",
-                    fontsize=16,
-                    color="red",
+                    va="top",
+                    fontsize=8,
+                    color="black",
                     fontweight="bold",
+                    fontname="Arial",
                 )
 
-            # Add p-value for all bins (significant and non-significant)
-            y_pval = y_max + 0.11 * y_range
-            p_text = f"p={p_value:.3f}" if p_value >= 0.001 else "p<0.001"
-            p_color = "red" if time_bin in significant_bins else "gray"
-            ax.text(
-                bin_start + bin_width / 2,
-                y_pval,
-                p_text,
-                ha="center",
-                va="bottom",
-                fontsize=8,
-                color=p_color,
-            )
+    # Axis labels — tight padding
+    ax.set_xlabel("Time (min)", fontsize=7, fontname="Arial", labelpad=2)
+    ax.set_ylabel("Distance ball\npushed (mm)", fontsize=7, fontname="Arial", labelpad=2)
 
-    # Set x-axis ticks: every 10 min from 60 min to 120 min
-    xticks = list(range(3600, 7201, 600))
-    xticklabels = [f"{int(x//60)} min" for x in xticks]
-    ax.set_xticks(xticks)
-    ax.set_xticklabels(xticklabels)
+    # Tick appearance — reduce pad to minimise whitespace
+    ax.tick_params(axis="both", direction="out", length=2, width=0.6, labelsize=6, pad=1)
+    for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+        lbl.set_fontname("Arial")
 
-    # Formatting
-    ax.set_xlabel("Time", fontsize=12)
-    ax.set_ylabel("Ball distance from start (mm)", fontsize=12)
+    # Condition labels in the bottom right (manual legend lines)
+    ax.text(
+        0.99,
+        0.14,
+        "No initial access to ball",
+        ha="right",
+        va="bottom",
+        fontsize=6,
+        color=LABEL_COLOR_CTRL,
+        fontname="Arial",
+        transform=ax.transAxes,
+    )
+    ax.text(
+        0.99,
+        0.05,
+        "Access to immobile ball",
+        ha="right",
+        va="bottom",
+        fontsize=6,
+        color=COLOR_TEST,
+        fontname="Arial",
+        transform=ax.transAxes,
+    )
 
-    # Set legend position to lower right
-    ax.legend(loc="lower right", fontsize=12)
+    # n= annotations: bootstrapped 95% CI at the right edge (last 5 min), matching the plotted band.
+    right_data = data_ds[data_ds[time_col_min] >= (data_ds[time_col_min].max() - 5)]
 
-    plt.tight_layout()
+    blue_fly_vals = (
+        right_data[right_data[group_col_plot] == groups_order[0]].groupby(subject_col)[value_col].mean().values
+    )
+    ctrl_fly_vals = (
+        right_data[right_data[group_col_plot] == groups_order[1]].groupby(subject_col)[value_col].mean().values
+    )
 
-    # Save plot
+    blue_mean, blue_ci_lo, blue_ci_hi = _boot_ci(blue_fly_vals)
+    ctrl_mean, ctrl_ci_lo, ctrl_ci_hi = _boot_ci(ctrl_fly_vals)
+
+    # Blue (Access to immobile ball): above the CI band top
+    ax.text(
+        119.5,
+        blue_ci_hi + 0.3,
+        f"n={n_test} flies",
+        ha="right",
+        va="bottom",
+        fontsize=5,
+        color=COLOR_TEST,
+        fontname="Arial",
+    )
+    # Orange (No initial access to ball): below the CI band bottom
+    ax.text(
+        119.5,
+        ctrl_ci_lo - 0.3,
+        f"n={n_control} flies",
+        ha="right",
+        va="top",
+        fontsize=5,
+        color=LABEL_COLOR_CTRL,
+        fontname="Arial",
+    )
+
+    # Spine and background styling
+    ax.set_facecolor("white")
+    fig.patch.set_facecolor("white")
+    ax.grid(False)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_linewidth(0.6)
+    ax.spines["bottom"].set_linewidth(0.6)
+
+    # Set exact axes dimensions: 4.56 cm wide × 2.28 cm tall.
+    # tight_layout arranges elements; we then scale the figure so the axes area
+    # is exactly the desired physical size (fractions stay fixed after tight_layout).
+    AX_W_CM = 4.56
+    AX_H_CM = 2.28
+    plt.tight_layout(pad=0.2)
+    ax_pos = ax.get_position()
+    new_fig_w_in = (AX_W_CM / 2.54) / ax_pos.width
+    new_fig_h_in = (AX_H_CM / 2.54) / ax_pos.height
+    fig.set_size_inches(new_fig_w_in, new_fig_h_in)
+
+    # Move x-label closer to the axis: set_label_coords bypasses labelpad and
+    # positions the label in axes fraction coordinates.  The value is set after
+    # the figure is resized so the axes-fraction ↔ physical-size mapping is final.
+    # -0.10 puts the label just below the tick labels for the small font / tight layout.
+    ax.xaxis.set_label_coords(0.5, -0.10)
+
+    # Save with bbox_inches="tight" so nothing outside the axes area is clipped.
     if output_path:
-        # Save as PDF and PNG
         pdf_path = output_path.with_suffix(".pdf")
         png_path = output_path.with_suffix(".png")
 
-        plt.savefig(pdf_path, format="pdf", dpi=300, bbox_inches="tight")
-        plt.savefig(png_path, format="png", dpi=300, bbox_inches="tight")
+        fig.savefig(pdf_path, format="pdf", dpi=300, bbox_inches="tight")
+        fig.savefig(png_path, format="png", dpi=300, bbox_inches="tight")
 
         print(f"  Saved PDF: {pdf_path}")
         print(f"  Saved PNG: {png_path}")
@@ -580,7 +701,7 @@ def generate_trajectory_plot(data, n_bins=12, n_permutations=10000, output_dir=N
         Show progress bars
     """
     if output_dir is None:
-        output_dir = Path("/mnt/upramdya_data/MD/MagnetBlock/Plots/trajectories")
+        output_dir = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure2") / Path(__file__).stem
     else:
         output_dir = Path(output_dir)
 
@@ -747,8 +868,8 @@ Examples:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/mnt/upramdya_data/MD/MagnetBlock/Plots/trajectories",
-        help="Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/trajectories)",
+        default=str(Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure2") / Path(__file__).stem),
+        help="Directory to save plots",
     )
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")

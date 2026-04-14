@@ -27,7 +27,7 @@ matplotlib.rcParams["axes.spines.right"] = False
 matplotlib.rcParams["axes.linewidth"] = 2
 matplotlib.rcParams["font.size"] = 20
 
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Ballpushing_Exploration/Plots/wildtype_trajectories")
+DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
 
 
 def sim_reinforced_walk(num_steps, momentum=0.5, initial_p=0.5, delta=0.1, min_position=0, max_ball=np.inf):
@@ -93,35 +93,6 @@ def main():
     ball_positions_no_learning = np.array(
         [sim_reinforced_walk(steps, momentum=0.5, initial_p=0.5, delta=0.0)[1] for _ in range(num_simulations)]
     )
-
-    # ---- Plot 1: simple 2-panel overview ---------------------------------
-    fig, axs = plt.subplots(2, 1, sharex=True, sharey=True, figsize=(5, 6))
-
-    axs[0].plot(ball_positions_no_learning.T, color="grey")
-    axs[0].set_title("no learning")
-    axs[1].plot(ball_positions_learning.T, color="grey")
-    axs[1].set_title("with learning")
-
-    xticks = np.arange(0, steps + 1, 250)
-    axs[1].set_xticks(xticks, [tick if tick % 1000 == 0 else "" for tick in xticks])
-
-    yticks = np.arange(0, 150 + 1, 25)
-    axs[0].set_yticks(yticks, [tick if tick % 75 == 0 else "" for tick in yticks])
-    axs[1].set_yticks(yticks, [tick if tick % 75 == 0 else "" for tick in yticks])
-
-    fig.suptitle(f"Simulation (N={num_simulations} virtual flies)")
-    plt.tight_layout()
-
-    axs[0].set_ylabel("Ball position (a.u.)")
-    axs[1].set_ylabel("Ball position (a.u.)")
-    axs[1].set_xlabel("Time steps (a.u.)")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    out1 = output_dir / "random-walk-learning-vs-not"
-    fig.savefig(out1.with_suffix(".pdf"), bbox_inches="tight")
-    fig.savefig(out1.with_suffix(".svg"), bbox_inches="tight")
-    plt.close(fig)
-    print(f"Saved: {out1.with_suffix('.pdf')}")
 
     # ---- Plot 2: publication figure with histograms ----------------------
     final_no_learning = ball_positions_no_learning[:, -1]
@@ -214,9 +185,10 @@ def main():
 
     fig.subplots_adjust(left=0.22, right=0.955, bottom=0.22, top=0.985)
 
-    out2 = output_dir / "random-walk-learning-vs-not-with-hist"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out2 = output_dir / "Fig1_f_simulatedTrajectories"
     fig.savefig(out2.with_suffix(".pdf"))
-    fig.savefig(out2.with_suffix(".svg"))
+    # fig.savefig(out2.with_suffix(".svg"))
     plt.close(fig)
     print(f"Saved: {out2.with_suffix('.pdf')}")
 

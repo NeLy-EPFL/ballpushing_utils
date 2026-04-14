@@ -12,6 +12,7 @@ Usage:
     python f1_tnt_genotype_comparison.py --metrics interaction_rate,interaction_duration
     python f1_tnt_genotype_comparison.py --no-stats  # Generate plots without statistical annotations
     python f1_tnt_genotype_comparison.py --generate-all-combinations  # Run all predefined combinations in one pass
+    python f1_tnt_genotype_comparison.py --use-lmm  # Enable LMM + residual permutation instead of regular permutation
 """
 
 import argparse
@@ -254,6 +255,13 @@ FACET_LAYOUT_GENOTYPE_ORDER = [
     "TNTxTH",
     "TNTxTRH",
 ]
+
+# Facet layout for visual genotypes only (EmptySplit + LC10-2 + LC16-1)
+FACET_LAYOUT_VISUAL_GENOTYPE_ORDER = [
+    "TNTxEmptySplit",
+    "TNTxLC10-2",
+    "TNTxLC16-1",
+]
 FACET_PANEL_WIDTH_MM = 30
 FACET_PANEL_HEIGHT_MM = 85
 FACET_CONTROL_BACKGROUND = "#f5f5f5"
@@ -274,7 +282,9 @@ USE_RESIDUAL_PERMUTATION = (
     True  # Primary method: permutation tests on residuals (distribution-free, accounts for blocking)
 )
 USE_MANN_WHITNEY = False  # Disabled: doesn't account for blocking factors (Date, Arena, Side)
-FORCE_REGULAR_PERMUTATION = False  # Can be overridden by command-line flag --force-regular-permutation
+FORCE_REGULAR_PERMUTATION = (
+    True  # Default: regular permutation. Use --use-lmm flag to switch to LMM + residual permutation
+)
 
 # Diagnostic options
 SAVE_DIAGNOSTIC_PLOTS = True  # Save diagnostic plots (Q-Q, residuals, etc.) for model validation
@@ -2137,6 +2147,7 @@ def plot_continuous_metrics_facet_layouts(
     permutation_results=None,
     regular_permutation_results=None,
     show_stats=True,
+    subfolder_name="facet_layouts",
 ):
     """Generate facet-style naive/pretrained layouts in addition to regular continuous plots."""
     if not facet_genotypes:
@@ -2148,7 +2159,7 @@ def plot_continuous_metrics_facet_layouts(
         print("Skipping facet layouts: no valid metrics")
         return
 
-    facet_output_dir = Path(output_dir) / "facet_layouts"
+    facet_output_dir = Path(output_dir) / subfolder_name
     facet_output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\nGenerating {len(metrics)} facet naive/pretrained layouts...")
@@ -3218,6 +3229,25 @@ def run_analysis_for_configuration(
     else:
         print("Skipping facet layouts: need control plus at least one requested genotype in current configuration")
 
+    # Additional facet layout: EmptySplit + LC10-2 + LC16-1 (visual genotypes)
+    visual_facet_genotypes = [g for g in FACET_LAYOUT_VISUAL_GENOTYPE_ORDER if g in available_genotypes]
+    if "TNTxEmptySplit" in visual_facet_genotypes and len(visual_facet_genotypes) >= 2:
+        plot_continuous_metrics_facet_layouts(
+            df_filtered,
+            genotype_col,
+            pretraining_col,
+            metrics=metrics_to_analyze,
+            output_dir=output_dir,
+            facet_genotypes=visual_facet_genotypes,
+            lmm_results=lmm_stats,
+            permutation_results=permutation_stats,
+            regular_permutation_results=regular_permutation_stats,
+            show_stats=not args.no_stats,
+            subfolder_name="facet_layouts_visual",
+        )
+    else:
+        print("Skipping visual facet layout: need EmptySplit plus at least one of LC10-2/LC16-1 in dataset")
+
     if args.show and not args.generate_all_combinations:
         plt.show()
     else:
@@ -3377,9 +3407,9 @@ def main():
     parser.add_argument("--detect-genotypes", action="store_true", help="Print all genotypes found in dataset and exit")
     parser.add_argument("--no-stats", action="store_true", help="Generate plots without statistical annotations")
     parser.add_argument(
-        "--force-regular-permutation",
+        "--use-lmm",
         action="store_true",
-        help="Force regular permutation tests (skip LMM and residual permutation)",
+        help="Enable LMM + residual permutation tests (default is regular permutation only)",
     )
     parser.add_argument(
         "--generate-all-combinations",
@@ -3402,14 +3432,15 @@ def main():
     if args.n_bootstrap < 1:
         raise ValueError("--n-bootstrap must be >= 1")
 
-    # Update global configuration if force-regular-permutation flag is set
+    # Update global configuration if --use-lmm flag is set
     global FORCE_REGULAR_PERMUTATION
-    if args.force_regular_permutation:
+    if args.use_lmm:
+        FORCE_REGULAR_PERMUTATION = False
+        print("\n🔬  LMM MODE ENABLED")
+        print("   - LMM analysis will be performed")
+        print("   - Residual permutation will be used where LMM is adequate\n")
+    else:
         FORCE_REGULAR_PERMUTATION = True
-        print("\n⚠️  FORCING REGULAR PERMUTATION MODE")
-        print("   - LMM analysis will be SKIPPED")
-        print("   - Residual permutation will be SKIPPED")
-        print("   - Only regular permutation tests will be performed\n")
 
     # Load dataset
     print("=" * 80)

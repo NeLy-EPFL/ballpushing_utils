@@ -539,8 +539,8 @@ def create_duration_plot(trial_durations, friedman_stat, friedman_p, posthoc_res
     png_path = output_dir / "Trial_Duration_4trials_withstats_jitter.png"
     pdf_path = output_dir / "Trial_Duration_4trials_withstats_jitter.pdf"
 
-    fig.savefig(eps_path, dpi=300, bbox_inches="tight", format="eps")
-    fig.savefig(png_path, dpi=300, bbox_inches="tight")
+    # fig.savefig(eps_path, dpi=300, bbox_inches="tight", format="eps")
+    # fig.savefig(png_path, dpi=300, bbox_inches="tight")
     fig.savefig(pdf_path, dpi=300, bbox_inches="tight", format="pdf")
 
     print(f"Saved plots to:")
@@ -563,7 +563,7 @@ def main():
     data_file = Path(
         "/mnt/upramdya_data/MD/BallPushing_Learning/Datasets/" "250318_Datasets/250320_Annotated_data.feather"
     )
-    output_dir = Path("/mnt/upramdya_data/MD/BallPushing_Learning/Plots/Durations")
+    output_dir = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
     min_trials = 4
 
     # Load data
