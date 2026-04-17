@@ -1,0 +1,43 @@
+🏆 MULTI-CONDITION PCA OPTIMIZATION SUMMARY
+============================================================
+
+Total configurations for consistency analysis: 20
+Conditions tested: 4
+Top parameters per condition: 5
+
+
+📊 List1_PCA:
+   Metrics used: 28
+   Best score: 1.0000
+   #1: Score=1.0000, n_components=20
+   #2: Score=0.8715, n_components=15
+   #3: Score=0.7456, n_components=12
+   #4: Score=0.6153, n_components=10
+   #5: Score=0.2700, n_components=7
+
+📊 List1_SparsePCA:
+   Metrics used: 28
+   Best score: 0.9156
+   #1: Score=0.9156, n_components=15, alpha=0.1
+   #2: Score=0.9156, n_components=15, alpha=0.1
+   #3: Score=0.9147, n_components=15, alpha=0.1
+   #4: Score=0.9147, n_components=15, alpha=0.1
+   #5: Score=0.9113, n_components=15, alpha=0.1
+
+📊 List2_PCA:
+   Metrics used: 26
+   Best score: 1.0000
+   #1: Score=1.0000, n_components=20
+   #2: Score=0.8754, n_components=15
+   #3: Score=0.7518, n_components=12
+   #4: Score=0.6242, n_components=10
+   #5: Score=0.2700, n_components=7
+
+📊 List2_SparsePCA:
+   Metrics used: 26
+   Best score: 0.9301
+   #1: Score=0.9301, n_components=15, alpha=0.1
+   #2: Score=0.9301, n_components=15, alpha=0.1
+   #3: Score=0.9301, n_components=15, alpha=0.1
+   #4: Score=0.9301, n_components=15, alpha=0.1
+   #5: Score=0.9256, n_components=15, alpha=0.1
