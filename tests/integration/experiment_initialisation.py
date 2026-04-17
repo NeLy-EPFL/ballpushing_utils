@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from Ballpushing_utils import Experiment, Fly
+from ballpushing_utils import Experiment, Fly
 from utils_behavior import Utils
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 def test_summary_metrics_integration():
     """Test that the new metrics appear in summary datasets"""
     try:
-        from Ballpushing_utils import Fly, Dataset
+        from ballpushing_utils import Fly, Dataset
 
         print("Testing new metrics integration in summary datasets...")
 
@@ -20,7 +20,7 @@ def test_summary_metrics_integration():
         # But we can at least verify the methods exist and are properly connected
 
         # Check that BallPushingMetrics has the new methods
-        from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+        from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 
         # Check that all new methods exist
         new_methods = [

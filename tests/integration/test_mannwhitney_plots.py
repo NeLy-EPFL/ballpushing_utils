@@ -6,8 +6,6 @@ This script tests the function on a small subset of metrics to verify it works c
 
 import sys
 
-sys.path.append("/home/matthias/ballpushing_utils/src/Plotting")
-sys.path.append("/home/matthias/ballpushing_utils/src")
 
 from All_metrics import generate_jitterboxplots_with_mannwhitney
 import pandas as pd

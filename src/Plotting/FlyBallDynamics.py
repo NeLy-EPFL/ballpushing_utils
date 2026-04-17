@@ -2,9 +2,9 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.dataset import Dataset
-from Ballpushing_utils.interactions_metrics import InteractionsMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.dataset import Dataset
+from ballpushing_utils.interactions_metrics import InteractionsMetrics
 
 import matplotlib.pyplot as plt
 import numpy as np

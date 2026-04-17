@@ -54,14 +54,13 @@ except ImportError:
     HAS_SEABORN = False
     print("⚠️  seaborn not available - using matplotlib only")
 
-sys.path.append("/home/matthias/ballpushing_utils/src/PCA")
 import Config
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
 DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-CONSISTENCY_DIR = "/home/matthias/ballpushing_utils/src/PCA/pca_analysis_results_tailored_20251219_163028/data_files"
-METRICS_PATH = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+CONSISTENCY_DIR = "/home/matthias/ballpushing_utils/src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
+METRICS_PATH = "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
 OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/EDFigure6") / Path(__file__).stem
 
 MIN_COMBINED_CONSISTENCY = 0.80
@@ -266,7 +265,7 @@ def load_consistency_results():
 def load_metrics_list():
     for path in (
         METRICS_PATH,
-        "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca.txt",
+        "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca.txt",
     ):
         if os.path.exists(path):
             with open(path) as f:

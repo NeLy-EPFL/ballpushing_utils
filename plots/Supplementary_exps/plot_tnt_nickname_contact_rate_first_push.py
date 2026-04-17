@@ -21,7 +21,7 @@ import pandas as pd
 sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent))
 
-from Ballpushing_utils.filtered_dataset_loader import build_dataset_for_nickname_and_control
+from ballpushing_utils.filtered_dataset_loader import build_dataset_for_nickname_and_control
 from plot_tnt_nickname_interaction_rate_first_push import (
     DEFAULT_SPLIT_REGISTRY,
     DEFAULT_YAML_PATH,

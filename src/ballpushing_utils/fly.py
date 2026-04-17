@@ -12,13 +12,13 @@ from moviepy.video.fx.speedx import speedx
 
 from utils_behavior import Utils
 
-from Ballpushing_utils.fly_trackingdata import FlyTrackingData
-from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
-from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
-from Ballpushing_utils.learning_metrics import LearningMetrics
-from Ballpushing_utils.f1_metrics import F1Metrics
-from Ballpushing_utils.interactions_metrics import InteractionsMetrics
-from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+from ballpushing_utils.fly_trackingdata import FlyTrackingData
+from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from ballpushing_utils.learning_metrics import LearningMetrics
+from ballpushing_utils.f1_metrics import F1Metrics
+from ballpushing_utils.interactions_metrics import InteractionsMetrics
+from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 
 
 class Fly:
@@ -53,8 +53,8 @@ class Fly:
             flyball_positions (DataFrame): The coordinates of the fly and the ball, obtained by calling the get_coordinates function with the flytrack and balltrack paths.
         """
 
-        from Ballpushing_utils.experiment import Experiment
-        from Ballpushing_utils.fly_metadata import FlyMetadata
+        from ballpushing_utils.experiment import Experiment
+        from ballpushing_utils.fly_metadata import FlyMetadata
 
         self.directory = Path(directory)
 
@@ -118,7 +118,7 @@ class Fly:
                 self.flyball_positions = ball_df.copy()
             # Add percent_completion column if rel_x_ball is present
             if self.flyball_positions is not None and "rel_x_ball" in self.flyball_positions:
-                from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+                from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 
                 ball_x_metrics = TrajectoryMetrics(self)
                 self.flyball_positions["percent_completion"] = ball_x_metrics.percent_completion()

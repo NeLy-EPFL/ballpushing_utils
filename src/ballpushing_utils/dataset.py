@@ -1,6 +1,6 @@
 from __future__ import annotations
-from Ballpushing_utils.config import Config
-from Ballpushing_utils.behavior_umap import BehaviorUMAP
+from ballpushing_utils.config import Config
+from ballpushing_utils.behavior_umap import BehaviorUMAP
 
 import os
 import pandas as pd
@@ -114,7 +114,7 @@ class Dataset:
 
     def __repr__(self):
 
-        from Ballpushing_utils import Experiment, Fly
+        from ballpushing_utils import Experiment, Fly
 
         # Adapt the repr function to the source attribute
         # If the source is a list, check if it is Fly or Experiment objects

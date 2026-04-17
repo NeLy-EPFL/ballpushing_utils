@@ -3,8 +3,8 @@ from pathlib import Path
 import yaml
 import json
 
-from Ballpushing_utils.fly_metadata import FlyMetadata
-from Ballpushing_utils.experiment import Experiment
+from ballpushing_utils.fly_metadata import FlyMetadata
+from ballpushing_utils.experiment import Experiment
 
 
 def load_yaml_dirs(yaml_path):

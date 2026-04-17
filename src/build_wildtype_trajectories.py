@@ -259,9 +259,9 @@ def process_condition(
         import sys as _sys
 
         _sys.path.append(str(Path(__file__).parent))
-        import Ballpushing_utils
+        import ballpushing_utils
     except ImportError as exc:
-        logging.error(f"Cannot import Ballpushing_utils: {exc}")
+        logging.error(f"Cannot import ballpushing_utils: {exc}")
         return False
 
     fly_dirs = condition_manifest["fly_dir"].tolist()

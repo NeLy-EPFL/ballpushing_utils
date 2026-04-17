@@ -192,7 +192,7 @@ def collect_fly_manifest_by_metadata(
 
 
 def load_flies_from_manifest(manifest: pd.DataFrame) -> list:
-    from Ballpushing_utils import Fly
+    from ballpushing_utils import Fly
 
     flies = []
     for fly_dir in manifest["fly_dir"].tolist():
@@ -217,7 +217,7 @@ def build_dataset_from_yaml_by_metadata(
     max_experiments: Optional[int] = None,
     max_flies_per_value: Optional[int] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    from Ballpushing_utils import Dataset
+    from ballpushing_utils import Dataset
 
     manifest = collect_fly_manifest_by_metadata(
         yaml_path=yaml_path,

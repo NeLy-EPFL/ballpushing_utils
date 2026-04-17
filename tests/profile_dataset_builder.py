@@ -23,8 +23,8 @@ import pandas as pd
 # Add the src directory to the path so we can import the modules
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-import Ballpushing_utils
-from Ballpushing_utils import config
+import ballpushing_utils
+from ballpushing_utils import config
 
 
 class PerformanceProfiler:

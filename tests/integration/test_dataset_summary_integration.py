@@ -16,8 +16,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Import ballpushing utils
-from Ballpushing_utils import Fly, Experiment, Dataset
-from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from ballpushing_utils import Fly, Experiment, Dataset
+from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 
 
 def analyze_dataset_structure(dataset_data, dataset_name, max_rows=10):

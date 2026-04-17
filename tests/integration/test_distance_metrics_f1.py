@@ -22,8 +22,8 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 from utils_behavior import Processing
 
 

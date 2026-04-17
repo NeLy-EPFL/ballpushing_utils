@@ -71,7 +71,7 @@ def load_nickname_mapping():
 
 def load_metrics_list():
     """Load the final metrics list for PCA analysis"""
-    metrics_file = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+    metrics_file = "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
     print(f"📋 Loading metrics from {metrics_file}")
 
     try:

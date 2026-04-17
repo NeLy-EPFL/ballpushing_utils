@@ -1,5 +1,5 @@
 import pandas as pd
-from Ballpushing_utils import utilities
+from ballpushing_utils import utilities
 import numpy as np
 import math
 from utils_behavior import Sleap_utils

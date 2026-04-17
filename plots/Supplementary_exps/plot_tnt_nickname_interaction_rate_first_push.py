@@ -42,7 +42,7 @@ from statsmodels.stats.multitest import multipletests
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from Ballpushing_utils.filtered_dataset_loader import build_dataset_for_nickname_and_control
+from ballpushing_utils.filtered_dataset_loader import build_dataset_for_nickname_and_control
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42

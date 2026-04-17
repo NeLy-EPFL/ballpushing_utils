@@ -13,7 +13,7 @@ import sys
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from Ballpushing_utils import Fly, Experiment, BallPushingMetrics
+from ballpushing_utils import Fly, Experiment, BallPushingMetrics
 
 
 def create_mock_f1_tracking_data():

@@ -2,8 +2,8 @@ from pathlib import Path
 import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 import argparse
 import yaml
 import os

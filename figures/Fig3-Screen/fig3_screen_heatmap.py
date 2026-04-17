@@ -38,7 +38,6 @@ plt.rcParams["font.sans-serif"] = ["Arial"]
 
 warnings.filterwarnings("ignore")
 
-sys.path.append("/home/matthias/ballpushing_utils/src/PCA")
 import Config
 
 # ── PATHS ─────────────────────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ DATA_PATH = (
     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"
     "250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
-METRICS_PATH = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+METRICS_PATH = "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
 REGION_MAP_PATH = "/mnt/upramdya_data/MD/Region_map_250908.csv"
 OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure3") / Path(__file__).stem
 

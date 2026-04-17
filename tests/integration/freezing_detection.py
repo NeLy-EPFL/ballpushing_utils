@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from Ballpushing_utils import Fly, Experiment, Dataset, BallPushingMetrics
+from ballpushing_utils import Fly, Experiment, Dataset, BallPushingMetrics
 from utils_behavior import Utils
 
 ExampleFly_path = (
