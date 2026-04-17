@@ -25,6 +25,7 @@ from .fly_metadata import FlyMetadata
 from .fly_trackingdata import FlyTrackingData
 from .interactions_metrics import InteractionsMetrics
 from .learning_metrics import LearningMetrics
+from .paths import data_root, dataset, figure_output_dir, figures_root, load_dotenv
 from .skeleton_metrics import SkeletonMetrics
 
 __all__ = [
@@ -41,4 +42,9 @@ __all__ = [
     "LearningMetrics",
     "SkeletonMetrics",
     "__version__",
+    "data_root",
+    "dataset",
+    "figure_output_dir",
+    "figures_root",
+    "load_dotenv",
 ]
