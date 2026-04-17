@@ -74,8 +74,15 @@ def permutation_test(
     may be ``"median"``, ``"mean"``, or any callable that accepts a 1-D
     array and returns a float.
 
-    The default ``seed=42`` matches the legacy figure scripts, so refactored
-    code produces identical p-values.
+    Reproducibility
+    ---------------
+    Uses the legacy Mersenne Twister RNG (``np.random.RandomState``) with
+    ``.permutation`` so that calling ``permutation_test(a, b, seed=42)``
+    produces **identical** p-values to the pre-refactor figure scripts,
+    which wrote ``np.random.seed(42)`` followed by ``np.random.permutation``.
+    Unlike ``np.random.seed``, ``RandomState`` does not mutate the global
+    RNG, so calling this function has no observable side effects on other
+    code that relies on the global state.
     """
     a = np.asarray(group_a, dtype=float)
     b = np.asarray(group_b, dtype=float)
@@ -85,11 +92,11 @@ def permutation_test(
     combined = np.concatenate([a, b])
     n_a = a.size
 
-    rng = np.random.default_rng(seed)
+    rng = np.random.RandomState(seed)
     perm_diffs = np.empty(n_permutations, dtype=float)
     for i in range(n_permutations):
-        rng.shuffle(combined)
-        perm_diffs[i] = stat_fn(combined[n_a:]) - stat_fn(combined[:n_a])
+        permuted = rng.permutation(combined)
+        perm_diffs[i] = stat_fn(permuted[n_a:]) - stat_fn(permuted[:n_a])
 
     p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(observed)))
     return PermutationResult(
