@@ -23,6 +23,7 @@ __all__ = [
 
 StatisticName = Literal["median", "mean"]
 StatisticFn = Callable[[NDArray[np.floating]], float]
+PCorrection = Literal["proportion", "plus_one"]
 
 
 @dataclass(frozen=True)
@@ -34,8 +35,10 @@ class PermutationResult:
     observed_diff:
         ``statistic(group_b) - statistic(group_a)`` for the observed data.
     p_value:
-        Two-sided p-value: fraction of permutations with
-        ``abs(perm_diff) >= abs(observed_diff)``.
+        Two-sided p-value. With ``p_correction="proportion"`` (the default)
+        this is ``count / n_permutations`` where ``count`` is the number of
+        permutations with ``abs(perm_diff) >= abs(observed_diff)``. With
+        ``p_correction="plus_one"`` it is ``(count + 1) / (n_permutations + 1)``.
     n_a, n_b:
         Sample sizes of the two groups.
     n_permutations:
@@ -66,6 +69,8 @@ def permutation_test(
     statistic: StatisticName | StatisticFn = "median",
     n_permutations: int = 10_000,
     seed: int | None = 42,
+    rng: np.random.RandomState | np.random.Generator | None = None,
+    p_correction: PCorrection = "proportion",
 ) -> PermutationResult:
     """Two-sided permutation test comparing *group_b* to *group_a*.
 
@@ -74,16 +79,43 @@ def permutation_test(
     may be ``"median"``, ``"mean"``, or any callable that accepts a 1-D
     array and returns a float.
 
+    Parameters
+    ----------
+    rng:
+        Optional pre-constructed RNG. Accepts either ``np.random.RandomState``
+        or ``np.random.Generator`` (i.e. the return value of
+        ``np.random.default_rng``). If supplied, ``seed`` is ignored and the
+        RNG is advanced in-place, which means the caller can share a single
+        RNG across a loop of calls for reproducible joint sequences. If
+        ``None``, a fresh ``RandomState(seed)`` is used, preserving the
+        legacy bit-for-bit behaviour.
+    p_correction:
+        ``"proportion"`` (default) returns ``count / n_permutations``.
+        ``"plus_one"`` returns ``(count + 1) / (n_permutations + 1)``, which
+        is the Laplace-style correction used by some of the screen panels
+        and guarantees a strictly positive p-value.
+
     Reproducibility
     ---------------
-    Uses the legacy Mersenne Twister RNG (``np.random.RandomState``) with
-    ``.permutation`` so that calling ``permutation_test(a, b, seed=42)``
-    produces **identical** p-values to the pre-refactor figure scripts,
-    which wrote ``np.random.seed(42)`` followed by ``np.random.permutation``.
-    Unlike ``np.random.seed``, ``RandomState`` does not mutate the global
-    RNG, so calling this function has no observable side effects on other
-    code that relies on the global state.
+    With the default arguments uses the legacy Mersenne Twister RNG
+    (``np.random.RandomState``) with ``.permutation`` so that calling
+    ``permutation_test(a, b, seed=42)`` produces **identical** p-values to
+    the pre-refactor figure scripts, which wrote ``np.random.seed(42)``
+    followed by ``np.random.permutation``. Unlike ``np.random.seed``,
+    ``RandomState`` does not mutate the global RNG, so calling this
+    function has no observable side effects on other code that relies on
+    the global state.
+
+    Passing ``rng=np.random.default_rng(42)`` with ``statistic="mean"`` and
+    ``p_correction="plus_one"`` reproduces the screen-panel convention used
+    in ``figures/Fig3-Screen/fig3_f1_tnt.py`` bit-for-bit, including when
+    a single ``Generator`` is threaded across several calls.
     """
+    if p_correction not in ("proportion", "plus_one"):
+        raise ValueError(
+            f"p_correction must be 'proportion' or 'plus_one', got {p_correction!r}"
+        )
+
     a = np.asarray(group_a, dtype=float)
     b = np.asarray(group_b, dtype=float)
     stat_fn = _resolve_statistic(statistic)
@@ -92,16 +124,22 @@ def permutation_test(
     combined = np.concatenate([a, b])
     n_a = a.size
 
-    rng = np.random.RandomState(seed)
+    if rng is None:
+        rng = np.random.RandomState(seed)
+
     perm_diffs = np.empty(n_permutations, dtype=float)
     for i in range(n_permutations):
         permuted = rng.permutation(combined)
         perm_diffs[i] = stat_fn(permuted[n_a:]) - stat_fn(permuted[:n_a])
 
-    p_value = float(np.mean(np.abs(perm_diffs) >= np.abs(observed)))
+    count = int(np.sum(np.abs(perm_diffs) >= np.abs(observed)))
+    if p_correction == "plus_one":
+        p_value = (count + 1) / (n_permutations + 1)
+    else:
+        p_value = count / n_permutations
     return PermutationResult(
         observed_diff=float(observed),
-        p_value=p_value,
+        p_value=float(p_value),
         n_a=n_a,
         n_b=b.size,
         n_permutations=n_permutations,
