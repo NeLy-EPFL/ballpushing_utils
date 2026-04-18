@@ -30,12 +30,13 @@ import argparse
 import random
 from pathlib import Path
 
-import matplotlib
 import matplotlib.pyplot as plt
 import pandas as pd
 
-matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType fonts in PDFs
-matplotlib.rcParams["font.family"] = "Arial"
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 
 PX_PER_MM = 500 / 30
@@ -47,15 +48,14 @@ FEEDING_COLORS: dict[str, str] = {
     "starved_noWater": "#8DA0CB",  # blue
 }
 
-DEFAULT_FEATHER = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"
-    "/260220_10_summary_control_folders_Data/coordinates"
-    "/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
+DEFAULT_FEATHER = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data"
+    "/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
 )
-DEFAULT_COORDINATES_DIR = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets" "/260220_10_summary_control_folders_Data/coordinates"
+DEFAULT_COORDINATES_DIR = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates"
 )
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
+DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 
 def load_dataset(feather_path: Path) -> pd.DataFrame:

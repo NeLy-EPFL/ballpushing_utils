@@ -15,7 +15,6 @@ import sys
 import warnings
 from pathlib import Path
 
-import matplotlib
 import matplotlib.font_manager as fm
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -35,15 +34,12 @@ from scipy.stats import mannwhitneyu
 from sklearn.preprocessing import RobustScaler
 from statsmodels.stats.multitest import multipletests
 
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+
 # Rebuild font cache if needed
 fm._load_fontmanager(try_read_cache=False)
-
-plt.rcParams["pdf.fonttype"] = 42
-plt.rcParams["ps.fonttype"] = 42
-plt.rcParams["svg.fonttype"] = "none"
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Arial"]
-
+set_illustrator_style()
 warnings.filterwarnings("ignore")
 
 try:
@@ -54,14 +50,20 @@ except ImportError:
     HAS_SEABORN = False
     print("⚠️  seaborn not available - using matplotlib only")
 
-import Config
+import Config  # noqa: E402 — external module from src/Plotting/Config.py
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-CONSISTENCY_DIR = "/home/matthias/ballpushing_utils/src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
-METRICS_PATH = "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
-OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/EDFigure6") / Path(__file__).stem
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DATA_PATH = dataset(
+    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+)
+CONSISTENCY_DIR = (
+    _REPO_ROOT
+    / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
+)
+METRICS_PATH = _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
+OUTPUT_DIR = figure_output_dir("EDFigure6", __file__, create=False)
 
 MIN_COMBINED_CONSISTENCY = 0.80
 CONTROL_MODE = "tailored"  # "tailored" | "emptysplit" | "tnt_pr"
@@ -265,7 +267,7 @@ def load_consistency_results():
 def load_metrics_list():
     for path in (
         METRICS_PATH,
-        "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca.txt",
+        _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca.txt",
     ):
         if os.path.exists(path):
             with open(path) as f:
@@ -277,7 +279,7 @@ def load_metrics_list():
 
 
 def load_nickname_mapping():
-    region_map_path = "/mnt/upramdya_data/MD/Region_map_250908.csv"
+    region_map_path = dataset("Region_map_250908.csv")
     try:
         region_map = pd.read_csv(region_map_path)
         nickname_mapping = dict(zip(region_map["Nickname"], region_map["Simplified Nickname"]))

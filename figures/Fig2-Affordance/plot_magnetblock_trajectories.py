@@ -18,26 +18,26 @@ Arguments:
     --output-dir: Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/trajectories)
 """
 
-import sys
-import os
 import argparse
+import os
+import sys
 from pathlib import Path
 
-# Add src directory to path for imports
+# Keep sibling scripts importable (legacy; harmless).
 sys.path.append(str(Path(__file__).parent.parent))
 
-import matplotlib
-import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
 
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
+from ballpushing_utils import dataset as dataset_path_for  # noqa: F401 (used below)
+from ballpushing_utils import figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -140,7 +140,9 @@ def bootstrap_ci_difference(group1_data, group2_data, n_bootstrap=10000, ci=95):
 
 def load_coordinates_dataset():
     """Load the MagnetBlock experiments coordinates dataset"""
-    dataset_path = "/mnt/upramdya_data/MD/MagnetBlock/Datasets/251126_10_coordinates_magnet_block_folders_Data/coordinates/pooled_coordinates.feather"
+    dataset_path = dataset_path_for(
+        "MagnetBlock/Datasets/251126_10_coordinates_magnet_block_folders_Data/coordinates/pooled_coordinates.feather"
+    )
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
@@ -701,11 +703,10 @@ def generate_trajectory_plot(data, n_bins=12, n_permutations=10000, output_dir=N
         Show progress bars
     """
     if output_dir is None:
-        output_dir = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure2") / Path(__file__).stem
+        output_dir = figure_output_dir("Figure2", __file__)
     else:
         output_dir = Path(output_dir)
-
-    output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
     print("GENERATING MAGNETBLOCK TRAJECTORY PLOT")
@@ -868,8 +869,11 @@ Examples:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=str(Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure2") / Path(__file__).stem),
-        help="Directory to save plots",
+        default=None,
+        help=(
+            "Directory to save plots. Defaults to "
+            "$BALLPUSHING_FIGURES_ROOT/Figure2/plot_magnetblock_trajectories/."
+        ),
     )
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
