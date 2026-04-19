@@ -239,9 +239,23 @@ re-process raw tracks, the pipeline is:
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # unit tests (fast, no SLEAP data needed)
-pytest tests/integration  # integration tests (require sample data)
+pytest tests/unit         # hermetic suite — no SLEAP data required
+pytest tests/integration  # integration suite — needs BALLPUSHING_DATA_ROOT
 ```
+
+`tests/unit/` runs against stub flies/experiments and is what CI
+executes on every push
+(see [`.github/workflows/tests.yml`](.github/workflows/tests.yml)).
+It covers the diagnostics builders
+(`ballpushing_utils.diagnostics.{event_timeline,metric_report,report}`)
+and the reproducibility contracts of the permutation test
+(`ballpushing_utils.stats.permutation_test`, both the legacy
+`RandomState` / median path and the screen-panel
+`default_rng` / mean / `plus_one` path).
+
+`tests/integration/` is currently mid-triage — see
+[`tests/integration/REVIEW.md`](tests/integration/REVIEW.md) for the
+per-file plan.
 
 Configuration lives in `pyproject.toml` under `[tool.pytest.ini_options]`.
 
