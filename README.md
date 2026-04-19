@@ -44,7 +44,8 @@ ballpushing_utils/
 │   └── Supplementary_exps/     # Supplementary-figure scripts.
 ├── experiments_yaml/           # YAML descriptors of every experiment
 │                               #   batch (genotype, replicate dates, ...).
-├── notebooks/                  # Jupyter walkthroughs (diagnostics demo).
+├── notebooks/                  # Jupyter walkthroughs (Fly/Experiment/
+│                               #   Dataset tour + diagnostics demo).
 ├── tools/                      # CLI / dashboard entry points
 │                               #   (e.g. tools/diagnostics_dashboard.py).
 ├── tests/                      # pytest suite.
@@ -153,6 +154,12 @@ subprocess, and prints a green/red pass-fail summary. Figures land under
 `BALLPUSHING_FIGURES_ROOT`.
 
 ### Use the library on your own recordings
+
+For a guided tour of how `Fly`, `Experiment`, and `Dataset` bind
+tracking data, metadata, and config together — with runnable cells
+against a real fly folder — start with
+[`notebooks/ballpushing_utils_walkthrough.ipynb`](notebooks/ballpushing_utils_walkthrough.ipynb).
+A quick taster:
 
 ```python
 from ballpushing_utils import Experiment
