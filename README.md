@@ -44,6 +44,9 @@ ballpushing_utils/
 │   └── Supplementary_exps/     # Supplementary-figure scripts.
 ├── experiments_yaml/           # YAML descriptors of every experiment
 │                               #   batch (genotype, replicate dates, ...).
+├── notebooks/                  # Jupyter walkthroughs (diagnostics demo).
+├── tools/                      # CLI / dashboard entry points
+│                               #   (e.g. tools/diagnostics_dashboard.py).
 ├── tests/                      # pytest suite.
 ├── run_all_figures.py          # Run every script under figures/.
 ├── pyproject.toml              # Package + dev-tool config.
@@ -197,6 +200,26 @@ fig.savefig(figure_output_dir("MyFig", __file__) / "panel.pdf", dpi=300)
 
 The permutation test seeds the legacy NumPy `RandomState(42)` so the
 p-values it returns match the published values bit-for-bit.
+
+### Diagnostics
+
+When a recording looks wrong (events mis-classified, metrics out of
+range, NaNs appearing) start with the diagnostics layer. The builders
+under `ballpushing_utils.diagnostics` return plain `DataFrame`s +
+`matplotlib.Figure`s, so they're equally at home in a script, a
+notebook, or a dashboard:
+
+- `notebooks/diagnostics_demo.ipynb` walks through `build_event_timeline`
+  and `build_metric_report` against a **stub fly** — runs offline so
+  it doubles as a smoke test for new installs.
+- `python tools/diagnostics_dashboard.py <fly_path>` serves an
+  interactive Panel app with the event table, the Gantt-style timeline
+  (thresholds tweakable via sliders), and the metric-range report.
+- `write_report(...)` materialises any report into a per-run folder
+  with `summary.md`, per-section CSVs, and `plots/*.png`.
+
+The hermetic invariants of these builders are locked down in
+`tests/unit/diagnostics/`, which is what CI runs on every push.
 
 ---
 
