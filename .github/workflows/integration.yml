@@ -1,0 +1,79 @@
+name: integration
+
+# The `tests.yml` workflow runs the fast, hermetic unit suite on every
+# push/PR (no LFS pull). This workflow is heavier: it fetches the Git-LFS
+# sample fly fixtures and runs the data-gated integration suite against
+# them. Keeping the two separate means the unit gate stays quick and
+# free, and the integration gate only runs when we actually want it.
+
+on:
+  # Run nightly so drift gets caught without manual intervention.
+  schedule:
+    - cron: "0 3 * * *"   # 03:00 UTC daily
+
+  # Allow contributors to opt a PR in by adding the `run-integration` label
+  # (or rerun via the Actions tab with `workflow_dispatch`).
+  pull_request:
+    types: [labeled, synchronize]
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: integration tests
+    runs-on: ubuntu-latest
+    # Skip PR runs unless the `run-integration` label is present.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-integration') }}
+
+    steps:
+      - name: Check out repository (with LFS)
+        uses: actions/checkout@v4
+        with:
+          # ``lfs: true`` triggers ``git lfs pull`` automatically so the
+          # sample fly videos + H5 tracks are present in the working tree.
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install ballpushing_utils with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install "utils_behavior @ git+https://github.com/NeLy-EPFL/utils_behavior"
+          pip install -e ".[dev]"
+
+      - name: Sanity-check that LFS payloads actually downloaded
+        run: |
+          # If `git lfs pull` was silently skipped, the files would still
+          # be pointer-stubs (under ~200 bytes). Fail loudly here rather
+          # than inside each data-gated test.
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+          root = Path("tests/fixtures/sample_data")
+          if not root.exists():
+              print(f"{root} missing; nothing to test against.", file=sys.stderr)
+              sys.exit(1)
+          big = [p for p in root.rglob("*") if p.is_file() and p.suffix in {".mp4", ".h5", ".npy"}]
+          pointers = [p for p in big if p.stat().st_size < 1024]
+          if pointers:
+              print("LFS payloads look like pointer stubs, not real data:", file=sys.stderr)
+              for p in pointers[:5]:
+                  print(f"  {p} ({p.stat().st_size} B)", file=sys.stderr)
+              sys.exit(1)
+          print(f"{len(big)} LFS payload(s) resolved, smallest = "
+                f"{min(p.stat().st_size for p in big) / 1024:.1f} KB.")
+          PY
+
+      - name: Run integration tests
+        # ``tests/integration`` expects either BALLPUSHING_DATA_ROOT or
+        # the bundled fixture set. We leave BALLPUSHING_DATA_ROOT unset
+        # so conftest falls back to tests/fixtures/sample_data/.
+        run: pytest tests/integration -v

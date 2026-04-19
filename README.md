@@ -47,8 +47,12 @@ ballpushing_utils/
 ├── notebooks/                  # Jupyter walkthroughs (Fly/Experiment/
 │                               #   Dataset tour + diagnostics demo).
 ├── tools/                      # CLI / dashboard entry points
-│                               #   (e.g. tools/diagnostics_dashboard.py).
-├── tests/                      # pytest suite.
+│                               #   (e.g. tools/diagnostics_dashboard.py,
+│                               #   tools/compress_sample_fly.py).
+├── tests/                      # pytest suite + Git-LFS sample fixtures
+│   ├── unit/                   #   (tests/fixtures/sample_data/ — real fly
+│   ├── integration/            #   videos + SLEAP tracks; see
+│   └── fixtures/               #   tests/fixtures/README.md).
 ├── run_all_figures.py          # Run every script under figures/.
 ├── pyproject.toml              # Package + dev-tool config.
 └── .env.example                # Template for local data/figure paths.
@@ -66,6 +70,11 @@ visibility, etc.) lives in
 Requires **Python ≥ 3.10**.
 
 ```bash
+# Sample videos + SLEAP tracks under tests/fixtures/ are stored via Git LFS.
+# Install it once (https://git-lfs.com), otherwise `git clone` will download
+# LFS-pointer stubs and the data-gated tests + notebooks will stay skipped.
+git lfs install
+
 git clone https://github.com/<TODO-org>/ballpushing_utils.git
 cd ballpushing_utils
 
@@ -82,6 +91,11 @@ pip install -e ".[video]"         # moviepy / pygame for video overlays
 pip install -e ".[dev]"           # pytest, black, ruff
 pip install -e ".[all]"           # everything
 ```
+
+If you only want the source code (no binary assets), prefix the clone with
+`GIT_LFS_SKIP_SMUDGE=1 git clone …` — data-gated tests will skip cleanly.
+See [`tests/fixtures/README.md`](tests/fixtures/README.md) for what's in
+the sample fixture and how to regenerate it from your own recordings.
 
 `ballpushing_utils` depends on
 [`utils_behavior`](https://github.com/labramdya/utils_behavior), the
