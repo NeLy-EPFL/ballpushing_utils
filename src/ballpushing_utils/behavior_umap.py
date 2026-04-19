@@ -6,9 +6,7 @@ from sklearn.cluster import KMeans
 from sklearn.decomposition import IncrementalPCA, PCA
 import umap
 import os
-from ballpushing_utils import dataset
 from numba import njit
-import numpy as np
 
 @njit
 def nan_safe_euclidean(a, b):
