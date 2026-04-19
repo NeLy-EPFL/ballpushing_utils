@@ -13,11 +13,11 @@ from scipy.fft import fft
 import re
 
 
-from moviepy.editor import (
-    VideoFileClip,
-    clips_array,
-    ColorClip,
-)
+# NOTE: ``moviepy`` is only needed for :meth:`Dataset.concatenate_clips`
+# (stitching per-fly event clips into a grid). It's an optional extra
+# (``pip install ballpushing_utils[video]``), so we import it lazily
+# inside the method — keeping the rest of the module importable
+# without moviepy (which CI / hermetic tests rely on).
 
 
 class Dataset:
@@ -1429,7 +1429,24 @@ class Dataset:
         Args:
             clips (list): List of paths to the video clips.
             output_path (str): The path where the grid video will be saved.
+
+        Requires the ``video`` optional dependency
+        (``pip install ballpushing_utils[video]``).
         """
+        try:
+            # moviepy 2.x exposes these at the top level.
+            from moviepy import VideoFileClip, clips_array, ColorClip
+        except ImportError:
+            try:
+                # moviepy 1.x kept them under moviepy.editor.
+                from moviepy.editor import VideoFileClip, clips_array, ColorClip
+            except ImportError as err:
+                raise ImportError(
+                    "Dataset.concatenate_clips requires the 'moviepy' package. "
+                    "Install the optional video extra: "
+                    "`pip install ballpushing_utils[video]`."
+                ) from err
+
         video_clips = [VideoFileClip(clip) for clip in clips]
 
         # Determine the number of rows and columns for the grid

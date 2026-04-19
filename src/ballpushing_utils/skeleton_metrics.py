@@ -3,9 +3,12 @@ from ballpushing_utils import utilities
 import numpy as np
 import math
 from utils_behavior import Sleap_utils
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 from matplotlib import pyplot as plt
-from moviepy.video.fx.speedx import speedx
+
+# NOTE: ``moviepy`` is only needed by the ``generate_*_video`` methods
+# below. It is an optional extra (``pip install ballpushing_utils[video]``)
+# so we import it lazily inside each method, keeping the rest of the
+# module importable on a minimal install (CI hermetic tests, etc.).
 
 
 class SkeletonMetrics:
@@ -601,7 +604,27 @@ class SkeletonMetrics:
     def generate_contacts_video(self, output_path):
         """
         Generate a video of all contact events concatenated with annotations.
+
+        Requires the ``video`` optional dependency
+        (``pip install ballpushing_utils[video]``).
         """
+        try:
+            from moviepy import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips  # moviepy 2.x
+        except ImportError:
+            try:
+                from moviepy.editor import (  # moviepy 1.x
+                    VideoFileClip,
+                    TextClip,
+                    CompositeVideoClip,
+                    concatenate_videoclips,
+                )
+            except ImportError as err:
+                raise ImportError(
+                    "SkeletonMetrics.generate_contacts_video requires the "
+                    "'moviepy' package. Install the optional video extra: "
+                    "`pip install ballpushing_utils[video]`."
+                ) from err
+
         video_clips = []
         video = VideoFileClip(str(self.fly.tracking_data.skeletontrack.video))
 
@@ -649,7 +672,11 @@ class SkeletonMetrics:
             grid_max_contacts (int): Max number of contacts to show in the grid (default 12).
         """
         import math
-        from moviepy.editor import VideoFileClip, vfx, clips_array
+        try:
+            from moviepy import VideoFileClip, vfx, clips_array  # moviepy 2.x
+        except ImportError:
+            from moviepy.editor import VideoFileClip, vfx, clips_array  # moviepy 1.x
+        from moviepy.video.fx.speedx import speedx  # moviepy 1.x API used below
 
         # Get contact-annotated dataset and video
         annotated_df = self.get_contact_annotated_dataset()
@@ -706,7 +733,23 @@ class SkeletonMetrics:
             min_duration_sec (float): Minimum duration (in seconds) for each event.
             slow_factor (int): Slowdown factor (default 1, i.e., no slow down).
         """
-        from moviepy.editor import VideoFileClip, CompositeVideoClip, ColorClip, concatenate_videoclips, vfx
+        try:
+            from moviepy import (  # moviepy 2.x
+                VideoFileClip,
+                CompositeVideoClip,
+                ColorClip,
+                concatenate_videoclips,
+                vfx,
+            )
+        except ImportError:
+            from moviepy.editor import (  # moviepy 1.x
+                VideoFileClip,
+                CompositeVideoClip,
+                ColorClip,
+                concatenate_videoclips,
+                vfx,
+            )
+        from moviepy.video.fx.speedx import speedx  # moviepy 1.x API used below
         import numpy as np
 
         video = VideoFileClip(str(self.fly.tracking_data.skeletontrack.video))
