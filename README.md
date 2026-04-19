@@ -159,6 +159,23 @@ For a guided tour of how `Fly`, `Experiment`, and `Dataset` bind
 tracking data, metadata, and config together — with runnable cells
 against a real fly folder — start with
 [`notebooks/ballpushing_utils_walkthrough.ipynb`](notebooks/ballpushing_utils_walkthrough.ipynb).
+Two companion notebooks drill into the two things most users want
+next:
+
+- [`notebooks/ballpushing_metrics_reference.ipynb`](notebooks/ballpushing_metrics_reference.ipynb)
+  is a live, per-metric reference paired with
+  `src/ballpushing_utils/README_Ballpushing_metrics.md` — every
+  metric in `fly.event_summaries` is printed with its current value
+  and a one-line description.
+- [`notebooks/dataset_types_guide.ipynb`](notebooks/dataset_types_guide.ipynb)
+  tours every `dataset_type` you can request
+  (`summary`, `coordinates`, `fly_positions`, `event_metrics`,
+  `F1_coordinates`, `F1_checkpoints`, `contact_data`,
+  `Skeleton_contacts`, `standardized_contacts`, `transformed`,
+  `transposed`, `behavior_umap`) with subsections for the
+  preconditions (F1 experiment type, skeleton tracks,
+  Learning paradigm, …).
+
 A quick taster:
 
 ```python
