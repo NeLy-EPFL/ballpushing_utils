@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.skeleton_metrics import SkeletonMetrics
 
 if __name__ == "__main__":
     import argparse

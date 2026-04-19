@@ -8,30 +8,26 @@ scatter colored by brain region (alpha 0.48 naive / 0.8 trained).
 Single shared y-axis. Two-line colored titles. Stats annotated.
 """
 
-import os
-from pathlib import Path
 import warnings
+
+import matplotlib.font_manager as fm
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 from statsmodels.stats.multitest import multipletests
 
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+from ballpushing_utils.stats import permutation_test
 
+set_illustrator_style()
 warnings.filterwarnings("ignore")
 fm._load_fontmanager(try_read_cache=False)
 
 # ── PATHS ──────────────────────────────────────────────────────────────────────
-DATA_PATH = (
-    "/mnt/upramdya_data/MD/F1_Tracks/Datasets/"
-    "260123_16_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather"
+DATA_PATH = dataset(
+    "F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather"
 )
-OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure3") / Path(__file__).stem
 
 # ── GENOTYPE CONFIGURATION ─────────────────────────────────────────────────────
 GENOTYPE_ORDER = [
@@ -112,22 +108,6 @@ ALPHA_FDR = 0.05
 
 
 # ── STATISTICS ─────────────────────────────────────────────────────────────────
-def permutation_test(a, b, n_perm=N_PERM, rng=None):
-    """Two-sample permutation test on the mean difference (no blocking)."""
-    if rng is None:
-        rng = np.random.default_rng(42)
-    obs = abs(a.mean() - b.mean())
-    combined = np.concatenate([a, b])
-    n = len(a)
-    count = 0
-    for _ in range(n_perm):
-        perm = rng.permutation(len(combined))
-        shuffled = combined[perm]
-        if abs(shuffled[:n].mean() - shuffled[n:].mean()) >= obs:
-            count += 1
-    return (count + 1) / (n_perm + 1)
-
-
 # FDR correction is applied within each biological group, not across all genotypes.
 # Groups reflect which comparisons are scientifically related.
 STAT_GROUPS = [
@@ -138,7 +118,14 @@ STAT_GROUPS = [
 
 
 def run_stats(panel_data):
-    """Permutation test naive vs trained per genotype, BH-FDR within each brain-region group."""
+    """Permutation test naive vs trained per genotype, BH-FDR within each brain-region group.
+
+    A single ``np.random.default_rng(42)`` is threaded through every
+    call so the joint permutation sequence matches the previously
+    published p-values bit-for-bit. ``p_correction="plus_one"`` applies
+    the Laplace ``(count + 1) / (n_perm + 1)`` convention used by the
+    screen panels.
+    """
     rng = np.random.default_rng(42)
     result = {}
     for group in STAT_GROUPS:
@@ -147,7 +134,16 @@ def run_stats(panel_data):
             naive = panel_data[g].get("n", np.array([]))
             trained = panel_data[g].get("y", np.array([]))
             if len(naive) >= 2 and len(trained) >= 2:
-                pvals.append(permutation_test(naive, trained, rng=rng))
+                pvals.append(
+                    permutation_test(
+                        naive,
+                        trained,
+                        statistic="mean",
+                        n_permutations=N_PERM,
+                        rng=rng,
+                        p_correction="plus_one",
+                    ).p_value
+                )
                 gts.append(g)
         if not pvals:
             continue
@@ -309,8 +305,8 @@ def plot_figure(df):
             multialignment="center",
         )
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    path = os.path.join(OUTPUT_DIR, "fig3_f1_tnt.pdf")
+    out_dir = figure_output_dir("Figure3", __file__)
+    path = out_dir / "fig3_f1_tnt.pdf"
     plt.savefig(path, dpi=300, bbox_inches="tight")
     print(f"Saved: {path}")
     plt.close(fig)

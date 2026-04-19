@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import time
-from Ballpushing_utils import Fly, Experiment, BallPushingMetrics
+from ballpushing_utils import Fly, Experiment, BallPushingMetrics
 from utils_behavior import Utils
 import inspect
 import warnings

@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from Ballpushing_utils import Fly
+from ballpushing_utils import Fly
 
 
 def test_time_range(fly_path, time_ranges):

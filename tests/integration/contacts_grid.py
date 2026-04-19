@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.skeleton_metrics import SkeletonMetrics
 
 if __name__ == "__main__":
     # Example usage: python contacts_grid.py --fly_dir /path/to/fly_dir --output /tmp/contacts_grid.mp4

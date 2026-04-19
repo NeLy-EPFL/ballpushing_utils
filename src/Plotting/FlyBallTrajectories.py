@@ -5,9 +5,9 @@ import numpy as np
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from Ballpushing_utils.fly import Fly
-from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
-from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from ballpushing_utils.fly import Fly
+from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+from ballpushing_utils.skeleton_metrics import SkeletonMetrics
 
 # Example fly directory
 exFly = Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/240104_TNT_Fine_1_Videos_Tracked/arena9/corridor5")

@@ -1,5 +1,12 @@
 # Tests outputs
 test/integration/outputs/umap_optimisation/
+tests/integration/outputs/
+
+# macOS / editor cruft
+.DS_Store
+._*
+.vscode/
+.idea/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

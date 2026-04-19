@@ -40,7 +40,7 @@ import pandas as pd
 
 sys.path.append(str(Path(__file__).parent))
 
-from Ballpushing_utils.filtered_dataset_loader import (
+from ballpushing_utils.filtered_dataset_loader import (
     build_dataset_for_nickname_and_control,
     build_dataset_from_yaml_by_metadata,
     load_experiment_directories_from_yaml,

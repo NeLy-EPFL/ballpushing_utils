@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
-from Ballpushing_utils import Fly, Experiment
+from ballpushing_utils import Fly, Experiment
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -392,7 +392,7 @@ def test_preprocessing(fly):
     if not hasattr(fly, "skeleton_metrics") or fly.skeleton_metrics is None:
         print("No skeleton metrics found. Creating SkeletonMetrics object...")
         try:
-            from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
+            from ballpushing_utils.skeleton_metrics import SkeletonMetrics
 
             # First check the raw ball data columns before preprocessing
             raw_ball_data = fly.tracking_data.raw_balltrack.objects[0].dataset

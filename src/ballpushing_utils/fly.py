@@ -3,22 +3,25 @@ from pathlib import Path
 import cv2
 import datetime
 import numpy as np
-import pygame
 import os
 import gc
 from functools import lru_cache
-from moviepy.editor import VideoFileClip, VideoClip
-from moviepy.video.fx.speedx import speedx
+
+# NOTE: ``moviepy`` and ``pygame`` are only used by :meth:`Fly.generate_preview`
+# (rendering a sped-up preview video). Both are optional extras
+# (``pip install ballpushing_utils[video]``) so we import them lazily
+# inside the method, keeping the rest of this module importable on a
+# minimal install (e.g. CI running ``pytest tests/unit``).
 
 from utils_behavior import Utils
 
-from Ballpushing_utils.fly_trackingdata import FlyTrackingData
-from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
-from Ballpushing_utils.skeleton_metrics import SkeletonMetrics
-from Ballpushing_utils.learning_metrics import LearningMetrics
-from Ballpushing_utils.f1_metrics import F1Metrics
-from Ballpushing_utils.interactions_metrics import InteractionsMetrics
-from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+from ballpushing_utils.fly_trackingdata import FlyTrackingData
+from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from ballpushing_utils.skeleton_metrics import SkeletonMetrics
+from ballpushing_utils.learning_metrics import LearningMetrics
+from ballpushing_utils.f1_metrics import F1Metrics
+from ballpushing_utils.interactions_metrics import InteractionsMetrics
+from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 
 
 class Fly:
@@ -53,8 +56,8 @@ class Fly:
             flyball_positions (DataFrame): The coordinates of the fly and the ball, obtained by calling the get_coordinates function with the flytrack and balltrack paths.
         """
 
-        from Ballpushing_utils.experiment import Experiment
-        from Ballpushing_utils.fly_metadata import FlyMetadata
+        from ballpushing_utils.experiment import Experiment
+        from ballpushing_utils.fly_metadata import FlyMetadata
 
         self.directory = Path(directory)
 
@@ -118,7 +121,7 @@ class Fly:
                 self.flyball_positions = ball_df.copy()
             # Add percent_completion column if rel_x_ball is present
             if self.flyball_positions is not None and "rel_x_ball" in self.flyball_positions:
-                from Ballpushing_utils.trajectory_metrics import TrajectoryMetrics
+                from ballpushing_utils.trajectory_metrics import TrajectoryMetrics
 
                 ball_x_metrics = TrajectoryMetrics(self)
                 self.flyball_positions["percent_completion"] = ball_x_metrics.percent_completion()
@@ -560,7 +563,47 @@ class Fly:
         save (bool, optional): Whether to save the sped up video. If True, the video is saved. If False, the video is previewed using Pygame. Defaults to False.
         output_path (str, optional): The path to save the sped up video. If not provided and save is True, a default path will be used. Defaults to None.
         tracks (dict, optional): A dictionary containing the tracking data for the fly and ball. Each key should be a string ('fly' or 'ball') and each value should be a numpy array with the x and y coordinates for each frame. Defaults to None.
+
+        Requires the ``video`` optional dependency
+        (``pip install ballpushing_utils[video]``).
         """
+        # Lazy import — keep the rest of the module importable without
+        # the ``video`` extra installed.
+        try:
+            from moviepy import VideoFileClip, VideoClip  # moviepy 2.x
+        except ImportError:
+            try:
+                from moviepy.editor import VideoFileClip, VideoClip  # moviepy 1.x
+            except ImportError as err:
+                raise ImportError(
+                    "Fly.generate_preview requires the 'moviepy' package. "
+                    "Install the optional video extra: "
+                    "`pip install ballpushing_utils[video]`."
+                ) from err
+        try:
+            from moviepy.video.fx.speedx import speedx
+        except ImportError as err:
+            # moviepy 2.x reorganised this submodule (``MultiplySpeed`` /
+            # ``.with_speed``). The call site below uses the legacy
+            # ``clip.fx(speedx, speed)`` API, so surface a clear error if
+            # users are on 2.x. Pin ``moviepy<2`` in that case, or update
+            # this method to the new API.
+            raise ImportError(
+                "Fly.generate_preview relies on moviepy's legacy "
+                "`moviepy.video.fx.speedx.speedx`; this module was "
+                "removed in moviepy 2.x. Install moviepy<2 (e.g. "
+                "`pip install 'moviepy<2'`) or port this method to "
+                "the 2.x API."
+            ) from err
+        if preview:
+            try:
+                import pygame
+            except ImportError as err:
+                raise ImportError(
+                    "Fly.generate_preview(preview=True) requires 'pygame'. "
+                    "Install the optional video extra: "
+                    "`pip install ballpushing_utils[video]`."
+                ) from err
 
         if save and output_path is None:
             # Use the default output path

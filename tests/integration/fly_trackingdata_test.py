@@ -19,9 +19,9 @@ import traceback
 # Add src to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from Ballpushing_utils.fly_trackingdata import FlyTrackingData
-from Ballpushing_utils.experiment import Experiment
-from Ballpushing_utils import Fly
+from ballpushing_utils.fly_trackingdata import FlyTrackingData
+from ballpushing_utils.experiment import Experiment
+from ballpushing_utils import Fly
 
 
 # Removed mock config - using actual fly config for real integration testing

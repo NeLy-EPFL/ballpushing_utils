@@ -14,7 +14,7 @@ DATA_SOURCES = {
         # Auto-detect Sparse PCA vs regular PCA files
         "pca_data_file": "src/PCA/best_pca_analysis/best_pca_with_metadata.feather",  # Updated for Sparse PCA
         "pca_data_file_fallback": "src/PCA/static_pca_with_metadata_tailoredctrls.feather",  # Fallback to regular PCA
-        "static_results_file": "/home/matthias/ballpushing_utils/src/PCA/best_pca_analysis/best_pca_stats_results.csv",  # Updated for Sparse PCA
+        "static_results_file": "/home/matthias/ballpushing_utils/src/Screen_analysis/best_pca_analysis/best_pca_stats_results.csv",  # Updated for Sparse PCA
         "static_results_file_fallback": "src/PCA/static_pca_stats_results_allmethods_tailoredctrls.csv",  # Fallback
         "pca_columns": [
             "SparsePCA1",
@@ -189,7 +189,7 @@ STATIC_STYLES = {
 # Output filename templates
 
 # Base output directory for all PCA matrices
-PCA_MATRICES_DIR = "/home/matthias/ballpushing_utils/src/PCA/best_pca_analysis/PCA_matrices"
+PCA_MATRICES_DIR = "/home/matthias/ballpushing_utils/src/Screen_analysis/best_pca_analysis/PCA_matrices"
 
 
 def get_output_filename(plot_type, style_type="static"):

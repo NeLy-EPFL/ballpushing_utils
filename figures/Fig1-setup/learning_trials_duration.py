@@ -10,26 +10,22 @@ Author: MD
 Date: 2025-03-20
 """
 
-import sys
+import datetime
+from itertools import combinations
 from pathlib import Path
 
-
-import matplotlib
-
-# matplotlib.rcParams["text.usetex"] = True
-matplotlib.rcParams["pdf.fonttype"] = 42
-
-matplotlib.rcParams["font.family"] = "Arial"
-
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow.feather as feather
-import matplotlib.pyplot as plt
-import seaborn as sns
 import scipy.stats as stats
+import seaborn as sns
 from statsmodels.stats.multitest import multipletests
-from itertools import combinations
-import datetime
+
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 
 def load_annotated_data(data_path):
@@ -560,10 +556,8 @@ def main():
     print("=" * 60 + "\n")
 
     # Configuration
-    data_file = Path(
-        "/mnt/upramdya_data/MD/BallPushing_Learning/Datasets/" "250318_Datasets/250320_Annotated_data.feather"
-    )
-    output_dir = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
+    data_file = dataset("BallPushing_Learning/Datasets/250318_Datasets/250320_Annotated_data.feather")
+    output_dir = figure_output_dir("Figure1", __file__)
     min_trials = 4
 
     # Load data

@@ -3,11 +3,10 @@
 import sys
 import os
 
-sys.path.append("/home/matthias/ballpushing_utils/src")
 
 from pathlib import Path
-import Ballpushing_utils
-from Ballpushing_utils.config import Config
+import ballpushing_utils
+from ballpushing_utils.config import Config
 
 
 def test_contact_standardized_events():

@@ -1,6 +1,6 @@
 import argparse
 from pathlib import Path
-from Ballpushing_utils import Experiment
+from ballpushing_utils import Experiment
 
 
 def test_time_range_experiment(exp_path, time_ranges):

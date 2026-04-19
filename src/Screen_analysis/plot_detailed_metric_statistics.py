@@ -63,7 +63,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # Use August dataset matching the reproduced original analysis
 DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
 # Use the exact reproduced analysis (August dataset, Triple test, 20 configs, edge cases disabled)
-CONSISTENCY_DIR = "/home/matthias/ballpushing_utils/src/PCA/pca_analysis_results_tailored_20251219_163028/data_files"
+CONSISTENCY_DIR = "/home/matthias/ballpushing_utils/src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
 # Default metrics path relative to this script for robustness
 METRICS_PATH = os.path.join(SCRIPT_DIR, "metrics_lists", "final_metrics_for_pca_alt.txt")
 

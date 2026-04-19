@@ -3,7 +3,6 @@
 import sys
 import os
 
-sys.path.append("/home/matthias/ballpushing_utils/src")
 
 import pandas as pd
 import numpy as np

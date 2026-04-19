@@ -12,22 +12,29 @@ import argparse
 import random
 from pathlib import Path
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial"]
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["lines.linewidth"] = 1
-matplotlib.rcParams["xtick.major.width"] = 2
-matplotlib.rcParams["ytick.major.width"] = 2
-matplotlib.rcParams["axes.spines.top"] = False
-matplotlib.rcParams["axes.spines.right"] = False
-matplotlib.rcParams["axes.linewidth"] = 2
-matplotlib.rcParams["font.size"] = 20
+from ballpushing_utils import figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
 
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1") / Path(__file__).stem
+# This panel uses a heavier line style than the per-panel norm (thick spines,
+# 20 pt base font) because it's a schematic rather than data. The shared
+# Illustrator style handles fonttype + sans-serif fallback; the ``extra``
+# dict pins the schematic-specific tweaks.
+set_illustrator_style(
+    font_size=20,
+    line_width=2,
+    extra={
+        "lines.linewidth": 1,
+        "xtick.major.width": 2,
+        "ytick.major.width": 2,
+        "axes.spines.top": False,
+        "axes.spines.right": False,
+    },
+)
+
+DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 
 def sim_reinforced_walk(num_steps, momentum=0.5, initial_p=0.5, delta=0.1, min_position=0, max_ball=np.inf):

@@ -13,24 +13,23 @@ import argparse
 from pathlib import Path
 
 import cv2
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.patches import Circle
 from scipy.ndimage import gaussian_filter
 
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "Arial"
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 # --- Paths ---
-TEMPLATE_PATH = Path("/mnt/upramdya_data/MD/F1_Tracks/F1_New_Template.png")
-DATASET_PATH = Path(
-    "/mnt/upramdya_data/MD/F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather"
+TEMPLATE_PATH = dataset("F1_Tracks/F1_New_Template.png")
+DATASET_PATH = dataset(
+    "F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather"
 )
-VIDEOS_BASE = Path("/mnt/upramdya_data/MD/F1_Tracks/Videos/251008_F1_New_Videos_Checked")
-OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure2") / Path(__file__).stem
+VIDEOS_BASE = dataset("F1_Tracks/Videos/251008_F1_New_Videos_Checked")
 
 # --- Parameters ---
 BINS = 100
@@ -196,7 +195,7 @@ def build_heatmap(data, template_shape, bins=BINS, blur_sigma=BLUR_SIGMA):
 
 
 def main(test_mode=False):
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    output_dir = figure_output_dir("Figure2", __file__)
 
     # Load template
     print("Loading template...")
@@ -507,7 +506,7 @@ def main(test_mode=False):
                 clip_on=False,
             )
 
-        out_path = OUTPUT_DIR / f"fig2_heatmaps_pretraining_{strategy_name}.pdf"
+        out_path = output_dir / f"fig2_heatmaps_pretraining_{strategy_name}.pdf"
         fig.savefig(out_path, dpi=300, bbox_inches="tight", format="pdf")
         plt.close(fig)
         print(f"  Saved: {out_path}")

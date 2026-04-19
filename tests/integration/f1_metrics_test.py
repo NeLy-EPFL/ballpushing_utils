@@ -25,7 +25,7 @@ from datetime import datetime
 # Add the src directory to the path for imports
 sys.path.append(str(Path(__file__).parent.parent.parent / "src"))
 
-from Ballpushing_utils import Fly, Experiment, BallPushingMetrics, F1Metrics
+from ballpushing_utils import Fly, Experiment, BallPushingMetrics, F1Metrics
 
 
 def convert_to_serializable(obj):

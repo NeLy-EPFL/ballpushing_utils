@@ -29,7 +29,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../src"))
 # Add the src directory to the path for imports
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from Ballpushing_utils import Fly
+from ballpushing_utils import Fly
 
 
 class F1PrematureExitTester:

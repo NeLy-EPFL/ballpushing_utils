@@ -14,8 +14,8 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../../src"))
 
 import pandas as pd
 import numpy as np
-import Ballpushing_utils
-from Ballpushing_utils.config import Config
+import ballpushing_utils
+from ballpushing_utils.config import Config
 
 
 def test_dataset_generation_with_missing_flies(detailed_debug=True):

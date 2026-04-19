@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 # Import the original dataset_builder module
 import dataset_builder
-import Ballpushing_utils
+import ballpushing_utils
 
 
 class DatasetBuilderProfiler:

@@ -7,19 +7,20 @@ Figure size: 17.5728 cm × 8.5672 cm.
 """
 
 import os
-from pathlib import Path
-import sys
 import warnings
+from pathlib import Path
 
-import numpy as np
-import pandas as pd
-import matplotlib
-import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 from statsmodels.stats.multitest import multipletests
+
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.plotting import set_illustrator_style
 
 try:
     import seaborn as sns
@@ -29,26 +30,21 @@ except ImportError:
     HAS_SEABORN = False
 
 fm._load_fontmanager(try_read_cache=False)
-
-plt.rcParams["pdf.fonttype"] = 42
-plt.rcParams["ps.fonttype"] = 42
-plt.rcParams["svg.fonttype"] = "none"
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["font.sans-serif"] = ["Arial"]
-
+set_illustrator_style()
 warnings.filterwarnings("ignore")
 
-sys.path.append("/home/matthias/ballpushing_utils/src/PCA")
-import Config
+import Config  # noqa: E402 — external module from src/Plotting/Config.py
 
 # ── PATHS ─────────────────────────────────────────────────────────────────────
-DATA_PATH = (
-    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"
-    "250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+DATA_PATH = dataset(
+    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
-METRICS_PATH = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
-REGION_MAP_PATH = "/mnt/upramdya_data/MD/Region_map_250908.csv"
-OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure3") / Path(__file__).stem
+METRICS_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
+)
+REGION_MAP_PATH = dataset("Region_map_250908.csv")
+OUTPUT_DIR = figure_output_dir("Figure3", __file__, create=False)
 
 # ── TILE DIMENSIONS ───────────────────────────────────────────────────────────
 TILE_W_CM = 0.6284  # width per heatmap tile in cm

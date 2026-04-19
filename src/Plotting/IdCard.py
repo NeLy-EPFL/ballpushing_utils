@@ -214,7 +214,7 @@ if __name__ == "__main__":
                 summary_data["Simplified region"] = summary_data["Brain region"]
 
             # Load metrics from the same file as used in Mann-Whitney analysis
-            metrics_file = "/home/matthias/ballpushing_utils/src/PCA/metrics_lists/final_metrics_for_pca_alt.txt"
+            metrics_file = "/home/matthias/ballpushing_utils/src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
             try:
                 with open(metrics_file, "r") as f:
                     all_metric_names = [line.strip() for line in f if line.strip()]
@@ -468,7 +468,7 @@ if __name__ == "__main__":
             pca_hit_details = ""
 
             try:
-                pca_stats_path = "/home/matthias/ballpushing_utils/src/PCA/best_pca_analysis/best_pca_stats_results.csv"
+                pca_stats_path = "/home/matthias/ballpushing_utils/src/Screen_analysis/best_pca_analysis/best_pca_stats_results.csv"
                 pca_stats = pd.read_csv(pca_stats_path)
 
                 # Check if nickname exists in the PCA results (match by genotype column)

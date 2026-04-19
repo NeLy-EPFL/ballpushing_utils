@@ -15,8 +15,8 @@ import yaml  # Import PyYAML for parsing YAML files
 import argparse  # For command-line arguments
 from concurrent.futures import ThreadPoolExecutor
 import logging  # For improved logging
-import Ballpushing_utils
-from Ballpushing_utils import utilities, config
+import ballpushing_utils
+from ballpushing_utils import utilities, config
 
 # ==================================================================
 # INTRODUCTION AND EXAMPLE USAGE

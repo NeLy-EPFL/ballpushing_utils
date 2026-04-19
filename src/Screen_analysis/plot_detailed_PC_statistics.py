@@ -1453,7 +1453,7 @@ def main():
         )
 
         # If explicit loadings CSV is available, create a mixed dendrogram:
-        loadings_csv = "/home/matthias/ballpushing_utils/src/PCA/best_pca_analysis/best_pca_loadings.csv"
+        loadings_csv = "/home/matthias/ballpushing_utils/src/Screen_analysis/best_pca_analysis/best_pca_loadings.csv"
         if os.path.exists(loadings_csv):
             print(f"\n🎯 Creating mixed dendrogram using PC loadings from: {loadings_csv}")
             plot_two_way_dendrogram_mixed(

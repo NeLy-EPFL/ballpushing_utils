@@ -1,5 +1,5 @@
 import numpy as np
-from Ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 
 
 class InteractionsMetrics:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from Ballpushing_utils import Experiment, Fly, Config
+from ballpushing_utils import Experiment, Fly, Config
 
 
 def test_spontaneous_movement_detection():

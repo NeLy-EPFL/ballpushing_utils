@@ -221,7 +221,7 @@ def filter_experiments(source, **criteria):
     Returns:
         list: A list of Experiment objects that match the criteria.
     """
-    from Ballpushing_utils import Fly
+    from ballpushing_utils import Fly
 
     flies = []
 
@@ -254,7 +254,7 @@ def load_fly(
     # experiment_type,
     custom_config,
 ):
-    from Ballpushing_utils import Fly
+    from ballpushing_utils import Fly
 
     print(f"Loading fly from {mp4_file.parent}")
     try:
@@ -287,7 +287,7 @@ def load_fly_worker(mp4_file, experiment_data, custom_config):
     Returns:
         Fly object if successful, None otherwise
     """
-    from Ballpushing_utils import Fly
+    from ballpushing_utils import Fly
 
     print(f"Loading fly from {mp4_file.parent} (worker)")
     try:
