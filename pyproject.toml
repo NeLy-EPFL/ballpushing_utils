@@ -60,6 +60,9 @@ dependencies = [
     "opencv-contrib-python>=4.9",
     "icecream>=2.1",
     "umap-learn>=0.5",
+    # ``tabulate`` is the backend used by ``pandas.DataFrame.to_markdown``,
+    # which the diagnostics report writer inlines for table previews.
+    "tabulate>=0.9",
     # `utils_behavior` is a lab-internal package used throughout the codebase.
     # Install from GitHub: https://github.com/NeLy-EPFL/utils_behavior
     "utils_behavior",
