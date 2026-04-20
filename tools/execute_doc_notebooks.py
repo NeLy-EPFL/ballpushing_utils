@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -109,10 +108,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if shutil.which("jupyter") is None and not _has_importable("jupyter"):
+    # Probe the SAME python we'll spawn via sys.executable -m jupyter.
+    # Don't trust shutil.which — it inspects PATH, which routinely diverges
+    # from sys.executable when a conda base and a .venv are layered.
+    if not _has_importable("jupyter") or not _has_importable("nbconvert"):
         sys.exit(
-            "[x] jupyter is not installed in this Python environment.\n"
-            "    Install with: pip install jupyter nbconvert"
+            "[x] jupyter / nbconvert are not installed in the Python that will run this script:\n"
+            f"      {sys.executable}\n"
+            f"    Install them into that interpreter with:\n"
+            f"      {sys.executable} -m pip install jupyter nbconvert ipykernel"
         )
 
     _check_fixture(SAMPLE_FLY, "canonical fly")
