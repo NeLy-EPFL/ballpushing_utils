@@ -25,9 +25,7 @@ warnings.filterwarnings("ignore")
 fm._load_fontmanager(try_read_cache=False)
 
 # ── PATHS ──────────────────────────────────────────────────────────────────────
-DATA_PATH = dataset(
-    "F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather"
-)
+DATA_PATH = dataset("F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/summary/pooled_summary.feather")
 
 # ── GENOTYPE CONFIGURATION ─────────────────────────────────────────────────────
 GENOTYPE_ORDER = [
@@ -125,25 +123,29 @@ def run_stats(panel_data):
     published p-values bit-for-bit. ``p_correction="plus_one"`` applies
     the Laplace ``(count + 1) / (n_perm + 1)`` convention used by the
     screen panels.
+
+    Returns a tuple ``(corr_pvals, raw_pvals)`` where both are dicts
+    mapping genotype → p-value.
     """
     rng = np.random.default_rng(42)
     result = {}
+    raw_result = {}
     for group in STAT_GROUPS:
         pvals, gts = [], []
         for g in group:
             naive = panel_data[g].get("n", np.array([]))
             trained = panel_data[g].get("y", np.array([]))
             if len(naive) >= 2 and len(trained) >= 2:
-                pvals.append(
-                    permutation_test(
-                        naive,
-                        trained,
-                        statistic="mean",
-                        n_permutations=N_PERM,
-                        rng=rng,
-                        p_correction="plus_one",
-                    ).p_value
-                )
+                p = permutation_test(
+                    naive,
+                    trained,
+                    statistic="mean",
+                    n_permutations=N_PERM,
+                    rng=rng,
+                    p_correction="plus_one",
+                ).p_value
+                pvals.append(p)
+                raw_result[g] = p
                 gts.append(g)
         if not pvals:
             continue
@@ -152,24 +154,12 @@ def run_stats(panel_data):
         else:
             pvals_corr = pvals  # single test: no correction needed
         result.update(zip(gts, pvals_corr))
-    return result
+    return result, raw_result
 
 
 # ── DATA LOADING ───────────────────────────────────────────────────────────────
-def load_data():
-    df = pd.read_feather(DATA_PATH)
-    if "ball_identity" in df.columns:
-        df = df[df["ball_identity"] == "test"].copy()
-    df = df[df["Genotype"].isin(GENOTYPE_ORDER)].copy()
-    print(f"  Rows: {len(df)}")
-    return df
-
-
-# ── PLOTTING ───────────────────────────────────────────────────────────────────
-def plot_figure(df):
-    rng = np.random.default_rng(42)
-
-    # Collect data (convert px → mm)
+def prepare_panel_data(df):
+    """Convert raw DataFrame to per-genotype, per-pretraining arrays (px → mm)."""
     panel_data = {}
     all_vals = []
     for g in GENOTYPE_ORDER:
@@ -181,6 +171,58 @@ def plot_figure(df):
             panel_data[g][p] = vals
             if len(vals):
                 all_vals.append(vals)
+    return panel_data, all_vals
+
+
+def build_stats_df(panel_data, raw_pvals, corr_pvals):
+    """Assemble a tidy stats DataFrame for the figure."""
+    # Derive FDR group label for each genotype
+    fdr_group = {}
+    for group in STAT_GROUPS:
+        label = " | ".join(group)
+        for g in group:
+            fdr_group[g] = label
+
+    rows = []
+    for g in GENOTYPE_ORDER:
+        naive_vals = panel_data[g].get("n", np.array([]))
+        trained_vals = panel_data[g].get("y", np.array([]))
+        p_raw = raw_pvals.get(g, np.nan)
+        p_corr = corr_pvals.get(g, np.nan)
+        if pd.notna(p_corr):
+            annot = "***" if p_corr < 0.001 else "**" if p_corr < 0.01 else "*" if p_corr < ALPHA_FDR else "ns"
+        else:
+            annot = "n/a"
+        rows.append(
+            {
+                "genotype": g,
+                "fdr_group": fdr_group.get(g, ""),
+                "metric": METRIC,
+                "n_naive": len(naive_vals),
+                "n_trained": len(trained_vals),
+                "mean_naive_mm": float(np.mean(naive_vals)) if len(naive_vals) > 0 else np.nan,
+                "mean_trained_mm": float(np.mean(trained_vals)) if len(trained_vals) > 0 else np.nan,
+                "p_value_raw": p_raw,
+                "p_value_corrected_fdr_bh": p_corr,
+                "significant": pd.notna(p_corr) and p_corr < ALPHA_FDR,
+                "annotation": annot,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def load_data():
+    df = pd.read_feather(DATA_PATH)
+    if "ball_identity" in df.columns:
+        df = df[df["ball_identity"] == "test"].copy()
+    df = df[df["Genotype"].isin(GENOTYPE_ORDER)].copy()
+    print(f"  Rows: {len(df)}")
+    return df
+
+
+# ── PLOTTING ───────────────────────────────────────────────────────────────────
+def plot_figure(panel_data, all_vals, pval_by_genotype):
+    rng = np.random.default_rng(42)
 
     # Fixed y limits: 0–8 mm, sharp
     y_min = 0.0
@@ -198,9 +240,6 @@ def plot_figure(df):
     _annot_bot = _bottom_f + _h_f * (BAR_Y + 0.03) / y_max  # annotation text base in fig fraction
     _stars_h = FONT_STARS / 72.0 / FIG_H  # one line of FONT_STARS in fig fraction
     TITLE_Y = _annot_bot + _stars_h + 0.008  # title bottom sits just above annotation
-
-    # Stats
-    pval_by_genotype = run_stats(panel_data)
 
     # x positions: two boxes per panel centered at 1.0 and 2.0
     pos = np.array([1.0, 2.0])
@@ -316,9 +355,17 @@ def plot_figure(df):
 def main():
     print("Loading data...")
     df = load_data()
+    print("Preparing data...")
+    panel_data, all_vals = prepare_panel_data(df)
     print("Running stats...")
+    pval_by_genotype, raw_pvals = run_stats(panel_data)
     print("Plotting...")
-    plot_figure(df)
+    plot_figure(panel_data, all_vals, pval_by_genotype)
+    out_dir = figure_output_dir("Figure3", __file__)
+    stats_df = build_stats_df(panel_data, raw_pvals, pval_by_genotype)
+    stats_path = out_dir / "fig3_f1_tnt_stats.csv"
+    stats_df.to_csv(stats_path, index=False)
+    print(f"Saved stats: {stats_path}")
     print("Done.")
 
 
