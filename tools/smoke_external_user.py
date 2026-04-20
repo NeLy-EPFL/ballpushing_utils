@@ -63,15 +63,44 @@ def main() -> None:
     magnetblock_fly: Fly | None = None
     magnetblock_exp: Experiment | None = None
 
+    def _assert_fly_loaded(fly: Fly, label: str) -> None:
+        """Force ``Fly.tracking_data`` and complain loudly if it is invalid.
+
+        ``Fly.__init__`` is lenient: it catches load errors, sets
+        ``tracking_data.valid_data = False``, and returns a usable-looking
+        object. That's the right behaviour for batch processing across
+        thousands of flies, but it makes the smoke test misleading — we
+        want a hard failure if a fixture fly doesn't actually load.
+        """
+        td = fly.tracking_data
+        if td is None or not getattr(td, "valid_data", False):
+            raise RuntimeError(
+                f"{label}: tracking data is invalid (valid_data=False). "
+                "Re-run with custom_config={'debugging': True} to see the "
+                "underlying traceback. Most often this is a savgol/NaN "
+                "issue from utils_behavior."
+            )
+        print(f"    valid_data=True")
+
+    def _assert_experiment_has_flies(exp: Experiment, label: str) -> None:
+        if len(exp.flies) == 0:
+            raise RuntimeError(
+                f"{label}: 0 flies loaded. Underlying Fly load probably "
+                "failed silently — try the per-fly debug recipe in the "
+                "smoke test docstring."
+            )
+        print(f"    {len(exp.flies)} fly/flies loaded, fps={exp.fps}")
+
     def load_nonf1_fly() -> None:
         nonlocal nonf1_fly
         nonf1_fly = Fly(nonf1_fly_path, as_individual=True)
         print(f"    {nonf1_fly!r}")
+        _assert_fly_loaded(nonf1_fly, "Non-F1 fly")
 
     def load_nonf1_experiment() -> None:
         nonlocal nonf1_exp
         nonf1_exp = Experiment(nonf1_exp_path)
-        print(f"    {len(nonf1_exp.flies)} flies, fps={nonf1_exp.fps}")
+        _assert_experiment_has_flies(nonf1_exp, "Non-F1 experiment")
 
     def load_f1_fly() -> None:
         nonlocal f1_fly
@@ -81,6 +110,7 @@ def main() -> None:
             custom_config={"experiment_type": "F1"},
         )
         print(f"    {f1_fly!r}")
+        _assert_fly_loaded(f1_fly, "F1 fly")
 
     def load_f1_experiment() -> None:
         nonlocal f1_exp
@@ -88,17 +118,18 @@ def main() -> None:
             f1_exp_path,
             custom_config={"experiment_type": "F1"},
         )
-        print(f"    {len(f1_exp.flies)} flies, fps={f1_exp.fps}")
+        _assert_experiment_has_flies(f1_exp, "F1 experiment")
 
     def load_magnetblock_fly() -> None:
         nonlocal magnetblock_fly
         magnetblock_fly = Fly(magnetblock_fly_path, as_individual=True)
         print(f"    {magnetblock_fly!r}")
+        _assert_fly_loaded(magnetblock_fly, "MagnetBlock fly")
 
     def load_magnetblock_experiment() -> None:
         nonlocal magnetblock_exp
         magnetblock_exp = Experiment(magnetblock_exp_path)
-        print(f"    {len(magnetblock_exp.flies)} flies, fps={magnetblock_exp.fps}")
+        _assert_experiment_has_flies(magnetblock_exp, "MagnetBlock experiment")
 
     _step(f"Load Non-F1 fly  ({nonf1_fly_path.relative_to(repo_root)})", load_nonf1_fly)
     _step(f"Load Non-F1 experiment  ({nonf1_exp_path.relative_to(repo_root)})", load_nonf1_experiment)
