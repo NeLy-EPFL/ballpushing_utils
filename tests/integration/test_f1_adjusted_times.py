@@ -152,105 +152,38 @@ def create_mock_f1_tracking_data():
 def test_f1_adjusted_times():
     """Test that F1 test ball metrics use adjusted times correctly."""
 
-    print("🧪 Testing F1 Adjusted Times Implementation")
-    print("=" * 60)
-
-    # Create mock tracking data
     tracking_data = create_mock_f1_tracking_data()
-
-    # Create metrics object
     metrics = BallPushingMetrics(tracking_data, compute_metrics_on_init=False)
 
-    print(f"F1 exit time: {tracking_data.f1_exit_time}s")
-    print(f"Chamber exit time: {tracking_data.chamber_exit_times[0]}s")
-    print(f"Ball identities: {tracking_data.ball_identities}")
+    # Which balls the system decides to adjust.
+    should_adjust_training = metrics._should_use_adjusted_time(0, 0)
+    should_adjust_test = metrics._should_use_adjusted_time(0, 1)
 
-    # Test helper methods
-    print("\n🔍 Testing Helper Methods:")
-    print("-" * 40)
+    assert should_adjust_test, "test ball must use F1-adjusted time"
+    assert not should_adjust_training, "training ball must NOT use F1-adjusted time"
 
-    # Test _should_use_adjusted_time
-    should_adjust_training = metrics._should_use_adjusted_time(0, 0)  # Training ball
-    should_adjust_test = metrics._should_use_adjusted_time(0, 1)  # Test ball
+    # Test ball times are raw_time - f1_exit_time; training ball times pass through.
+    raw_time = 45.0
+    adjusted_training = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 0)
+    adjusted_test = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 1)
 
-    print(f"Should adjust training ball: {should_adjust_training}")
-    print(f"Should adjust test ball: {should_adjust_test}")
+    assert adjusted_training == raw_time, (
+        f"training-ball time should pass through unchanged, got {adjusted_training}s"
+    )
+    expected_test = raw_time - tracking_data.f1_exit_time  # 45 - 30 == 15
+    assert abs(adjusted_test - expected_test) < 0.1, (
+        f"test-ball time should be raw - f1_exit_time = {expected_test}s, got {adjusted_test}s"
+    )
 
-    # Test _adjust_time_for_f1_test_ball
-    raw_time = 45.0  # 45 seconds from experiment start
-    adjusted_training = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 0)  # Training ball
-    adjusted_test = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 1)  # Test ball
-
-    print(f"Raw time: {raw_time}s")
-    print(f"Adjusted training ball time: {adjusted_training}s")
-    print(f"Adjusted test ball time: {adjusted_test}s (should be {raw_time - tracking_data.f1_exit_time}s)")
-
-    # Test individual time-based metrics
-    print("\n📊 Testing Time-Based Metrics:")
-    print("-" * 40)
-
-    # Test get_max_event
-    max_event_training = metrics.get_max_event(0, 0)
-    max_event_test = metrics.get_max_event(0, 1)
-
-    print(f"Max event training ball: idx={max_event_training[0]}, time={max_event_training[1]}s")
-    print(f"Max event test ball: idx={max_event_test[0]}, time={max_event_test[1]}s")
-
-    # Test get_final_event
-    final_event_training = metrics.get_final_event(0, 0)
-    final_event_test = metrics.get_final_event(0, 1)
-
-    print(f"Final event training ball: {final_event_training}")
-    print(f"Final event test ball: {final_event_test}")
-
-    # Test get_major_event
-    major_event_training = metrics.get_major_event(0, 0)
-    major_event_test = metrics.get_major_event(0, 1)
-
-    print(f"Major event training ball: idx={major_event_training[0]}, time={major_event_training[1]}s")
-    print(f"Major event test ball: idx={major_event_test[0]}, time={major_event_test[1]}s")
-
-    # Test get_first_significant_event
-    first_sig_training = metrics.get_first_significant_event(0, 0)
-    first_sig_test = metrics.get_first_significant_event(0, 1)
-
-    print(f"First significant training ball: idx={first_sig_training[0]}, time={first_sig_training[1]}s")
-    print(f"First significant test ball: idx={first_sig_test[0]}, time={first_sig_test[1]}s")
-
-    print("\n✅ F1 Adjusted Times Test Completed!")
-    print(f"Expected behavior: Test ball times should be {tracking_data.f1_exit_time}s less than raw times")
-
-    return {
-        "should_adjust_training": should_adjust_training,
-        "should_adjust_test": should_adjust_test,
-        "adjusted_test_time": adjusted_test,
-        "max_event_test_time": max_event_test[1],
-        "major_event_test_time": major_event_test[1],
-    }
-
-
-if __name__ == "__main__":
-    results = test_f1_adjusted_times()
-
-    # Validate results
-    expected_f1_exit_time = 30.0  # F1 corridor exit time
-    expected_chamber_exit_time = 3.0  # Initial chamber exit time
-    success = True
-
-    if not results["should_adjust_test"]:
-        print("❌ ERROR: Test ball should use adjusted time but doesn't")
-        success = False
-
-    if results["should_adjust_training"]:
-        print("❌ ERROR: Training ball should NOT use adjusted time but does")
-        success = False
-
-    if abs(results["adjusted_test_time"] - 15.0) > 0.1:  # 45 - 30 = 15
-        print(f"❌ ERROR: Test ball time adjustment incorrect. Expected 15.0, got {results['adjusted_test_time']}")
-        success = False
-
-    if success:
-        print("\n🎉 All tests passed! F1 adjusted time system working correctly.")
-    else:
-        print("\n❌ Some tests failed. Check implementation.")
-        sys.exit(1)
+    # Smoke-check the time-based metric helpers still execute end-to-end
+    # with both ball identities — regressions here are usually a KeyError or
+    # a wrong ball_idx lookup, not a numeric drift, so the smoke is what we
+    # want to catch.
+    assert metrics.get_max_event(0, 0) is not None
+    assert metrics.get_max_event(0, 1) is not None
+    assert metrics.get_final_event(0, 0) is not None
+    assert metrics.get_final_event(0, 1) is not None
+    assert metrics.get_major_event(0, 0) is not None
+    assert metrics.get_major_event(0, 1) is not None
+    assert metrics.get_first_significant_event(0, 0) is not None
+    assert metrics.get_first_significant_event(0, 1) is not None
