@@ -35,7 +35,7 @@ def test_missing_fly_pipeline(fly_path, detailed_debug=True):
     try:
         # Step 1: Load the fly
         print("Step 1: Loading fly...")
-        fly = Ballpushing_utils.Fly(fly_path, as_individual=True)
+        fly = ballpushing_utils.Fly(fly_path, as_individual=True)
         print(f"✅ Fly loaded: {fly.metadata.name}")
 
         # Step 2: Check basic data availability
@@ -71,7 +71,7 @@ def test_missing_fly_pipeline(fly_path, detailed_debug=True):
         print(f"\nStep 3: Testing SkeletonMetrics initialization...")
 
         try:
-            skeleton_metrics = Ballpushing_utils.SkeletonMetrics(fly)
+            skeleton_metrics = ballpushing_utils.SkeletonMetrics(fly)
             print(f"  ✅ SkeletonMetrics initialized successfully")
         except Exception as e:
             print(f"  ❌ SkeletonMetrics initialization failed: {e}")

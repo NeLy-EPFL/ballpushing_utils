@@ -28,7 +28,7 @@ def test_raw_ball_coordinates():
         return
 
     # Create experiment and get first fly
-    experiment = Ballpushing_utils.Experiment(experiment_path)
+    experiment = ballpushing_utils.Experiment(experiment_path)
     if not experiment.flies:
         print("No flies found in experiment")
         return
@@ -51,7 +51,7 @@ def test_raw_ball_coordinates():
     print("-" * 60)
 
     try:
-        skeleton_metrics = Ballpushing_utils.SkeletonMetrics(fly)
+        skeleton_metrics = ballpushing_utils.SkeletonMetrics(fly)
         events_df = skeleton_metrics.events_based_contacts
 
         print(f"Events DataFrame shape: {events_df.shape}")
@@ -92,7 +92,7 @@ def test_raw_ball_coordinates():
     fly.config = config
 
     try:
-        skeleton_metrics = Ballpushing_utils.SkeletonMetrics(fly)
+        skeleton_metrics = ballpushing_utils.SkeletonMetrics(fly)
         events_df = skeleton_metrics.events_based_contacts
 
         print(f"Events DataFrame shape: {events_df.shape}")
