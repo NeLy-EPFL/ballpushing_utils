@@ -1,188 +1,101 @@
-#!/usr/bin/env python3
+"""Spontaneous ball movement detection against the bundled fixtures.
+
+The detector flags frames where the ball moves between interaction
+events (i.e. not during fly-induced pushing). The summary for each
+ball must expose the canonical key set; values depend on the recording.
+
+These tests do not assert a specific outcome — they just exercise the
+pipeline end-to-end and check the returned summary is well-formed so
+regressions like the ``too many values to unpack`` bug (fixed in the
+preceding commit) can't sneak back in.
 """
-Test script for spontaneous ball movement detection.
-This demonstrates the new functionality that checks for ball movement outside of interaction events.
-"""
 
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+import pytest
 
-from ballpushing_utils import Experiment, Fly, Config
+from ballpushing_utils import Experiment, Fly
+from ballpushing_utils.config import Config
 
 
-def test_spontaneous_movement_detection():
-    """Test the spontaneous ball movement detection on an experiment."""
+_REQUIRED_SUMMARY_KEYS = {
+    "num_spontaneous_frames",
+    "total_displacement",
+    "max_displacement",
+    "max_consecutive_frames",
+    "spontaneous_movement_times",
+}
 
-    print("=" * 80)
-    print("TESTING SPONTANEOUS BALL MOVEMENT DETECTION")
-    print("=" * 80)
-    print()
 
-    # Test with a regular TNT experiment
-    print("Testing with regular TNT experiment...")
-    print("-" * 80)
-
-    experiment_path = Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked")
-
-    if not experiment_path.exists():
-        print(f"❌ Experiment path does not exist: {experiment_path}")
-        print("Please update the path to a valid experiment directory.")
-        return
-
-    # Create custom config with spontaneous movement checking enabled
+def _spontaneous_config(experiment_type: str | None = None) -> Config:
     config = Config()
-    config.check_spontaneous_ball_movement = True
-    config.spontaneous_movement_threshold = 10.0  # 10 pixels
-    config.debugging = False  # Set to True for more verbose output
-
-    print(f"\nConfiguration:")
-    print(f"  check_spontaneous_ball_movement: {config.check_spontaneous_ball_movement}")
-    print(f"  spontaneous_movement_threshold: {config.spontaneous_movement_threshold} pixels")
-    print(f"  spontaneous_movement_window: {config.spontaneous_movement_window} frames")
-    print()
-
-    # Load experiment
-    print(f"Loading experiment from: {experiment_path.name}")
-    experiment = Experiment(experiment_path, custom_config=config)
-
-    if not experiment.flies:
-        print("❌ No flies found in experiment")
-        return
-
-    print(f"Found {len(experiment.flies)} flies in experiment")
-    print()
-
-    # Test first few flies
-    num_to_test = min(5, len(experiment.flies))
-    print(f"Testing spontaneous movement detection on first {num_to_test} flies:")
-    print("=" * 80)
-    print()
-
-    flies_with_spontaneous_movement = []
-
-    for i, fly in enumerate(experiment.flies[:num_to_test]):
-        print(f"\n[{i+1}/{num_to_test}] Fly: {fly.metadata.name}")
-        print("-" * 60)
-
-        if not fly.tracking_data or not fly.tracking_data.valid_data:
-            print("  ❌ Invalid tracking data, skipping...")
-            continue
-
-        # Get spontaneous movement summary for each ball
-        num_balls = len(fly.tracking_data.balltrack.objects) if fly.tracking_data.balltrack else 0
-        print(f"  Number of balls: {num_balls}")
-
-        for ball_idx in range(num_balls):
-            ball_identity = fly.tracking_data.get_ball_identity(ball_idx)
-            ball_name = ball_identity if ball_identity else f"ball_{ball_idx}"
-
-            summary = fly.tracking_data.get_spontaneous_movement_summary(ball_idx)
-
-            if summary and summary["num_spontaneous_frames"] > 0:
-                print(f"\n  ⚠️  {ball_name.upper()} - Spontaneous Movement Detected:")
-                print(f"     Frames with movement: {summary['num_spontaneous_frames']}")
-                print(f"     Total displacement: {summary['total_displacement']:.1f} pixels")
-                print(f"     Max single-frame displacement: {summary['max_displacement']:.1f} pixels")
-                print(
-                    f"     Max consecutive frames: {summary['max_consecutive_frames']} ({summary['max_consecutive_frames']/experiment.fps:.1f}s)"
-                )
-
-                if summary["spontaneous_movement_times"]:
-                    example_times = summary["spontaneous_movement_times"][:3]
-                    print(f"     Example times: {', '.join([f'{t:.1f}s' for t in example_times])}", end="")
-                    if len(summary["spontaneous_movement_times"]) > 3:
-                        print(f" (and {len(summary['spontaneous_movement_times']) - 3} more)")
-                    else:
-                        print()
-
-                flies_with_spontaneous_movement.append((fly.metadata.name, ball_name, summary))
-            else:
-                print(f"  ✅ {ball_name}: No spontaneous movement detected")
-
-    # Summary
-    print("\n" + "=" * 80)
-    print("SUMMARY")
-    print("=" * 80)
-    print(f"Flies tested: {num_to_test}")
-    print(f"Flies with spontaneous ball movement: {len(flies_with_spontaneous_movement)}")
-
-    if flies_with_spontaneous_movement:
-        print("\nFlies flagged for review:")
-        for fly_name, ball_name, summary in flies_with_spontaneous_movement:
-            print(
-                f"  • {fly_name} ({ball_name}): {summary['num_spontaneous_frames']} frames, "
-                f"{summary['total_displacement']:.1f}px total displacement"
-            )
-    else:
-        print("\n✅ No spontaneous ball movement detected in tested flies")
-
-    print("\n" + "=" * 80)
-    print("TEST COMPLETE")
-    print("=" * 80)
-
-
-def test_f1_experiment():
-    """Test spontaneous movement detection on F1 experiment."""
-
-    print("\n" + "=" * 80)
-    print("TESTING F1 EXPERIMENT")
-    print("=" * 80)
-    print()
-
-    f1_path = Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Videos/241014_F1_Pretrained_1_Videos_Tracked")
-
-    if not f1_path.exists():
-        print(f"❌ F1 experiment path does not exist: {f1_path}")
-        return
-
-    config = Config()
-    config.experiment_type = "F1"
+    if experiment_type is not None:
+        config.experiment_type = experiment_type
     config.check_spontaneous_ball_movement = True
     config.spontaneous_movement_threshold = 10.0
+    config.debugging = False
+    return config
 
-    print(f"Loading F1 experiment from: {f1_path.name}")
-    experiment = Experiment(f1_path, custom_config=config)
 
-    if not experiment.flies:
-        print("❌ No flies found in F1 experiment")
-        return
+def _assert_summary_shape(summary, label: str) -> None:
+    assert summary is not None, f"{label}: spontaneous movement summary is None"
+    missing = _REQUIRED_SUMMARY_KEYS - summary.keys()
+    assert not missing, f"{label}: summary missing keys {sorted(missing)!r}"
 
-    print(f"Found {len(experiment.flies)} flies")
-    print()
 
-    # Test first fly
-    fly = experiment.flies[0]
-    print(f"Testing fly: {fly.metadata.name}")
-
-    if not fly.tracking_data or not fly.tracking_data.valid_data:
-        print("  ❌ Invalid tracking data")
-        return
+@pytest.mark.integration
+def test_spontaneous_movement_on_example_fly(example_fly_path):
+    """Regular (non-F1) paradigm — canonical fly."""
+    fly = Fly(example_fly_path, as_individual=True, custom_config=_spontaneous_config())
+    assert fly.tracking_data is not None and fly.tracking_data.valid_data, (
+        "canonical example fly should load with valid tracking data"
+    )
 
     num_balls = len(fly.tracking_data.balltrack.objects) if fly.tracking_data.balltrack else 0
-    print(f"Number of balls: {num_balls}")
+    assert num_balls >= 1, "example fly should have at least one tracked ball"
 
-    # Check each ball
     for ball_idx in range(num_balls):
-        ball_identity = fly.tracking_data.get_ball_identity(ball_idx)
-        print(f"\n  Ball {ball_idx} ({ball_identity}):")
-
         summary = fly.tracking_data.get_spontaneous_movement_summary(ball_idx)
-
-        if summary and summary["num_spontaneous_frames"] > 0:
-            print(f"    ⚠️  Spontaneous movement detected")
-            print(f"    Frames: {summary['num_spontaneous_frames']}")
-            print(f"    Total displacement: {summary['total_displacement']:.1f} pixels")
-        else:
-            print(f"    ✅ No spontaneous movement")
+        _assert_summary_shape(summary, f"example_fly ball {ball_idx}")
 
 
-if __name__ == "__main__":
-    # Run tests
-    test_spontaneous_movement_detection()
+@pytest.mark.integration
+def test_spontaneous_movement_on_example_experiment(example_experiment_path):
+    """Experiment-level: loads once, walks every fly that loaded cleanly."""
+    experiment = Experiment(
+        example_experiment_path, custom_config=_spontaneous_config()
+    )
+    assert experiment.flies, (
+        "example_experiment should produce at least one fly when loaded with "
+        "spontaneous-movement config"
+    )
 
-    # Uncomment to test F1 experiments
-    # test_f1_experiment()
+    for fly in experiment.flies:
+        if fly.tracking_data is None or not fly.tracking_data.valid_data:
+            continue
+        num_balls = (
+            len(fly.tracking_data.balltrack.objects) if fly.tracking_data.balltrack else 0
+        )
+        for ball_idx in range(num_balls):
+            summary = fly.tracking_data.get_spontaneous_movement_summary(ball_idx)
+            _assert_summary_shape(summary, f"{fly.metadata.name} ball {ball_idx}")
 
-    print("\n✅ All tests completed!")
+
+@pytest.mark.integration
+def test_spontaneous_movement_on_f1_fly(example_f1_fly_path):
+    """F1 paradigm smoke check — same contract, F1 experiment config."""
+    fly = Fly(
+        example_f1_fly_path,
+        as_individual=True,
+        custom_config=_spontaneous_config(experiment_type="F1"),
+    )
+    assert fly.tracking_data is not None and fly.tracking_data.valid_data, (
+        "canonical F1 fly should load with valid tracking data"
+    )
+
+    num_balls = len(fly.tracking_data.balltrack.objects) if fly.tracking_data.balltrack else 0
+    assert num_balls >= 1, "F1 fixture fly should expose at least one tracked ball"
+
+    for ball_idx in range(num_balls):
+        summary = fly.tracking_data.get_spontaneous_movement_summary(ball_idx)
+        _assert_summary_shape(summary, f"f1_fly ball {ball_idx}")
