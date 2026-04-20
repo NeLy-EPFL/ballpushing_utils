@@ -93,14 +93,24 @@ class Experiment:
         """
         Loads the frame rate of the videos in the experiment directory.
 
+        Returns the value as a Python ``int`` (preferred) or ``float``,
+        not a 0-d :class:`numpy.ndarray`. ``np.load`` of a scalar
+        ``fps.npy`` returns a 0-d array, which trips ``isinstance(x,
+        (int, float))`` checks elsewhere; coerce here so callers can
+        treat ``self.fps`` as a normal scalar.
+
         Returns:
-            int: The frame rate of the videos.
+            int | float: The frame rate of the videos. Defaults to 30
+            if ``fps.npy`` is missing.
         """
         # Load the fps value from the fps.npy file in the experiment directory
         fps_file = self.directory / "fps.npy"
         if fps_file.exists():
-            fps = np.load(fps_file)
-
+            raw = np.load(fps_file)
+            # ``raw`` is typically a 0-d ndarray; ``.item()`` unwraps it
+            # to a native Python int/float. Guarded for the rare case
+            # where ``raw`` is already a Python scalar.
+            fps = raw.item() if hasattr(raw, "item") else raw
         else:
             fps = 30
             # print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
