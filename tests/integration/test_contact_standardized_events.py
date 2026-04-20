@@ -23,7 +23,7 @@ def test_contact_standardized_events():
         return
 
     # Create experiment
-    experiment = Ballpushing_utils.Experiment(experiment_path)
+    experiment = ballpushing_utils.Experiment(experiment_path)
 
     # Get the first fly for testing
     if not experiment.flies:
@@ -42,7 +42,7 @@ def test_contact_standardized_events():
 
     try:
         # Create skeleton metrics
-        skeleton_metrics = Ballpushing_utils.SkeletonMetrics(fly)
+        skeleton_metrics = ballpushing_utils.SkeletonMetrics(fly)
 
         # Check the annotated contact dataset
         annotated_df = skeleton_metrics.get_contact_annotated_dataset()

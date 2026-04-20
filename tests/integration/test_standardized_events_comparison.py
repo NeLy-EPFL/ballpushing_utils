@@ -28,7 +28,7 @@ def compare_standardized_events_modes():
         return
 
     # Create experiment and get first fly
-    experiment = Ballpushing_utils.Experiment(experiment_path)
+    experiment = ballpushing_utils.Experiment(experiment_path)
     if not experiment.flies:
         print("No flies found in experiment")
         return
@@ -58,7 +58,7 @@ def compare_standardized_events_modes():
     fly.config = config_interaction
 
     try:
-        skeleton_metrics_interaction = Ballpushing_utils.SkeletonMetrics(fly)
+        skeleton_metrics_interaction = ballpushing_utils.SkeletonMetrics(fly)
 
         # Get interaction events from tracking data
         interaction_events = fly.tracking_data.interaction_events
@@ -109,7 +109,7 @@ def compare_standardized_events_modes():
     fly.config = config_contact
 
     try:
-        skeleton_metrics_contact = Ballpushing_utils.SkeletonMetrics(fly)
+        skeleton_metrics_contact = ballpushing_utils.SkeletonMetrics(fly)
 
         # Get contact events
         contact_events = skeleton_metrics_contact.find_contact_events()

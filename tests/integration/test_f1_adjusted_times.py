@@ -119,6 +119,12 @@ def create_mock_f1_tracking_data():
             self.duration = n_frames / 30  # Total duration in seconds
             self.chamber_exit_times = {0: 3.0}  # Fly exits initial chamber at 3 seconds
 
+            # Real TrackingData sets ``chamber_exit_time`` (singular) in
+            # __init__ — see fly_trackingdata.py. BallPushingMetrics' debug
+            # branch reads it directly, so the mock needs it too. Keep the
+            # plural dict above since other code paths still read it.
+            self.chamber_exit_time = self.chamber_exit_times[0]
+
             # Ball identities for F1 experiment
             self.ball_identities = {0: "training", 1: "test"}
             self.identity_to_idx = {"training": 0, "test": 1}

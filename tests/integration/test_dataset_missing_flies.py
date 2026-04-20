@@ -43,7 +43,7 @@ def test_dataset_generation_with_missing_flies(detailed_debug=True):
         for i, fly_path in enumerate(missing_fly_paths):
             print(f"  Loading fly {i+1}: {Path(fly_path).name}")
             try:
-                fly = Ballpushing_utils.Fly(fly_path, as_individual=True)
+                fly = ballpushing_utils.Fly(fly_path, as_individual=True)
                 flies.append(fly)
                 print(f"  ✅ Loaded: {fly.metadata.name}")
             except Exception as e:
@@ -57,7 +57,7 @@ def test_dataset_generation_with_missing_flies(detailed_debug=True):
         print(f"\nStep 2: Creating dataset with individual flies...")
 
         try:
-            dataset = Ballpushing_utils.Dataset(flies, dataset_type="standardized_contacts")
+            dataset = ballpushing_utils.Dataset(flies, dataset_type="standardized_contacts")
             print(f"✅ Dataset created successfully")
 
             if dataset.data is not None:
@@ -109,7 +109,7 @@ def test_dataset_generation_with_missing_flies(detailed_debug=True):
             print(f"    With {len(fly_paths)} flies")
 
             try:
-                experiment = Ballpushing_utils.Experiment(exp_path)
+                experiment = ballpushing_utils.Experiment(exp_path)
                 print(f"    ✅ Experiment loaded with {len(experiment.flies)} total flies")
 
                 # Filter to only the specific flies we want
@@ -135,7 +135,7 @@ def test_dataset_generation_with_missing_flies(detailed_debug=True):
 
                 if target_flies:
                     # Test dataset creation with these specific flies
-                    dataset_exp = Ballpushing_utils.Dataset(target_flies, dataset_type="standardized_contacts")
+                    dataset_exp = ballpushing_utils.Dataset(target_flies, dataset_type="standardized_contacts")
 
                     if dataset_exp.data is not None:
                         print(f"    ✅ Experiment-based dataset created: {dataset_exp.data.shape}")
@@ -178,7 +178,7 @@ def test_dataset_generation_with_missing_flies(detailed_debug=True):
             # Test the _prepare_dataset_standardized_contacts method directly
             try:
                 print(f"  🧪 Testing _prepare_dataset_standardized_contacts directly...")
-                dataset_obj = Ballpushing_utils.Dataset(
+                dataset_obj = ballpushing_utils.Dataset(
                     [fly], dataset_type="coordinates"
                 )  # Create with dummy type first
                 result = dataset_obj._prepare_dataset_standardized_contacts(fly)
@@ -217,7 +217,7 @@ def test_dataset_filtering_logic():
 
     try:
         print(f"📁 Loading fly: {Path(fly_path).name}")
-        fly = Ballpushing_utils.Fly(fly_path, as_individual=True)
+        fly = ballpushing_utils.Fly(fly_path, as_individual=True)
         print(f"✅ Fly loaded: {fly.metadata.name}")
 
         # Check the filtering condition in Dataset.__init__

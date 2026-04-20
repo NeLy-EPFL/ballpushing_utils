@@ -1739,7 +1739,10 @@ class FlyTrackingData:
         # Create interaction mask
         interaction_mask = np.zeros(len(ball_data), dtype=bool)
         if self.interaction_events and 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
-            for event_start, event_end in self.interaction_events[0][ball_idx]:
+            for event in self.interaction_events[0][ball_idx]:
+                # Each event is [start, end, length]; mirror the unpacking
+                # pattern used at the top of ``compute_spontaneous_movement``.
+                event_start, event_end = event[0], event[1]
                 buffer_frames = self.fly.config.gap_between_events * 2
                 start_buffered = max(0, event_start - buffer_frames)
                 end_buffered = min(len(ball_data), event_end + buffer_frames)

@@ -23,7 +23,7 @@ def test_dataset_builder_with_contacts():
         return
 
     # Create experiment
-    experiment = Ballpushing_utils.Experiment(experiment_path)
+    experiment = ballpushing_utils.Experiment(experiment_path)
 
     # Get the first few flies for testing (limit to avoid long processing)
     test_flies = experiment.flies[:3]  # Test with 3 flies
@@ -41,7 +41,7 @@ def test_dataset_builder_with_contacts():
 
     try:
         # Create a dataset with standardized_contacts metrics
-        dataset = Ballpushing_utils.Dataset(test_flies, dataset_type="standardized_contacts")
+        dataset = ballpushing_utils.Dataset(test_flies, dataset_type="standardized_contacts")
 
         print(f"Dataset created successfully!")
         print(f"Dataset data type: {type(dataset.data)}")
