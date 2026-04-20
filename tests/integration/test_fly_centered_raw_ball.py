@@ -60,7 +60,14 @@ def test_fly_centered_tracks_excludes_ball_when_fly_only_true(example_fly):
     fly.config = _make_config(fly_only=True)
     fly_centered = ballpushing_utils.SkeletonMetrics(fly).fly_centered_tracks
 
-    ball_cols = [c for c in fly_centered.columns if "centre" in c]
+    # Ball coordinate columns show up as *centre_raw* / *centre_preprocessed*;
+    # a plain "centre" substring also matches fly-body parts (e.g. thorax
+    # centre), so filter on the ball-specific patterns only.
+    ball_cols = [
+        c
+        for c in fly_centered.columns
+        if "centre_raw" in c or "centre_preprocessed" in c
+    ]
     assert not ball_cols, (
         f"did not expect any ball-coordinate columns in fly_centered_tracks with "
         f"fly_only=True, got {ball_cols!r}"
