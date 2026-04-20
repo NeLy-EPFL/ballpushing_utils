@@ -53,11 +53,15 @@ def main() -> None:
     nonf1_fly_path = nonf1_exp_path / "arena2/corridor5"
     f1_exp_path = fixtures / "F1_Tracks/Videos/250904_F1_New_Videos_Checked"
     f1_fly_path = f1_exp_path / "arena5/Right"
+    magnetblock_exp_path = fixtures / "MultiMazeRecorder/Videos/240711_MagnetBlock_Videos_Tracked"
+    magnetblock_fly_path = magnetblock_exp_path / "arena4/corridor4"
 
     nonf1_fly: Fly | None = None
     nonf1_exp: Experiment | None = None
     f1_fly: Fly | None = None
     f1_exp: Experiment | None = None
+    magnetblock_fly: Fly | None = None
+    magnetblock_exp: Experiment | None = None
 
     def load_nonf1_fly() -> None:
         nonlocal nonf1_fly
@@ -86,10 +90,22 @@ def main() -> None:
         )
         print(f"    {len(f1_exp.flies)} flies, fps={f1_exp.fps}")
 
+    def load_magnetblock_fly() -> None:
+        nonlocal magnetblock_fly
+        magnetblock_fly = Fly(magnetblock_fly_path, as_individual=True)
+        print(f"    {magnetblock_fly!r}")
+
+    def load_magnetblock_experiment() -> None:
+        nonlocal magnetblock_exp
+        magnetblock_exp = Experiment(magnetblock_exp_path)
+        print(f"    {len(magnetblock_exp.flies)} flies, fps={magnetblock_exp.fps}")
+
     _step(f"Load Non-F1 fly  ({nonf1_fly_path.relative_to(repo_root)})", load_nonf1_fly)
     _step(f"Load Non-F1 experiment  ({nonf1_exp_path.relative_to(repo_root)})", load_nonf1_experiment)
     _step(f"Load F1 fly  ({f1_fly_path.relative_to(repo_root)})", load_f1_fly)
     _step(f"Load F1 experiment  ({f1_exp_path.relative_to(repo_root)})", load_f1_experiment)
+    _step(f"Load MagnetBlock fly  ({magnetblock_fly_path.relative_to(repo_root)})", load_magnetblock_fly)
+    _step(f"Load MagnetBlock experiment  ({magnetblock_exp_path.relative_to(repo_root)})", load_magnetblock_experiment)
 
     print("\n[✓] All fixture loads succeeded. The external-user path is healthy.")
 

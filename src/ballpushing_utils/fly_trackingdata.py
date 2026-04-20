@@ -49,6 +49,14 @@ class FlyTrackingData:
 
         except Exception as e:
             print(f"Error loading files for {self.fly.metadata.name}: {e}")
+            # Print the full traceback when debugging is on so callers can
+            # see *where* the failure happened, not just the message.
+            # ``debugging`` is the existing escape hatch on FlyConfig used
+            # by the rest of this module for diagnostic output.
+            if getattr(self.fly.config, "debugging", False):
+                import traceback
+
+                traceback.print_exc()
             self.valid_data = False
             if self.log_missing:
                 self.log_missing_fly()
