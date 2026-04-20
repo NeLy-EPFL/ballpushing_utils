@@ -89,6 +89,7 @@ pip install -e .
 pip install -e ".[interactive]"   # bokeh / panel / shiny dashboards
 pip install -e ".[video]"         # moviepy / pygame for video overlays
 pip install -e ".[dev]"           # pytest, black, ruff
+pip install -e ".[docs]"          # jupyter / nbconvert (for the walkthrough notebooks)
 pip install -e ".[all]"           # everything
 ```
 
@@ -98,10 +99,16 @@ See [`tests/fixtures/README.md`](tests/fixtures/README.md) for what's in
 the sample fixture and how to regenerate it from your own recordings.
 
 `ballpushing_utils` depends on
-[`utils_behavior`](https://github.com/labramdya/utils_behavior), the
-lab's general-purpose behavioural-analysis utilities. It is declared as a
-PyPI dependency in `pyproject.toml`; if your environment cannot resolve
-it from PyPI, install it from source first.
+[`utils_behavior`](https://github.com/NeLy-EPFL/utils_behavior), declared
+as a direct `git+https://` dependency in `pyproject.toml` so
+`pip install -e .` resolves without a private index.
+
+> **Troubleshooting.** If `pip install` inside the venv fails with
+> `No module named pip`, the venv was created without pip (some distros
+> ship a `python` without ensurepip). Bootstrap it once with
+> `.venv/bin/python -m ensurepip --upgrade`, then retry. If `pip` outside
+> the venv still points at a system / conda interpreter, call the venv's
+> pip explicitly: `.venv/bin/pip install …`.
 
 ---
 
