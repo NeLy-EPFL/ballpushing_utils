@@ -1,0 +1,92 @@
+{
+    "Variable": [
+        "Date",
+        "Genotype",
+        "Period",
+        "FeedingState",
+        "Orientation",
+        "Light",
+        "Crossing"
+    ],
+    "Arena1": [
+        "231130",
+        "None",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena2": [
+        "231130",
+        "TNTxZ1898",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena3": [
+        "231130",
+        "TNTxZ1897",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena4": [
+        "231130",
+        "TNTxZ1700",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena5": [
+        "231130",
+        "TNTxZ1699",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena6": [
+        "231130",
+        "TNTxZ1701",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena7": [
+        "231130",
+        "TNTxZ1702",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena8": [
+        "231130",
+        "TNTxZ1896",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ],
+    "Arena9": [
+        "231130",
+        "TNTxZ1698",
+        "PM15",
+        "starved_noWater",
+        "std",
+        "on",
+        "1"
+    ]
+}

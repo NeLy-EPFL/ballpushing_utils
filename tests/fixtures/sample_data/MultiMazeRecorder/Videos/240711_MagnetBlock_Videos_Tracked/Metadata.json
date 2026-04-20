@@ -1,0 +1,112 @@
+{
+    "Variable": [
+        "Date",
+        "Genotype",
+        "Period",
+        "FeedingState",
+        "Orientation",
+        "Light",
+        "Crossing",
+        "BallType",
+        "Magnet"
+    ],
+    "Arena1": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "y"
+    ],
+    "Arena2": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "n"
+    ],
+    "Arena3": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "y"
+    ],
+    "Arena4": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "n"
+    ],
+    "Arena5": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "n"
+    ],
+    "Arena6": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "n"
+    ],
+    "Arena7": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "y"
+    ],
+    "Arena8": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "n"
+    ],
+    "Arena9": [
+        "240711",
+        "PR",
+        "AM10",
+        "starved_noWater",
+        "std",
+        "on",
+        "1",
+        "steel",
+        "y"
+    ]
+}

@@ -1,0 +1,82 @@
+{
+    "Variable": [
+        "Date",
+        "Genotype",
+        "Pretraining",
+        "Peak",
+        "Orientation",
+        "Unlocked"
+    ],
+    "Arena1": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "yn"
+    ],
+    "Arena2": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "ny"
+    ],
+    "Arena3": [
+        "250904",
+        "PR",
+        "n",
+        "morning",
+        "std",
+        "nn"
+    ],
+    "Arena4": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "yn"
+    ],
+    "Arena5": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "nn"
+    ],
+    "Arena6": [
+        "250904",
+        "PR",
+        "n",
+        "morning",
+        "std",
+        "nn"
+    ],
+    "Arena7": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "yn"
+    ],
+    "Arena8": [
+        "250904",
+        "PR",
+        "n",
+        "morning",
+        "std",
+        "nn"
+    ],
+    "Arena9": [
+        "250904",
+        "PR",
+        "y",
+        "morning",
+        "std",
+        "nn"
+    ]
+}
