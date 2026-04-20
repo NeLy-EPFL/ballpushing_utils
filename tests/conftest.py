@@ -32,6 +32,20 @@ from ballpushing_utils import Experiment, Fly
 
 
 # ---------------------------------------------------------------------------
+# Pytest collection ignores.
+#
+# ``tests/F1_tracks/`` is a set of standalone dev/debug scripts (each has a
+# ``main()`` + ``if __name__ == "__main__"`` and hardcoded paths under
+# ``/mnt/upramdya_data/MD/F1_Tracks/``). They were named ``test_*.py`` by
+# accident and are not pytest tests. They should be moved to ``tools/`` or
+# ``scripts/dev/`` in a follow-up commit; for now we just ignore the
+# directory so collection doesn't choke on a syntax error inside one of
+# the scripts.
+# ---------------------------------------------------------------------------
+collect_ignore_glob = ["F1_tracks/*"]
+
+
+# ---------------------------------------------------------------------------
 # Canonical relative paths. Kept here so the whole test suite agrees on
 # which recordings count as the "canonical" fixtures. Each path is relative
 # to either ``$BALLPUSHING_DATA_ROOT`` (real data) or
