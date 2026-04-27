@@ -14,7 +14,6 @@ max_distance
 max_event
 max_event_time
 nb_freeze
-nb_significant_events
 normalized_velocity
 number_of_pauses
 overall_interaction_rate

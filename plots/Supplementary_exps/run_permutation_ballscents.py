@@ -120,11 +120,10 @@ def format_metric_label(metric_name):
 # Fixed color mapping for ball scents - ensures consistent colors across all plots
 # Colors chosen to distinguish different experimental conditions
 BALLSCENT_COLORS = {
-    "New": "#7f7f7f",  # Grey - control (new clean ball)
-    "New + Pre-exposed": "#1f77b4",  # Blue
+    "New": "#7f7f7f",  # Grey — control (new clean ball)
+    "Pre-exposed": "#1f77b4",  # Blue  (CtrlScent: pre-exposed to fly odors)
     "Washed": "#2ca02c",  # Green
     "Washed + Pre-exposed": "#ff7f0e",  # Orange
-    "Pre-exposed": "#9467bd",  # Purple (if present in data)
 }
 
 
@@ -286,20 +285,14 @@ def generate_BallScent_permutation_plots(
     matplotlib.rcParams["font.family"] = "sans-serif"
     matplotlib.rcParams["font.sans-serif"] = ["Arial"]
 
-    # Filter out Ctrl condition (different experimental setup)
-    data = data[data[y] != "Ctrl"].copy()
-    print(f"Filtered out 'Ctrl' condition. Remaining conditions: {sorted(data[y].unique())}")
-
-    # Filter out CtrlScent condition (different experimental setup)
-    data = data[data[y] != "CtrlScent"].copy()
-    print(f"Filtered out 'CtrlScent' condition. Remaining conditions: {sorted(data[y].unique())}")
-
-    # Fixed ordering for ball scents (control first, then others alphabetically)
-    # New (control), New + Pre-exposed, Washed, Washed + Pre-exposed
-    fixed_order = ["New", "New + Pre-exposed", "Washed", "Washed + Pre-exposed"]
-    # Filter to only conditions present in data
+    # Fixed ordering for ball scents: New (ctrl), Pre-exposed, Washed, Washed+Pre-exposed
+    # Data is pre-filtered to these four conditions in load_and_clean_dataset.
+    fixed_order = ["New", "Pre-exposed", "Washed", "Washed + Pre-exposed"]
+    # Keep only conditions present in this data slice
     fixed_order = [cond for cond in fixed_order if cond in data[y].unique()]
-    print(f"Fixed ordering for ball scents: {fixed_order}")
+    # Filter data to the fixed conditions (drops any residual Ctrl rows)
+    data = data[data[y].isin(fixed_order)].copy()
+    print(f"Conditions: {fixed_order}")
 
     all_stats = []
 
@@ -1019,6 +1012,15 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
 
     # Normalize BallScent labels to canonical factorial names
     dataset = normalize_ball_scent_labels(dataset, group_col="BallScent")
+
+    # Filter to exactly the four conditions shown in the figure.
+    # Pre-exposed = CtrlScent (ball pre-exposed to fly odors); NewScent → "New + Pre-exposed" is excluded.
+    allowed = ["New", "Pre-exposed", "Washed", "Washed + Pre-exposed"]
+    initial_shape = dataset.shape
+    dataset = dataset[dataset["BallScent"].isin(allowed)].copy()
+    print(f"\n📊 Filtered to allowed ball scents: {allowed}")
+    print(f"   Shape: {initial_shape} -> {dataset.shape}")
+    print(f"   Remaining conditions: {sorted(dataset['BallScent'].unique())}")
 
     return dataset
 

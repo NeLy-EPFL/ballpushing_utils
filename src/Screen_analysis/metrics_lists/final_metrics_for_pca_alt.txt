@@ -13,7 +13,6 @@ max_distance
 max_event
 nb_events
 nb_freeze
-nb_significant_events
 normalized_velocity
 velocity_during_interactions
 velocity_trend
