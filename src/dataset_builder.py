@@ -31,40 +31,48 @@ from ballpushing_utils import utilities, config
 # - Memory monitoring: Tracks memory usage and provides detailed logging
 # - Configurable thresholds: Memory threshold and batch size can be adjusted
 
-# Available datasets:
-# - coordinates : Full coordinates of ball and fly positions over time
-# - fly_positions : Raw tracking positions for all available keypoints (fly, ball, skeleton) - useful for heatmaps and position analyses
-# - event_metrics : individual event metrics for each fly
-# - summary : Summary of all events for each fly
-# - standardized_contacts : contact data reworked to be time standardized and fly centric
-# - transposed: standardized contacts + associated statistics transposed to be one row per event
-# - contact_data : skeleton data associated with individual events (redundant with Skeleton_contacts) => Should probably be reworked
+# Available datasets (full list also exposed in ELIGIBLE_DATASETS below):
+# - coordinates           : Full coordinates of ball and fly positions over time
+# - fly_positions         : Raw tracking positions for all keypoints (fly, ball, skeleton)
+# - event_metrics         : Individual event metrics for each fly
+# - summary               : Summary of all events for each fly
+# - standardized_contacts : Contact data reworked to be time-standardized and fly-centric
+# - transposed            : Standardized contacts transposed to be one row per event
+# - contact_data          : Skeleton data associated with individual events
+# - F1_coordinates        : F1-only — coordinates re-baselined to corridor-exit time
+# - F1_checkpoints        : F1-only — distance-based checkpoints with adjusted times
+#
+# Experiment type is auto-detected from the path (F1_Tracks → F1,
+# MagnetBlock → MagnetBlock, MultiMazeRecorder → TNT). Use
+# ``--experiment-type`` to override for experiments still in the
+# default catch-all directory. Asking for an F1-only dataset on a
+# non-F1 experiment is a no-op with a warning, never silent.
 
 
 # Example usage:
-# Process experiment folders:
-# python dataset_builder.py --mode experiment --yaml config.yaml
+# Build a single dataset for a YAML of experiment folders (auto type detection):
+# python dataset_builder.py --yaml config.yaml --datasets summary
+#
+# Multiple datasets in one pass:
+# python dataset_builder.py --yaml config.yaml --datasets summary coordinates F1_coordinates
+#
+# Override experiment type (e.g. a TNT screen still living in the
+# MultiMazeRecorder catch-all that the rig hasn't moved yet):
+# python dataset_builder.py --yaml config.yaml --datasets summary --experiment-type TNT
 #
 # Process individual fly directories from a combined YAML file:
-# python dataset_builder.py --mode flies --yaml combined_flies.yaml
+# python dataset_builder.py --mode flies --yaml combined_flies.yaml --datasets summary
 #
-# Process experiments with filter (no YAML):
-# python dataset_builder.py --mode experiment
-#
-# Process flies with optimized batch cache clearing:
-# python dataset_builder.py --mode flies --yaml flies.yaml --batch-size 10
-#
-# Process with custom memory threshold (4GB):
-# python dataset_builder.py --mode flies --yaml flies.yaml --memory-threshold 4096
-#
-# Force original cache clearing behavior:
-# python dataset_builder.py --mode flies --yaml flies.yaml --force-cache-clear
+# Tune cache management (batch size + memory threshold):
+# python dataset_builder.py --mode flies --yaml flies.yaml --datasets summary \
+#       --batch-size 10 --memory-threshold 4096
 #
 # Verify existing datasets and create missing pooled datasets:
 # python dataset_builder.py --verify /path/to/existing/dataset/directory
 #
 # Verify with completeness checking against YAML:
-# python dataset_builder.py --verify /path/to/existing/dataset/directory --yaml folders.yaml --mode experiment
+# python dataset_builder.py --verify /path/to/existing/dataset/directory \
+#       --yaml folders.yaml --mode experiment --datasets summary
 
 # ==================================================================
 # CONFIGURATION SECTION - EDIT THESE VALUES TO MODIFY BEHAVIOR
@@ -74,7 +82,9 @@ from ballpushing_utils import utilities, config
 # excluded_folders is a list of folders from data root to exclude from processing
 # config_path is the path to the configuration file for the experiment. It just sets the name of the json file which will be saved along with the experiment files.
 # experiment_filter can be used to select the experiments to process based on a substring in the folder name (e.g. TNT_Fine)
-# metrics is a list of metrics to process.
+# Datasets are now selected via the mandatory ``--datasets`` CLI flag instead
+# of a hardcoded list inside CONFIG; experiment type comes from path detection
+# (or ``--experiment-type`` override). See ELIGIBLE_DATASETS below.
 
 CONFIG = {
     "PATHS": {
@@ -86,18 +96,135 @@ CONFIG = {
     },
     "PROCESSING": {
         "experiment_filter": "",  # Filter for a specific experiment folder to test
-        "metrics": [
-            # "F1_checkpoints",
-            #"F1_coordinates",  # For F1 experiments only
-            # "fly_positions",  # Raw tracking positions for all keypoints (useful for heatmaps) - Deprecated since ballpushing metrics include proximity times
-            # "standardized_contacts",
-             "summary",  # Re-enabled for testing the optimization
-            # "coordinates",  # For regular experiments
-            # "fly_positions",
-        ],  # Metrics to process (add/remove as needed)
         "memory_threshold_mb": 4096,  # Memory threshold in MB for conditional cache clearing
     },
 }
+
+
+# ==================================================================
+# EXPERIMENT TYPE & DATASET ELIGIBILITY
+# ==================================================================
+# The recording rig writes each experiment to a top-level directory
+# named after the paradigm. Path-based detection looks for one of these
+# segments anywhere in the experiment folder's parts; the first match
+# wins. ``--experiment-type`` overrides this entirely (useful for
+# experiments still living in the catch-all MultiMazeRecorder tree
+# that haven't been moved to a dedicated directory yet).
+EXPERIMENT_TYPE_FROM_PATH = {
+    "F1_Tracks": "F1",
+    "MagnetBlock": "MagnetBlock",
+    "MultiMazeRecorder": "TNT",  # default catch-all rig output
+}
+
+# Which dataset types each experiment type can produce. Asking for an
+# ineligible dataset → loud error during compatibility filtering, never
+# a silently-empty feather. Adding a new dataset means: extend the
+# Dataset class in ballpushing_utils/dataset.py AND add it here.
+ELIGIBLE_DATASETS = {
+    "F1": {
+        "summary",
+        "coordinates",
+        "F1_coordinates",
+        "F1_checkpoints",
+        "fly_positions",
+        "event_metrics",
+        "standardized_contacts",
+        "transposed",
+        "contact_data",
+    },
+    "MagnetBlock": {
+        "summary",
+        "coordinates",
+        "fly_positions",
+        "event_metrics",
+        "standardized_contacts",
+        "transposed",
+        "contact_data",
+    },
+    "TNT": {
+        "summary",
+        "coordinates",
+        "fly_positions",
+        "event_metrics",
+        "standardized_contacts",
+        "transposed",
+        "contact_data",
+    },
+    "Learning": {
+        "summary",
+        "coordinates",
+        "fly_positions",
+        "event_metrics",
+        "standardized_contacts",
+        "transposed",
+        "contact_data",
+    },
+}
+
+# Flat list of every dataset name we know how to build. Used to
+# constrain ``--datasets`` choices so typos fail at parse time.
+ALL_DATASET_TYPES = sorted({d for ds in ELIGIBLE_DATASETS.values() for d in ds})
+
+
+def detect_experiment_type(folder):
+    """Infer experiment type from a folder's path.
+
+    Walks the folder's parts and returns the first match in
+    ``EXPERIMENT_TYPE_FROM_PATH``. Returns ``None`` if no segment
+    matches, so the caller can decide whether to raise or fall back to
+    a CLI override.
+    """
+    folder = Path(folder)
+    for part in folder.parts:
+        if part in EXPERIMENT_TYPE_FROM_PATH:
+            return EXPERIMENT_TYPE_FROM_PATH[part]
+    return None
+
+
+def resolve_experiment_type(folder, override=None):
+    """Resolve the experiment type for ``folder`` (override > path).
+
+    Raises ``ValueError`` if neither the override nor path detection
+    yields a known type — never silently default, since the wrong
+    experiment_type changes time-range cropping and metric selection
+    inside the package.
+    """
+    if override is not None:
+        return override
+    detected = detect_experiment_type(folder)
+    if detected is None:
+        raise ValueError(
+            f"Could not auto-detect experiment type from path: {folder}\n"
+            f"  No path segment matched any of {sorted(EXPERIMENT_TYPE_FROM_PATH)}.\n"
+            f"  Pass --experiment-type to set it explicitly. "
+            f"Valid choices: {sorted(ELIGIBLE_DATASETS)}."
+        )
+    return detected
+
+
+def filter_datasets_for_type(requested, experiment_type, label=""):
+    """Drop datasets that the resolved experiment type can't produce.
+
+    Logs a clear warning for each skipped dataset (e.g. asking for
+    ``F1_coordinates`` on a MagnetBlock experiment) and returns the
+    eligible subset, preserving the caller's order.
+    """
+    eligible = ELIGIBLE_DATASETS.get(experiment_type, set())
+    if not eligible:
+        raise ValueError(
+            f"Unknown experiment type {experiment_type!r}. "
+            f"Valid choices: {sorted(ELIGIBLE_DATASETS)}."
+        )
+    valid = [d for d in requested if d in eligible]
+    skipped = [d for d in requested if d not in eligible]
+    if skipped:
+        prefix = f"[{label}] " if label else ""
+        logging.warning(
+            f"{prefix}Datasets {skipped} not compatible with experiment type "
+            f"{experiment_type!r} — skipping. Eligible for {experiment_type}: "
+            f"{sorted(eligible)}."
+        )
+    return valid
 
 # Print the current ball pushing configurations
 current_config = config.Config()
@@ -326,7 +453,7 @@ def estimate_cache_clearing_time(num_flies, individual_time_ms=100, batch_time_m
     return individual_total, batch_total, savings, savings_percent
 
 
-def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
+def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5, experiment_type_override=None):
     """
     Process multiple fly directories in batches with efficient cache management.
 
@@ -335,11 +462,16 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
     fly_dirs : list
         List of fly directory paths.
     metrics : list
-        List of metrics to process.
+        List of dataset types requested by the user (will be filtered
+        per-fly against the eligibility table for the resolved
+        experiment type).
     output_data : Path
         Output directory for datasets.
     batch_size : int
         Number of flies to process before clearing caches.
+    experiment_type_override : str, optional
+        If set, force this experiment type for every fly instead of
+        detecting it from the path.
 
     Returns
     -------
@@ -359,9 +491,20 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
 
             logging.info(f"Processing fly directory: {fly_dir} ({i+1}/{len(fly_dirs)})")
 
+            # Resolve experiment type from path (or CLI override) and
+            # filter the requested datasets down to ones this paradigm
+            # can actually produce.
+            experiment_type = resolve_experiment_type(fly_dir, override=experiment_type_override)
+            fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
+            if not fly_metrics:
+                logging.warning(
+                    f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
+                )
+                continue
+
             # Check if all datasets already exist
             all_datasets_exist = True
-            for metric in metrics:
+            for metric in fly_metrics:
                 dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
                 if not dataset_path.exists():
                     all_datasets_exist = False
@@ -372,12 +515,17 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
                 processed_flies.append(fly_name)
                 continue
 
-            # Create and process fly
-            fly = Ballpushing_utils.Fly(fly_dir, as_individual=True)
+            # Create and process fly. ``custom_config`` overrides
+            # ``experiment_type`` on the fly's Config (and the shared
+            # Experiment.config it points at), so paradigm-specific
+            # branches (F1 exit time, MagnetBlock 1h cutoff, …) take
+            # the right path without anyone editing config.py.
+            custom_config = {"experiment_type": experiment_type}
+            fly = ballpushing_utils.Fly(fly_dir, as_individual=True, custom_config=custom_config)
             batch_flies.append((fly, fly_name))
 
             # Process each metric for this specific fly
-            for metric in metrics:
+            for metric in fly_metrics:
                 dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
 
                 if dataset_path.exists():
@@ -385,7 +533,7 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
                     continue
 
                 # Create dataset for this specific fly
-                dataset = Ballpushing_utils.Dataset(fly, dataset_type=metric)
+                dataset = ballpushing_utils.Dataset(fly, dataset_type=metric)
 
                 if dataset.data is not None and not dataset.data.empty:
                     dataset_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,7 +578,7 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5):
     return processed_flies
 
 
-def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
+def process_experiment(folder, metrics, output_data, baseline_memory_mb=None, experiment_type_override=None):
     """
     Process an experiment folder in experiment mode.
 
@@ -439,11 +587,16 @@ def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
     folder : Path
         Path to the experiment folder.
     metrics : list
-        List of metrics to process.
+        List of dataset types requested by the user (will be filtered
+        against the eligibility table for the resolved experiment type
+        before any work happens).
     output_data : Path
         Output directory for datasets.
     baseline_memory_mb : float, optional
         Baseline memory usage for delta-based cache clearing.
+    experiment_type_override : str, optional
+        If set, force this experiment type instead of detecting it
+        from ``folder``'s path.
 
     Returns
     -------
@@ -453,9 +606,21 @@ def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
     logging.info(f"Processing experiment folder: {folder.name}")
 
     try:
+        # Resolve experiment type once for the whole folder; this
+        # determines which datasets we'll attempt to build AND seeds
+        # the per-fly Config via custom_config below.
+        experiment_type = resolve_experiment_type(folder, override=experiment_type_override)
+        logging.info(f"  Resolved experiment type: {experiment_type}")
+        exp_metrics = filter_datasets_for_type(metrics, experiment_type, label=folder.name)
+        if not exp_metrics:
+            logging.warning(
+                f"No compatible datasets for {folder.name} (type={experiment_type}). Skipping."
+            )
+            return None
+
         # Check if all datasets already exist
         all_datasets_exist = True
-        for metric in metrics:
+        for metric in exp_metrics:
             dataset_path = output_data / metric / f"{folder.name}_{metric}.feather"
             if not dataset_path.exists():
                 all_datasets_exist = False
@@ -467,19 +632,25 @@ def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
 
         # Check if the Experiment object exists or needs to be created
         experiment = None
-        for metric in metrics:
+        for metric in exp_metrics:
             dataset_path = output_data / metric / f"{folder.name}_{metric}.feather"
 
             if dataset_path.exists():
                 logging.info(f"Dataset {dataset_path} already exists. Skipping.")
                 continue
 
-            # Create the Experiment object only if needed
+            # Create the Experiment object only if needed.
+            # ``custom_config`` propagates experiment_type into every
+            # fly's shared Config — the package's paradigm-specific
+            # branches read from ``fly.config.experiment_type``.
             if experiment is None:
-                experiment = Ballpushing_utils.Experiment(folder)
+                experiment = ballpushing_utils.Experiment(
+                    folder,
+                    custom_config={"experiment_type": experiment_type},
+                )
 
             # Process the dataset
-            dataset = Ballpushing_utils.Dataset(experiment, dataset_type=metric)
+            dataset = ballpushing_utils.Dataset(experiment, dataset_type=metric)
             if dataset.data is not None and not dataset.data.empty:
                 dataset_path.parent.mkdir(parents=True, exist_ok=True)  # Ensure output directory exists
                 dataset.data.to_feather(dataset_path)
@@ -508,7 +679,7 @@ def process_experiment(folder, metrics, output_data, baseline_memory_mb=None):
         logging.error(f"Traceback: {traceback.format_exc()}")
 
 
-def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False):
+def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False, experiment_type_override=None):
     """
     Process an individual fly directory in flies mode.
 
@@ -517,11 +688,15 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
     fly_dir : Path
         Path to the fly directory (e.g., /path/to/experiment/arena1/corridor1).
     metrics : list
-        List of metrics to process.
+        List of dataset types requested by the user (will be filtered
+        against the eligibility table for the resolved experiment type).
     output_data : Path
         Output directory for datasets.
     force_cache_clear : bool
         If True, always clear caches regardless of memory usage.
+    experiment_type_override : str, optional
+        If set, force this experiment type instead of detecting it
+        from ``fly_dir``'s path.
     """
     logging.info(f"Processing fly directory: {fly_dir}")
 
@@ -541,9 +716,18 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
             logging.error(f"Metadata.json not found in experiment folder: {experiment_folder}")
             return
 
+        # Resolve experiment type and prune incompatible datasets.
+        experiment_type = resolve_experiment_type(fly_dir, override=experiment_type_override)
+        fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
+        if not fly_metrics:
+            logging.warning(
+                f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
+            )
+            return
+
         # Check if all datasets already exist
         all_datasets_exist = True
-        for metric in metrics:
+        for metric in fly_metrics:
             dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
             if not dataset_path.exists():
                 all_datasets_exist = False
@@ -553,11 +737,17 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
             logging.info(f"All datasets for {fly_name} already exist. Skipping.")
             return
 
-        # Create individual Fly object with as_individual=True to avoid loading full experiment
-        fly = Ballpushing_utils.Fly(fly_dir, as_individual=True)
+        # Create individual Fly object with as_individual=True to avoid
+        # loading full experiment. ``custom_config`` overrides
+        # experiment_type on the Config used by this Fly.
+        fly = ballpushing_utils.Fly(
+            fly_dir,
+            as_individual=True,
+            custom_config={"experiment_type": experiment_type},
+        )
 
         # Process each metric for this specific fly
-        for metric in metrics:
+        for metric in fly_metrics:
             dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
 
             if dataset_path.exists():
@@ -565,7 +755,7 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
                 continue
 
             # Create dataset for this specific fly (pass the fly object directly)
-            dataset = Ballpushing_utils.Dataset(fly, dataset_type=metric)
+            dataset = ballpushing_utils.Dataset(fly, dataset_type=metric)
 
             if dataset.data is not None and not dataset.data.empty:
                 # No need to filter since we're working with individual fly data
@@ -984,8 +1174,34 @@ if __name__ == "__main__":
         "--skip-pooling",
         nargs="+",
         default=[],
-        metavar="METRIC",
-        help="Metrics to exclude from pooling (e.g. --skip-pooling coordinates). Useful for heavy datasets that would crash RAM.",
+        metavar="DATASET",
+        help="Datasets to exclude from pooling (e.g. --skip-pooling coordinates). Useful for heavy datasets that would crash RAM.",
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        required=True,
+        choices=ALL_DATASET_TYPES,
+        metavar="NAME",
+        help=(
+            "Dataset types to build (one or more). Each is validated "
+            "against the resolved experiment type; incompatible "
+            "combinations (e.g. F1_coordinates on a non-F1 experiment) "
+            "are skipped with a warning, never silently produced. "
+            "Choices: " + ", ".join(ALL_DATASET_TYPES)
+        ),
+    )
+    parser.add_argument(
+        "--experiment-type",
+        choices=sorted(ELIGIBLE_DATASETS),
+        default=None,
+        help=(
+            "Override path-based experiment type detection. By default "
+            "the type is read from the experiment's path (F1_Tracks → "
+            "F1, MagnetBlock → MagnetBlock, MultiMazeRecorder → TNT). "
+            "Use this for experiments saved outside their canonical "
+            "directory (typically still in the MultiMazeRecorder catch-all)."
+        ),
     )
     args = parser.parse_args()
 
@@ -993,6 +1209,17 @@ if __name__ == "__main__":
     CONFIG["PROCESSING"]["memory_threshold_mb"] = args.memory_threshold
 
     logging.basicConfig(level=getattr(logging, args.log_level))
+
+    # Log dataset / experiment-type resolution up front so the run's
+    # intent is captured in the log even if it crashes mid-fly.
+    logging.info(f"Datasets to build: {args.datasets}")
+    if args.experiment_type:
+        logging.info(f"Experiment type: forced to {args.experiment_type!r} (CLI override)")
+    else:
+        logging.info(
+            "Experiment type: auto-detect from path "
+            f"({EXPERIMENT_TYPE_FROM_PATH})"
+        )
 
     # Log optimization settings
     logging.info(f"Cache management configuration:")
@@ -1013,7 +1240,7 @@ if __name__ == "__main__":
             raise ValueError("--complement requires --yaml to be specified")
         logging.info("Running in complement mode")
         processing_items, output_data, is_experiment_mode = process_complement_mode(
-            args.yaml, args.complement, CONFIG["PROCESSING"]["metrics"]
+            args.yaml, args.complement, args.datasets
         )
         if not processing_items:
             logging.info("No missing files to process. Exiting.")
@@ -1029,7 +1256,7 @@ if __name__ == "__main__":
             logging.info("Detected fly directories in YAML, using flies mode")
             args.mode = "flies"
         # Create metric subdirectories
-        for metric in CONFIG["PROCESSING"]["metrics"]:
+        for metric in args.datasets:
             (output_data / metric).mkdir(exist_ok=True)
         # Skip the normal folder discovery and go straight to processing
         skip_folder_discovery = True
@@ -1052,7 +1279,7 @@ if __name__ == "__main__":
         else:
             # Determine the output_summary_dir based on the provided arguments
             today_date = datetime.now().strftime("%y%m%d_%H")
-            dataset_type = CONFIG["PROCESSING"]["metrics"][0]  # Use the first metric as the dataset type
+            dataset_type = args.datasets[0]  # Use the first metric as the dataset type
 
             if args.yaml:
                 yaml_stem = Path(args.yaml).stem  # Extract the stem (filename without extension)
@@ -1087,6 +1314,9 @@ if __name__ == "__main__":
                 "yaml_file": args.yaml,
                 "threads": args.threads,
                 "log_level": args.log_level,
+                "datasets_requested": args.datasets,
+                "experiment_type_override": args.experiment_type,
+                "experiment_type_path_map": EXPERIMENT_TYPE_FROM_PATH,
                 "timestamp": datetime.now().isoformat(),
             },
         }
@@ -1148,7 +1378,7 @@ if __name__ == "__main__":
 
     if not skip_folder_discovery:
         # Create metric subdirectories (already done in complement mode)
-        for metric in CONFIG["PROCESSING"]["metrics"]:
+        for metric in args.datasets:
             (output_data / metric).mkdir(exist_ok=True)
 
     # Main processing loop
@@ -1188,7 +1418,11 @@ if __name__ == "__main__":
 
         # Process flies in batches
         successfully_processed = process_flies_batch(
-            flies_to_process, CONFIG["PROCESSING"]["metrics"], output_data, batch_size=args.batch_size
+            flies_to_process,
+            args.datasets,
+            output_data,
+            batch_size=args.batch_size,
+            experiment_type_override=args.experiment_type,
         )
 
         # Update checkpoint with all processed flies (skip in complement mode)
@@ -1223,14 +1457,22 @@ if __name__ == "__main__":
             try:
                 if args.mode == "experiment":
                     new_baseline = process_experiment(
-                        item, CONFIG["PROCESSING"]["metrics"], output_data, baseline_memory_mb
+                        item,
+                        args.datasets,
+                        output_data,
+                        baseline_memory_mb,
+                        experiment_type_override=args.experiment_type,
                     )
                     if new_baseline is not None:
                         baseline_memory_mb = new_baseline
                 elif args.mode == "flies":
                     # Use individual processing with configurable cache clearing
                     process_fly_directory(
-                        item, CONFIG["PROCESSING"]["metrics"], output_data, force_cache_clear=args.force_cache_clear
+                        item,
+                        args.datasets,
+                        output_data,
+                        force_cache_clear=args.force_cache_clear,
+                        experiment_type_override=args.experiment_type,
                     )
 
                 processed_items.add(item_name)
@@ -1256,7 +1498,7 @@ if __name__ == "__main__":
     # ==================================================================
     if args.skip_pooling:
         logging.info(f"Skipping pooling for metrics: {args.skip_pooling}")
-    for metric in CONFIG["PROCESSING"]["metrics"]:
+    for metric in args.datasets:
         if metric in args.skip_pooling:
             logging.info(f"Skipping pooling for metric '{metric}' (excluded via --skip-pooling)")
             continue

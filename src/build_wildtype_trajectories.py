@@ -42,6 +42,8 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
+import ballpushing_utils
+
 # ---------------------------------------------------------------------------
 # Default paths – override with CLI flags
 # ---------------------------------------------------------------------------
@@ -275,8 +277,8 @@ def process_condition(
         fly_dir = Path(fly_dir)
         fly_label = f"{fly_dir.parent.parent.name}/{fly_dir.parent.name}/{fly_dir.name}"
         try:
-            fly = Ballpushing_utils.Fly(fly_dir, as_individual=True)
-            ds = Ballpushing_utils.Dataset(fly, dataset_type=DATASET_TYPE)
+            fly = ballpushing_utils.Fly(fly_dir, as_individual=True)
+            ds = ballpushing_utils.Dataset(fly, dataset_type=DATASET_TYPE)
             if ds.data is None or ds.data.empty:
                 logging.warning(f"[{condition}] No data for {fly_label}")
                 n_fail += 1
