@@ -22,14 +22,14 @@ def uniform_sample_frames(
     video_path = Path(video_path).as_posix()
 
     try:
-        from decord import VideoReader
+        from video_reader import PyVideoReader
 
-        vr = VideoReader(video_path)
+        vr = PyVideoReader(video_path)
         n_frames_total = len(vr)
         assert n_frames <= n_frames_total, f"Requested {n_frames} frames, but video has only {n_frames_total} frames."
         frame_indices = np.linspace(0, n_frames_total, n_frames, endpoint=False)
         frame_indices = np.round(frame_indices).astype(int)
-        frames =  vr.get_batch(frame_indices).asnumpy()[:, y0:y1, :, 0]
+        frames =  vr[frame_indices][:, y0:y1, :, 0]
         t, _, w = frames.shape
         frames = np.ascontiguousarray(frames.reshape((t, n_corridors, corridor_height, w)))
         return frames
@@ -61,12 +61,12 @@ def iter_frames(video_path: str, y0: int = 64, n_corridors: int = 6, corridor_he
     video_path = Path(video_path).as_posix()
     y1 = y0 + n_corridors * corridor_height
     try:
-        from decord import VideoReader
-        vr = VideoReader(video_path)
+        from video_reader import PyVideoReader
+        vr = PyVideoReader(video_path)
         if verbose:
             vr = tqdm(vr, total=len(vr))
         for frame in vr:
-            yield frame.asnumpy()[y0:y1, :, 0].reshape((n_corridors, corridor_height, -1))
+            yield frame[y0:y1, :, 0].reshape((n_corridors, corridor_height, -1))
     except ImportError:
         import cv2
         cap = cv2.VideoCapture(video_path)
