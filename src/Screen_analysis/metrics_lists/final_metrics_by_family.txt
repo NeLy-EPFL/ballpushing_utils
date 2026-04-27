@@ -1,0 +1,6 @@
+[intensity] distance_moved, max_distance, max_event, nb_events, nb_freeze, nb_significant_events, normalized_velocity, velocity_during_interactions, velocity_trend
+[orientation_kinematics] flailing, fraction_not_facing_ball, number_of_pauses
+[persistence_dynamics] interaction_persistence, persistence_at_end
+[rates_ratios] chamber_ratio, distance_ratio, head_pushing_ratio, overall_interaction_rate, pulling_ratio, significant_ratio
+[state_success] has_finished, has_major, has_significant, pulled
+[timing] chamber_exit_time, time_chamber_beginning, first_major_event, first_major_event_time, max_event_time, total_pause_duration

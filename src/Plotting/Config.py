@@ -58,7 +58,7 @@ data_bins = 10
 
 permutation_method = "scipy"
 
-permutation_metric = "avg_distance"
+# permutation_metric = "avg_distance"
 
 n_permutations = 1000
 
@@ -312,107 +312,96 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
 def create_and_save_plot(
     data, nicknames, brain_region, output_path, registries, show_signif=False, show_progress=False, test_nickname=None
 ):
+    # For ID card, we expect a single nickname
     if test_nickname:
         nicknames = [test_nickname]
 
-    n_nicknames = len(nicknames)
-    n_cols = 5
-    n_rows = math.ceil(n_nicknames / n_cols)
-    subplot_size = (6, 6)
-    fig_width, fig_height = subplot_size[0] * n_cols, subplot_size[1] * n_rows
+    # Only one nickname for ID card
+    nickname = nicknames[0]
+    nickname_data = data[data["Nickname"] == nickname]
+    split_value = nickname_data["Split"].iloc[0]
+    associated_control = registries["control_nicknames_dict"][split_value]
+    control_data = data[data["Nickname"] == associated_control]
+    subset_data = pd.concat([nickname_data, control_data])
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
-    axes = axes.flatten()
+    # Preprocess data
+    processed = Processing.preprocess_data(
+        subset_data,
+        time_col="time",
+        value_col="distance_ball_0",
+        group_col="Brain region",
+        subject_col="fly",
+        bins=12,  # or use data_bins if you want to keep it configurable
+    )
 
-    iterator = enumerate(nicknames)
-    if show_progress:
-        iterator = tqdm(iterator, total=n_nicknames, desc="Creating subplots")
-
-    for i, nickname in iterator:
-        nickname_data = data[data["Nickname"] == nickname]
-        split_value = nickname_data["Split"].iloc[0]
-        associated_control = registries["control_nicknames_dict"][split_value]
-        control_data = data[data["Nickname"] == associated_control]
-        subset_data = pd.concat([nickname_data, control_data])
-
-        print(f"Processing {nickname} vs {associated_control}")
-
-        # Preprocess the data for permutation test
-        preprocessed_data = Processing.preprocess_data(subset_data, bins=data_bins)
-
-        if show_signif:
-            permutation = Processing.compute_permutation_test(
-                preprocessed_data,
-                permutation_metric,
-                n_permutations=n_permutations,
-                show_progress=show_progress,
-                verbose=error_logs,
-            )
-
-            # Add the 'Significant' column to the preprocessed data
-            preprocessed_data["Significant"] = preprocessed_data["time_bin"].isin(
-                permutation["significant_timepoints_corrected"]
-            )
-
-        # Plot the raw data
-        sns.lineplot(
-            data=subset_data, x="time", y="distance_ball_0", hue="Brain region", ax=axes[i], palette=color_dict
+    # Permutation test
+    if show_signif:
+        permutation = Processing.compute_permutation_test(
+            processed,
+            metric="avg_distance_ball_0",
+            group_col="Brain region",
+            control_group="Control",
+            n_permutations=1000,
+            progress=show_progress,
         )
+        # Mark significant bins
+        processed["Significant"] = processed["time_bin"].isin(
+            permutation["time_bins"][permutation["significant_timepoints"]]
+        )
+    else:
+        permutation = None
+        processed["Significant"] = False
 
-        # Highlight significant timepoints with dotted lines and asterisks
-        if show_signif:
-            try:
-                significant_bins = preprocessed_data[preprocessed_data["Significant"]]["time_bin"]
-                for time_bin in range(data_bins):
-                    bin_start = (
-                        subset_data["time"].min()
-                        + time_bin * (subset_data["time"].max() - subset_data["time"].min()) / data_bins
-                    )
-                    bin_end = bin_start + (subset_data["time"].max() - subset_data["time"].min()) / data_bins
+    # Plot
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
-                    # Draw faint dotted lines for the bins
-                    axes[i].axvline(bin_start, color="gray", linestyle="dotted", alpha=0.5)
-                    axes[i].axvline(bin_end, color="gray", linestyle="dotted", alpha=0.5)
+    plt.figure(figsize=(10, 6))
+    ax = plt.gca()
+    sns.lineplot(
+        data=subset_data,
+        x="time",
+        y="distance_ball_0",
+        hue="Brain region",
+        palette=color_dict,
+        ax=ax,
+    )
 
-                    # Annotate significance levels
-                    if time_bin in significant_bins.values:
-                        p_value = permutation["p_values_corrected"][time_bin]
-                        if p_value < 0.001:
-                            significance = "***"
-                        elif p_value < 0.01:
-                            significance = "**"
-                        elif p_value < 0.05:
-                            significance = "*"
-                        else:
-                            significance = ""
+    # Draw vertical dotted lines for each time bin
+    time_min = subset_data["time"].min()
+    time_max = subset_data["time"].max()
+    n_bins = processed["time_bin"].nunique()
+    bin_edges = np.linspace(time_min, time_max, n_bins + 1)
+    for edge in bin_edges:
+        ax.axvline(edge, color="gray", linestyle="dotted", alpha=0.5)
 
-                        if significance:
-                            # Lower the y position of the stars and increase font size
-                            y_position = subset_data["distance_ball_0"].max() * 0.95
-                            axes[i].annotate(
-                                significance,
-                                xy=(bin_start + (bin_end - bin_start) / 2, y_position),
-                                xycoords="data",
-                                ha="center",
-                                va="bottom",
-                                fontsize=16,
-                                color="red",
-                            )
+    # Annotate significance levels with asterisks
+    if show_signif and permutation is not None:
+        for idx, tb in enumerate(permutation["time_bins"]):
+            bin_start = bin_edges[idx]
+            bin_end = bin_edges[idx + 1]
+            x_pos = bin_start + (bin_end - bin_start) / 2
+            y_pos = subset_data["distance_ball_0"].max() * 0.95
 
-                axes[i].set_title(f"{nickname} vs {associated_control}")
-                axes[i].set_xlabel("Time (s)")
-                axes[i].set_ylabel("Ball distance from start (px)")
-                axes[i].legend().remove()  # Remove the legend
+            if idx in permutation["significant_timepoints"]:
+                p_value = permutation["p_values_corrected"][idx]
+                if p_value < 0.001:
+                    significance = "***"
+                elif p_value < 0.01:
+                    significance = "**"
+                elif p_value < 0.05:
+                    significance = "*"
+                else:
+                    significance = ""
+                if significance:
+                    ax.annotate(significance, xy=(x_pos, y_pos), ha="center", va="bottom", fontsize=16, color="red")
 
-            except Exception as e:
-                print(f"Error: {e}")
-
-    for j in range(i + 1, len(axes)):
-        fig.delaxes(axes[j])
-
+    plt.title(f"Trajectory: {nickname} vs {associated_control}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Ball distance from start (px)")
     plt.tight_layout()
     plt.savefig(output_path)
-    plt.close(fig)  # Close the figure to free up memory
+    plt.close()
 
 
 def create_control_plot(data, control_nicknames, output_path):
@@ -442,93 +431,55 @@ def create_control_plot(data, control_nicknames, output_path):
 
 # Function to create and save KDE and ECDF plots
 def create_and_save_kde_ecdf_plot(data, nicknames, brain_region, output_path, registries):
-    if brain_region == "Control":
-        # Special case: Plot all controls together
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # One row: KDE and ECDF side by side
+    """
+    Create and save a KDE and ECDF plot for a single nickname and its control.
+    Always produces two subplots: one for KDE, one for ECDF.
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
 
-        # Subset data for all control nicknames
-        control_data = data[data["Nickname"].isin(nicknames)]
+    # For ID card, we expect a single nickname
+    nickname = nicknames[0]
+    nickname_data = data[data["Nickname"] == nickname]
+    split_value = nickname_data["Split"].iloc[0]
+    associated_control = registries["control_nicknames_dict"][split_value]
+    control_data = data[data["Nickname"] == associated_control]
+    subset_data = pd.concat([nickname_data, control_data])
 
-        # KDE Plot
-        sns.histplot(data=control_data, x="start", hue="Nickname", ax=axes[0], element="step", kde=True)
-        axes[0].set_title("KDE: All Controls", fontsize=12)
-        axes[0].set_xlim(0, 3600)
-        axes[0].tick_params(labelsize=10)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
-        # ECDF Plot / cumulative distribution
-        sns.histplot(
-            data=control_data, x="start", hue="Nickname", ax=axes[1], cumulative=True, element="step", kde=True
-        )
-        axes[1].set_title("Cumulative distribution: All Controls", fontsize=12)
-        axes[1].set_xlim(0, 3600)
-        axes[1].tick_params(labelsize=10)
+    # KDE Plot
+    sns.histplot(
+        data=subset_data,
+        x="start_time",
+        hue="Brain region",
+        ax=axes[0],
+        kde=True,
+        element="step",
+        palette=color_dict,
+    )
+    axes[0].set_title(f"KDE: {nickname} vs {associated_control}", fontsize=12)
+    axes[0].set_xlim(0, 3600)
+    axes[0].tick_params(labelsize=10)
 
-        # Add vertical line between KDE and ECDF
-        fig.add_subplot(111, frameon=False)
-        plt.vlines(x=0.5, ymin=0, ymax=1, transform=fig.transFigure, colors="black", linewidth=2)
-        plt.tick_params(labelcolor="none", top=False, bottom=False, left=False, right=False)
+    # ECDF Plot
+    sns.histplot(
+        data=subset_data,
+        x="start_time",
+        hue="Brain region",
+        ax=axes[1],
+        palette=color_dict,
+        cumulative=True,
+        element="step",
+        kde=True,
+    )
+    axes[1].set_title(f"Cumulative: {nickname} vs {associated_control}", fontsize=12)
+    axes[1].set_xlim(0, 3600)
+    axes[1].tick_params(labelsize=10)
 
-    else:
-        # Default behavior for other brain regions
-        pairs_per_row = 3
-        n_nicknames = len(nicknames)
-        n_rows = math.ceil(n_nicknames / pairs_per_row)
-        n_cols = pairs_per_row * 2  # Two plots (KDE and ECDF) for each pair
-
-        subplot_size = (10, 6)  # Adjusted size for each subplot
-        fig_width, fig_height = subplot_size[0] * pairs_per_row, subplot_size[1] * n_rows
-
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(fig_width, fig_height), squeeze=False)
-
-        for i, nickname in enumerate(nicknames):
-            row = i // pairs_per_row
-            col = (i % pairs_per_row) * 2
-
-            nickname_data = data[data["Nickname"] == nickname]
-            split_value = nickname_data["Split"].iloc[0]
-            associated_control = registries["control_nicknames_dict"][split_value]
-            control_data = data[data["Nickname"] == associated_control]
-            subset_data = pd.concat([nickname_data, control_data])
-
-            # KDE Plot
-            sns.histplot(
-                data=subset_data,
-                x="start",
-                hue="Brain region",
-                ax=axes[row, col],
-                kde=True,
-                element="step",
-                palette=color_dict,
-            )
-            axes[row, col].set_title(f"KDE: {nickname}\nvs {associated_control}", fontsize=10)
-            axes[row, col].set_xlim(0, 3600)
-            axes[row, col].tick_params(labelsize=8)
-
-            # ECDF Plot
-            sns.histplot(
-                data=subset_data,
-                x="start",
-                hue="Brain region",
-                ax=axes[row, col + 1],
-                palette=color_dict,
-                cumulative=True,
-                element="step",
-                kde=True,
-            )
-            axes[row, col + 1].set_title(f"Cumulative: {nickname}\nvs {associated_control}", fontsize=10)
-            axes[row, col + 1].set_xlim(0, 3600)
-            axes[row, col + 1].tick_params(labelsize=8)
-
-        # # Add vertical and horizontal separators
-        # for i in range(1, pairs_per_row):
-        #     plt.vlines(x=i/pairs_per_row, ymin=0, ymax=1, transform=fig.transFigure, colors='black', linewidth=2)
-
-        # for i in range(1, n_rows):
-        #     plt.hlines(y=1-i/n_rows, xmin=0, xmax=1, transform=fig.transFigure, colors='black', linewidth=2)
-
-    plt.subplots_adjust(hspace=0.4, wspace=0.4)  # Adjust spacing between subplots
+    plt.subplots_adjust(hspace=0.3, wspace=0.3)
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)  # Close the figure to free up memory
+    plt.close(fig)
 
 
 def create_and_save_hist_kde_rawdisp_plot(data, nicknames, brain_region, output_path, registries, color_dict):
