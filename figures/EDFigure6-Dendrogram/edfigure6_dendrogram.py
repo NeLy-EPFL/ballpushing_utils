@@ -55,13 +55,8 @@ import Config  # noqa: E402 — external module from src/Plotting/Config.py
 # ── Configuration ────────────────────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_PATH = dataset(
-    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-)
-CONSISTENCY_DIR = (
-    _REPO_ROOT
-    / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
-)
+DATA_PATH = dataset("Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather")
+CONSISTENCY_DIR = _REPO_ROOT / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
 METRICS_PATH = _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
 OUTPUT_DIR = figure_output_dir("EDFigure6", __file__, create=False)
 
@@ -88,26 +83,26 @@ METRIC_DISPLAY_NAMES = {
     "distance_ratio": "Dist. ball moved / corridor length",
     "distance_moved": "Dist. ball moved",
     "pulled": "Signif. (>0.3 mm) pulling events (#)",
-    "max_event": "Event max. ball displ. (n)",
+    "max_event": "Event max. ball displ. (#)",
     "number_of_pauses": "Long pauses (>5s <5px) (#)",
-    "first_major_event": "First major (>1.2mm) event(n)",
+    "first_major_event": "First major (>1.2mm) event(#)",
     "significant_ratio": "Fraction signif. (>0.3 mm) events",
     "max_distance": "Max ball displacement (mm)",
     "chamber_ratio": "Fraction time in chamber",
     "nb_events": "Events (< 2mm fly-ball dist.)(#)",
     "persistence_at_end": "Fraction time near end of corridor",
     "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
-    "normalized_velocity": "Normalized walking velocity",
+    "normalized_speed": "Normalized walking speed",
     "first_major_event_time": "First major (>1.2mm) event time (s)",
     "max_event_time": "Max ball displ. time (s)",
     "nb_freeze": "short pauses (>2s <5px) (#)",
     "flailing": "Movement of front legs during contact",
-    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "speed_during_interactions": "Fly speed during ball contact (mm/s)",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing (>30°) ball in corridor",
     "interaction_persistence": "Avg. duration ball interaction events (s)",
     "chamber_exit_time": "Time of first chamber exit (s)",
-    "velocity_trend": "Slope linear fit to fly velocity over time",
+    "speed_trend": "Slope linear fit to fly speed over time",
 }
 
 
