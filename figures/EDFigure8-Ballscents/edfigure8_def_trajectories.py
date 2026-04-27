@@ -27,11 +27,12 @@ Arguments:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
-from ballpushing_utils import figure_output_dir
-import matplotlib
+from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -39,14 +40,8 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 # Add repository root to path for imports
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
 # Set matplotlib parameters for publication quality
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
-
 # Pixel to mm conversion (500 px = 30 mm)
 PIXELS_PER_MM = 500 / 30
 
@@ -67,8 +62,7 @@ COMPARISONS = [
 
 # Dataset path
 COORDINATES_PATH = (
-    "/mnt/upramdya_data/MD/Ball_scents/Datasets/"
-    "251103_10_summary_ballscents_Data/coordinates/pooled_coordinates.feather"
+    dataset("Ball_scents/Datasets/251103_10_summary_ballscents_Data/coordinates/pooled_coordinates.feather")
 )
 
 

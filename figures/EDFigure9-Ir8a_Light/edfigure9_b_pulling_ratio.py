@@ -16,20 +16,13 @@ Usage:
 """
 
 import argparse
-import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from ballpushing_utils import figure_output_dir
+from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils.plotting import set_illustrator_style
 
-import matplotlib
-
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
-
+set_illustrator_style()
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -39,8 +32,7 @@ import pandas as pd
 # ---------------------------------------------------------------------------
 
 SUMMARY_PATH = (
-    "/mnt/upramdya_data/MD/TNT_Olfaction_Dark/Datasets"
-    "/251106_08_summary_TNT_Olfaction_Dark_Data/summary/pooled_summary.feather"
+    dataset("TNT_Olfaction_Dark/Datasets/251106_08_summary_TNT_Olfaction_Dark_Data/summary/pooled_summary.feather")
 )
 
 # Light OFF = black/gray, Light ON = orange  (matching the legend)

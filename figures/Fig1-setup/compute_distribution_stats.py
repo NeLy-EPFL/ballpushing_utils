@@ -30,16 +30,21 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+from ballpushing_utils import dataset, figure_output_dir
+
 # ---- defaults matching the two sibling scripts ---------------------------
-DEFAULT_FEATHER = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"
-    "/260220_10_summary_control_folders_Data/coordinates"
-    "/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
+# All paths route through ``dataset()`` / ``figure_output_dir()`` so the
+# script picks up ``BALLPUSHING_DATA_ROOT`` / ``BALLPUSHING_FIGURES_ROOT``
+# env vars on machines where the lab share isn't mounted at the default
+# location.
+DEFAULT_FEATHER = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data"
+    "/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
 )
-DEFAULT_COORDINATES_DIR = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets" "/260220_10_summary_control_folders_Data/coordinates"
+DEFAULT_COORDINATES_DIR = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates"
 )
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1")
+DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 PX_PER_MM = 500 / 30
 

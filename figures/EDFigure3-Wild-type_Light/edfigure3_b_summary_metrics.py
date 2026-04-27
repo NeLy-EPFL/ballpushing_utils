@@ -14,10 +14,7 @@ Usage:
 """
 
 import argparse
-import sys
 from pathlib import Path
-
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -25,17 +22,13 @@ from matplotlib.patches import Rectangle
 from scipy import stats
 
 # Add src directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from ballpushing_utils import figure_output_dir
+from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 # Set matplotlib parameters for publication quality
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
-
-
 def cohens_d(group1, group2):
     """Calculate Cohen's d effect size (group2 - group1)."""
     n1, n2 = len(group1), len(group2)
@@ -101,7 +94,7 @@ def load_and_clean_exploration_dataset(test_mode=False):
         If True, sample a subset of data for faster processing
     """
     # Load the exploration dataset
-    dataset_path = "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/summary/pooled_summary.feather"
+    dataset_path = dataset("Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/summary/pooled_summary.feather")
 
     print(f"Loading exploration dataset from: {dataset_path}")
     try:
