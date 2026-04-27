@@ -56,7 +56,7 @@ Below is a more detailed description of each step
 
 **nb_stops** : Number of stops
 
-**normalized_velocity** : Fly velocity normalized by available space to accelerate (i.e., ball position)
+**normalized_speed** : Fly speed normalized by available space to accelerate (i.e., ball position)
 
 **overall_interaction_rate** : Rate of interaction over time
 
@@ -76,9 +76,9 @@ Below is a more detailed description of each step
 
 **total_stop_duration** : Cumulative duration spent in stops
 
-**velocity_during_interactions** : Fly speed when interacting with the ball
+**speed_during_interactions** : Fly speed when interacting with the ball
 
-**velocity_trend** : Variation of velocity across the experiment
+**speed_trend** : Variation of speed across the experiment
 
 For more details on thresholds, metrics computation and descriptions, see the ballpushing metrics readme.
 
@@ -119,7 +119,7 @@ This method uses **biological domain knowledge** to group metrics into functiona
 **Metric Families:**
 
 - **Timing**: `chamber_exit_time`, `first_major_event_time`, pause/stop durations
-- **Intensity**: `nb_events`, `distance_moved`, `max_distance`, velocity metrics
+- **Intensity**: `nb_events`, `distance_moved`, `max_distance`, speed metrics
 - **Rates/Ratios**: `significant_ratio`, `pulling_ratio`, `head_pushing_ratio`
 - **State/Success**: `has_finished`, `has_major`, `has_significant` binary flags
 - **Persistence/Dynamics**: `interaction_persistence`, learning trends, `auc`

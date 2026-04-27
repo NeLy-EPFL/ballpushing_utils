@@ -59,7 +59,7 @@ class BehaviorUMAP:
         # Feature selection configuration
         feature_config = {
             "tracking": [r"_frame\d+_x$", r"_frame\d+_y$"],
-            "frame": [r"_frame\d+_velocity$", r"_frame\d+_angle$"],
+            "frame": [r"_frame\d+_speed$", r"_frame\d+_angle$"],
             "statistical": [r"_mean$", r"_std$", r"_skew$", r"_kurt$"],
             "fourier": [r"_dom_freq$", r"_dom_freq_magnitude$"],
         }

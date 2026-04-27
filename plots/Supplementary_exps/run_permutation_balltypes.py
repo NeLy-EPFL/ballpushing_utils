@@ -1397,14 +1397,14 @@ def main(overwrite=True, test_mode=False):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
     ]
 
     # Additional pattern-based metrics
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "freeze",

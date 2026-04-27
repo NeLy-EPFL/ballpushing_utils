@@ -235,10 +235,10 @@ def get_elegant_metric_name(metric_name):
         "pulled": "Number of pulls",
         "pulling_ratio": "Pulling ratio",
         "head_pushing_ratio": "Head pushing ratio",
-        # Velocity metrics
-        "normalized_velocity": "Normalized velocity",
-        "velocity_during_interactions": "Velocity during interactions",
-        "velocity_trend": "Velocity trend",
+        # Speed metrics
+        "normalized_speed": "Normalized speed",
+        "speed_during_interactions": "Speed during interactions",
+        "speed_trend": "Speed trend",
         # Pause/stop metrics
         "has_long_pauses": "Has long pauses",
         "nb_stops": "Number of stops",

@@ -498,20 +498,20 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("event_influence"):
                     event_influence = safe_call(self.compute_event_influence, fly_idx, ball_idx)
 
-                # Velocity metrics - conditional computation
-                normalized_velocity = np.nan
-                if self.is_metric_enabled("normalized_velocity"):
-                    normalized_velocity = safe_call(self.compute_normalized_velocity, fly_idx, ball_idx)
+                # Speed metrics - conditional computation
+                normalized_speed = np.nan
+                if self.is_metric_enabled("normalized_speed"):
+                    normalized_speed = safe_call(self.compute_normalized_speed, fly_idx, ball_idx)
 
-                velocity_during_interactions = np.nan
-                if self.is_metric_enabled("velocity_during_interactions"):
-                    velocity_during_interactions = safe_call(
-                        self.compute_velocity_during_interactions, fly_idx, ball_idx
+                speed_during_interactions = np.nan
+                if self.is_metric_enabled("speed_during_interactions"):
+                    speed_during_interactions = safe_call(
+                        self.compute_speed_during_interactions, fly_idx, ball_idx
                     )
 
-                velocity_trend = np.nan
-                if self.is_metric_enabled("velocity_trend"):
-                    velocity_trend = safe_call(self.compute_velocity_trend, fly_idx)
+                speed_trend = np.nan
+                if self.is_metric_enabled("speed_trend"):
+                    speed_trend = safe_call(self.compute_speed_trend, fly_idx)
 
                 # New metrics - conditional computation
 
@@ -816,13 +816,13 @@ class BallPushingMetrics:
                 if self.is_metric_enabled("logistic_r2"):
                     metrics_dict["logistic_r2"] = logistic_features["r2"]
 
-                # Velocity metrics
-                if self.is_metric_enabled("normalized_velocity"):
-                    metrics_dict["normalized_velocity"] = normalized_velocity
-                if self.is_metric_enabled("velocity_during_interactions"):
-                    metrics_dict["velocity_during_interactions"] = velocity_during_interactions
-                if self.is_metric_enabled("velocity_trend"):
-                    metrics_dict["velocity_trend"] = velocity_trend
+                # Speed metrics
+                if self.is_metric_enabled("normalized_speed"):
+                    metrics_dict["normalized_speed"] = normalized_speed
+                if self.is_metric_enabled("speed_during_interactions"):
+                    metrics_dict["speed_during_interactions"] = speed_during_interactions
+                if self.is_metric_enabled("speed_trend"):
+                    metrics_dict["speed_trend"] = speed_trend
                 if self.is_metric_enabled("overall_slope"):
                     metrics_dict["overall_slope"] = overall_slope
                 if self.is_metric_enabled("overall_interaction_rate"):
@@ -2182,12 +2182,12 @@ class BallPushingMetrics:
         is_static = np.ones(len(skeleton_data), dtype=bool)
 
         for keypoint in keypoints:
-            # Calculate the velocity (magnitude of movement) for each keypoint over a rolling window
-            x_velocity = skeleton_data[f"x_{keypoint}"].diff().rolling(window=window).mean().abs()
-            y_velocity = skeleton_data[f"y_{keypoint}"].diff().rolling(window=window).mean().abs()
+            # Calculate the speed (magnitude of movement) for each keypoint over a rolling window
+            x_speed = skeleton_data[f"x_{keypoint}"].diff().rolling(window=window).mean().abs()
+            y_speed = skeleton_data[f"y_{keypoint}"].diff().rolling(window=window).mean().abs()
 
-            # Check if the velocity is below the threshold
-            keypoint_static = (x_velocity <= threshold) & (y_velocity <= threshold)
+            # Check if the speed is below the threshold
+            keypoint_static = (x_speed <= threshold) & (y_speed <= threshold)
 
             # Combine with the overall static status
             is_static &= keypoint_static
@@ -2729,9 +2729,9 @@ class BallPushingMetrics:
             "influence_ratio": influence_ratio,
         }
 
-    def compute_normalized_velocity(self, fly_idx, ball_idx):
+    def compute_normalized_speed(self, fly_idx, ball_idx):
         """
-        Compute the fly's velocity normalized by the available space.
+        Compute the fly's speed normalized by the available space.
 
         Parameters
         ----------
@@ -2743,7 +2743,7 @@ class BallPushingMetrics:
         Returns
         -------
         float
-            The average velocity normalized by the available space.
+            The average speed normalized by the available space.
         """
         # Get the fly and ball data
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
@@ -2755,20 +2755,20 @@ class BallPushingMetrics:
             ball_data["x_centre"], ball_data["y_centre"], initial_ball_x, initial_ball_y
         )
 
-        # Calculate the fly's velocity
-        fly_velocity = (
+        # Calculate the fly's speed
+        fly_speed = (
             np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
-        )  # Convert to velocity in pixels/second
+        )  # Convert to speed in pixels/second
 
-        # Normalize velocity by the available space
-        normalized_velocity = fly_velocity / (ball_distances + 1e-6)  # Add epsilon to avoid division by zero
+        # Normalize speed by the available space
+        normalized_speed = fly_speed / (ball_distances + 1e-6)  # Add epsilon to avoid division by zero
 
-        # Return the average normalized velocity
-        return np.nanmean(normalized_velocity)
+        # Return the average normalized speed
+        return np.nanmean(normalized_speed)
 
-    def compute_velocity_during_interactions(self, fly_idx, ball_idx):
+    def compute_speed_during_interactions(self, fly_idx, ball_idx):
         """
-        Compute the fly's average velocity during interaction events.
+        Compute the fly's average speed during interaction events.
 
         Parameters
         ----------
@@ -2780,7 +2780,7 @@ class BallPushingMetrics:
         Returns
         -------
         float
-            The average velocity during interaction events.
+            The average speed during interaction events.
         """
         # Get the fly data and interaction events
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
@@ -2789,23 +2789,23 @@ class BallPushingMetrics:
         if not events:
             return np.nan
 
-        # Calculate the fly's velocity
-        fly_velocity = (
+        # Calculate the fly's speed
+        fly_speed = (
             np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
-        )  # Convert to velocity in pixels/second
+        )  # Convert to speed in pixels/second
 
-        # Extract velocity during interaction events
-        velocities_during_events = []
+        # Extract speed during interaction events
+        speeds_during_events = []
         for event in events:
             start_idx, end_idx = event[0], event[1]
-            velocities_during_events.extend(fly_velocity[start_idx:end_idx])
+            speeds_during_events.extend(fly_speed[start_idx:end_idx])
 
-        # Return the average velocity during interaction events
-        return np.nanmean(velocities_during_events)
+        # Return the average speed during interaction events
+        return np.nanmean(speeds_during_events)
 
-    def compute_velocity_trend(self, fly_idx):
+    def compute_speed_trend(self, fly_idx):
         """
-        Compute the trend (slope) of the fly's velocity over time.
+        Compute the trend (slope) of the fly's speed over time.
 
         Parameters
         ----------
@@ -2815,27 +2815,27 @@ class BallPushingMetrics:
         Returns
         -------
         float
-            The slope of the velocity trend over time.
+            The slope of the speed trend over time.
         """
         # Get the fly data
         fly_data = self.tracking_data.flytrack.objects[fly_idx].dataset
 
-        # Calculate the fly's velocity
-        fly_velocity = (
+        # Calculate the fly's speed
+        fly_speed = (
             np.sqrt(fly_data["x_thorax"].diff() ** 2 + fly_data["y_thorax"].diff() ** 2) * self.fly.experiment.fps
-        )  # Convert to velocity in pixels/second
+        )  # Convert to speed in pixels/second
 
         # Remove NaN values
-        valid_indices = ~np.isnan(fly_velocity)
-        time = np.arange(len(fly_velocity))[valid_indices] / self.fly.experiment.fps  # Time in seconds
-        velocity = fly_velocity[valid_indices]
+        valid_indices = ~np.isnan(fly_speed)
+        time = np.arange(len(fly_speed))[valid_indices] / self.fly.experiment.fps  # Time in seconds
+        speed = fly_speed[valid_indices]
 
         if len(time) < 2:
             return np.nan
 
-        # Fit a linear regression to the velocity trend
+        # Fit a linear regression to the speed trend
         model = LinearRegression()
-        model.fit(time.reshape(-1, 1), velocity)
+        model.fit(time.reshape(-1, 1), speed)
 
         # Return the slope of the trend
         return model.coef_[0]
@@ -3539,12 +3539,12 @@ class BallPushingMetrics:
             x_col = f"x_{leg}"
             y_col = f"y_{leg}"
 
-            # Calculate velocity (frame-to-frame displacement) for this leg
-            x_velocity = skeleton_data[x_col].diff().fillna(0)
-            y_velocity = skeleton_data[y_col].diff().fillna(0)
+            # Calculate speed (frame-to-frame displacement) for this leg
+            x_speed = skeleton_data[x_col].diff().fillna(0)
+            y_speed = skeleton_data[y_col].diff().fillna(0)
 
-            # Motion energy is the magnitude of velocity
-            motion_energy = np.sqrt(x_velocity**2 + y_velocity**2)
+            # Motion energy is the magnitude of speed
+            motion_energy = np.sqrt(x_speed**2 + y_speed**2)
 
             # Extract motion energy during interaction events
             event_motion_energies = []

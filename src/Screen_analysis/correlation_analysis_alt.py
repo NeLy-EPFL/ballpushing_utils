@@ -38,8 +38,8 @@ FAMILY_KEYWORDS = {
         "major_event",
         "distance_moved",
         "max_distance",
-        "normalized_velocity",
-        "velocity",
+        "normalized_speed",
+        "speed",
         "speed",
     ],
     "rates_ratios": [
@@ -145,7 +145,7 @@ def identify_metric_columns(dataset):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
     ]
@@ -153,7 +153,7 @@ def identify_metric_columns(dataset):
         if metric in dataset.columns:
             potential_metrics.append(metric)
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "freeze",
@@ -200,7 +200,7 @@ def identify_metric_columns(dataset):
         "logistic_k",
         "logistic_t0",
         "logistic_r2",
-        # "velocity_trend",
+        # "speed_trend",
         # "overall_interaction_rate",
         # "max_distance",
         # "nb_significant_events",
@@ -528,8 +528,8 @@ def analyze_correlations(dataset, metric_columns, correlation_threshold=0.8, nan
         "nb_freeze",
         "number_of_pauses",
         "total_pause_duration",
-        "normalized_velocity",
-        "velocity_during_interactions",
+        "normalized_speed",
+        "speed_during_interactions",
         "fraction_not_facing_ball",
         "flailing",
         "head_pushing_ratio",

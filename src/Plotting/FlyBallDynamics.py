@@ -259,13 +259,13 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
     Group summary: 4 plots -
     1. Backoff time vs percent completion (all backoffs, all events, all flies)
     2. Backoff time vs event_idx (first backoff per event, all flies)
-    3. Ball velocity vs event_idx (all events, all flies)
+    3. Ball speed vs event_idx (all events, all flies)
     4. Percent completion at first backoff vs event_idx (all events, all flies)
     """
     all_backoff_times = []
     all_percent_completions = []
     all_event_idxs = []
-    all_ball_velocities = []
+    all_ball_speeds = []
     all_first_backoff_times = []
     all_first_backoff_percent = []
     all_first_backoff_event_idxs = []
@@ -311,15 +311,15 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
                     all_first_backoff_times.append(t)
                     all_first_backoff_percent.append(pc)
                     all_first_backoff_event_idxs.append(event_idx)
-                # Ball velocity (only if not nan)
-                bv = row.get("ball_velocity", np.nan)
+                # Ball speed (only if not nan)
+                bv = row.get("ball_speed", np.nan)
                 if not np.isnan(bv):
-                    all_ball_velocities.append((event_idx, bv))
+                    all_ball_speeds.append((event_idx, bv))
         except Exception as e:
             print(f"[WARN] Could not compute event_metrics for fly {fly_dir}: {e}")
-    # Unpack event_idx and ball_velocity for plotting
-    event_idxs_bv = [x[0] for x in all_ball_velocities]
-    ball_velocities = [x[1] for x in all_ball_velocities]
+    # Unpack event_idx and ball_speed for plotting
+    event_idxs_bv = [x[0] for x in all_ball_speeds]
+    ball_speeds = [x[1] for x in all_ball_speeds]
     import matplotlib.pyplot as plt
 
     # Group mode summary layout
@@ -339,14 +339,14 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
     axes[0, 1].set_xlabel("Event index")
     axes[0, 1].set_ylabel("Time to first backoff (s)")
     axes[0, 1].set_title("Time to first backoff vs. event index\n(first backoff per event, all flies)")
-    axes[1, 0].scatter(event_idxs_bv, ball_velocities, color="tab:orange", alpha=0.6)
+    axes[1, 0].scatter(event_idxs_bv, ball_speeds, color="tab:orange", alpha=0.6)
     axes[1, 0].set_xlabel("Event index")
-    axes[1, 0].set_ylabel("Ball velocity (pixels/s)")
-    axes[1, 0].set_title("Ball velocity vs. event index\n(all events, all flies)")
+    axes[1, 0].set_ylabel("Ball speed (pixels/s)")
+    axes[1, 0].set_title("Ball speed vs. event index\n(all events, all flies)")
     bv_vs_pc = [
         (pc, bv)
         for pc, bv in zip(
-            all_first_backoff_percent, [x[1] for x in all_ball_velocities if x[0] in all_first_backoff_event_idxs]
+            all_first_backoff_percent, [x[1] for x in all_ball_speeds if x[0] in all_first_backoff_event_idxs]
         )
         if not np.isnan(pc) and not np.isnan(bv)
     ]
@@ -356,8 +356,8 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
     else:
         axes[1, 1].text(0.5, 0.5, "No data", ha="center", va="center")
     axes[1, 1].set_xlabel("Percent completion at first backoff")
-    axes[1, 1].set_ylabel("Ball velocity (pixels/s)")
-    axes[1, 1].set_title("Ball velocity vs. percent completion at first backoff\n(first backoff per event, all flies)")
+    axes[1, 1].set_ylabel("Ball speed (pixels/s)")
+    axes[1, 1].set_title("Ball speed vs. percent completion at first backoff\n(first backoff per event, all flies)")
     # After plotting all subplots, set y and x axis limits
     # axes[0, 0] is time-based (percent completion vs backoff time)
     axes[0, 0].set_ylim(0, 350)
@@ -379,7 +379,7 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
         plt.close(fig)
     else:
         plt.show()
-    # Jointplot: percent completion at first backoff vs ball velocity and time to first backoff
+    # Jointplot: percent completion at first backoff vs ball speed and time to first backoff
     import seaborn as sns
     import pandas as pd
 
@@ -387,22 +387,22 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
     for pc, t, bv in zip(
         all_first_backoff_percent,
         all_first_backoff_times,
-        [x[1] for x in all_ball_velocities if x[0] in all_first_backoff_event_idxs],
+        [x[1] for x in all_ball_speeds if x[0] in all_first_backoff_event_idxs],
     ):
         if not np.isnan(pc) and not np.isnan(t) and not np.isnan(bv):
-            joint_data.append({"percent_completion": pc, "time_to_first_backoff": t, "ball_velocity": bv})
+            joint_data.append({"percent_completion": pc, "time_to_first_backoff": t, "ball_speed": bv})
     if joint_data:
         df_joint = pd.DataFrame(joint_data)
-        # Ball velocity vs percent completion (scatter as before, now with log scale and density)
+        # Ball speed vs percent completion (scatter as before, now with log scale and density)
         jp1 = sns.jointplot(
-            data=df_joint, x="percent_completion", y="ball_velocity", kind="scatter", color="tab:orange"
+            data=df_joint, x="percent_completion", y="ball_speed", kind="scatter", color="tab:orange"
         )
         # Overlay KDE for density
         try:
             sns.kdeplot(
                 data=df_joint,
                 x="percent_completion",
-                y="ball_velocity",
+                y="ball_speed",
                 ax=jp1.ax_joint,
                 fill=True,
                 cmap="Oranges",
@@ -410,13 +410,13 @@ def plot_group_summary(fly_dirs, save=False, output_dir=None):
                 levels=10,
             )
         except Exception as e:
-            print(f"[WARN] KDE overlay failed for velocity: {e}")
+            print(f"[WARN] KDE overlay failed for speed: {e}")
         jp1.ax_joint.set_yscale("log")
-        jp1.ax_joint.set_ylabel("Ball velocity (pixels/s, log scale)")
-        plt.suptitle("Ball velocity vs. percent completion at first backoff (all flies)\n(log scale, density)", y=1.02)
+        jp1.ax_joint.set_ylabel("Ball speed (pixels/s, log scale)")
+        plt.suptitle("Ball speed vs. percent completion at first backoff (all flies)\n(log scale, density)", y=1.02)
         plt.tight_layout()
         if save:
-            jp1.savefig(os.path.join(output_dir, "jointplot_ball_velocity_vs_percent_completion.png"))
+            jp1.savefig(os.path.join(output_dir, "jointplot_ball_speed_vs_percent_completion.png"))
             plt.close(jp1.fig)
         else:
             plt.show()

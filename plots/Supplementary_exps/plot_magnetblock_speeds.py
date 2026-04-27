@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 """
-Script to generate ball velocity plots over time for MagnetBlock experiments.
+Script to generate ball speed plots over time for MagnetBlock experiments.
 
-This script generates velocity visualizations with:
-- Velocity calculation from distance data
+This script generates speed visualizations with:
+- Speed calculation from distance data
 - Rolling window smoothing
-- Time-binned analysis of velocity
+- Time-binned analysis of speed
 - Permutation tests for each time bin
 - Significance annotations (*, **, ***)
 - Comparison between Magnet and non-Magnet conditions
 
 Usage:
-    python plot_magnetblock_velocities.py [--n-bins N] [--n-permutations N] [--output-dir PATH]
+    python plot_magnetblock_speeds.py [--n-bins N] [--n-permutations N] [--output-dir PATH]
 
 Arguments:
     --n-bins: Number of time bins for analysis (default: 12)
     --n-permutations: Number of permutations for statistical testing (default: 10000)
-    --output-dir: Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/velocities)
+    --output-dir: Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/speeds)
     --rolling-window: Size of rolling window for smoothing (default: 150)
     --no-stats: Skip permutation testing and statistics visualization
-    --no-smoothing: Skip rolling window smoothing of velocity data
+    --no-smoothing: Skip rolling window smoothing of speed data
 """
 
 import sys
@@ -140,23 +140,23 @@ def load_coordinates_dataset():
     return dataset
 
 
-def calculate_velocities(data, position_col="y_fly_0", time_col="time", rolling_window=150, apply_smoothing=True):
-    """Calculate velocities per fly and smooth within each fly's trajectory"""
+def calculate_speeds(data, position_col="y_fly_0", time_col="time", rolling_window=150, apply_smoothing=True):
+    """Calculate speeds per fly and smooth within each fly's trajectory"""
     data = data.copy()
 
     # Sort by fly and time for proper per-fly diff
     data = data.sort_values(by=["fly", time_col]).reset_index(drop=True)
 
-    # Calculate velocity PER FLY
-    def calc_per_fly_velocity(group):
+    # Calculate speed PER FLY
+    def calc_per_fly_speed(group):
         group = group.sort_values(time_col).reset_index(drop=True)
-        group["velocity_raw"] = group[position_col].diff() / group[time_col].diff()
+        group["speed_raw"] = group[position_col].diff() / group[time_col].diff()
         return group
 
-    data = data.groupby("fly", group_keys=False).apply(calc_per_fly_velocity)
+    data = data.groupby("fly", group_keys=False).apply(calc_per_fly_speed)
 
     # Calculate speed and convert to mm/s
-    data["speed_raw"] = data["velocity_raw"].abs()
+    data["speed_raw"] = data["speed_raw"].abs()
     data["speed_mm_s"] = data["speed_raw"] * 0.06
 
     if apply_smoothing:
@@ -173,25 +173,25 @@ def calculate_velocities(data, position_col="y_fly_0", time_col="time", rolling_
     return data
 
 
-def preprocess_velocity_data(
+def preprocess_speed_data(
     data,
     time_col="time",
-    velocity_col="speed_mm_s_smooth",
+    speed_col="speed_mm_s_smooth",
     group_col="Magnet",
     subject_col="fly",
     n_bins=12,
 ):
     """
-    Preprocess velocity data by binning time and computing statistics per bin.
+    Preprocess speed data by binning time and computing statistics per bin.
 
     Parameters:
     -----------
     data : pd.DataFrame
-        Raw velocity data
+        Raw speed data
     time_col : str
         Column name for time
-    velocity_col : str
-        Column name for velocity values
+    speed_col : str
+        Column name for speed values
     group_col : str
         Column name for grouping (Magnet)
     subject_col : str
@@ -204,8 +204,8 @@ def preprocess_velocity_data(
     pd.DataFrame
         Processed data with time bins and statistics
     """
-    # Remove NaN velocities
-    data = data.dropna(subset=[velocity_col])
+    # Remove NaN speeds
+    data = data.dropna(subset=[speed_col])
 
     # Create time bins
     time_min = data[time_col].min()
@@ -221,8 +221,8 @@ def preprocess_velocity_data(
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     # Compute statistics per bin, group, and subject
-    grouped = data.groupby([group_col, subject_col, "time_bin"])[velocity_col].mean().reset_index()
-    grouped.columns = [group_col, subject_col, "time_bin", f"avg_{velocity_col}"]
+    grouped = data.groupby([group_col, subject_col, "time_bin"])[speed_col].mean().reset_index()
+    grouped.columns = [group_col, subject_col, "time_bin", f"avg_{speed_col}"]
 
     # Add bin centers and edges
     grouped["bin_center"] = grouped["time_bin"].map(dict(enumerate(bin_centers)))
@@ -437,10 +437,10 @@ def compute_permutation_test(
     return results
 
 
-def create_velocity_plot(
+def create_speed_plot(
     data,
     time_col="time",
-    velocity_col="speed_mm_s_smooth",
+    speed_col="speed_mm_s_smooth",
     group_col="Magnet",
     subject_col="fly",
     n_bins=12,
@@ -460,18 +460,18 @@ def create_velocity_plot(
     ci_level=95,
 ):
     """
-    Create a velocity plot comparing Magnet to non-Magnet conditions.
+    Create a speed plot comparing Magnet to non-Magnet conditions.
     Aggregates data by grouping time and Magnet, calculates mean and SEM.
     Filters to time window around 60 minutes (±10 minutes) and adds vertical line at start point.
 
     Parameters:
     -----------
     data : pd.DataFrame
-        Full velocity data
+        Full speed data
     time_col : str
         Column name for time
-    velocity_col : str
-        Column name for velocity/speed
+    speed_col : str
+        Column name for speed/speed
     group_col : str
         Column name for grouping
     subject_col : str
@@ -501,8 +501,8 @@ def create_velocity_plot(
     ci_level : float
         Confidence interval level (default: 95)
     """
-    # Filter out NaN velocities
-    data = data.dropna(subset=[velocity_col])
+    # Filter out NaN speeds
+    data = data.dropna(subset=[speed_col])
 
     if time_window is not None:
         tmin, tmax = time_window
@@ -560,7 +560,7 @@ def create_velocity_plot(
         group_data = data[data[group_col] == group]
 
         # Group by time and calculate mean and bootstrap CI
-        grouped = group_data.groupby(time_col)[velocity_col].apply(list).reset_index(name="values")
+        grouped = group_data.groupby(time_col)[speed_col].apply(list).reset_index(name="values")
         grouped["mean"] = grouped["values"].apply(np.mean)
         grouped[["ci_lower", "ci_upper"]] = grouped["values"].apply(
             lambda vals: pd.Series(bootstrap_ci(vals, bootstrap_n, ci_level))
@@ -691,7 +691,7 @@ def create_velocity_plot(
         plt.close()
 
 
-def generate_velocity_plot(
+def generate_speed_plot(
     data,
     n_bins=12,
     n_permutations=10000,
@@ -702,7 +702,7 @@ def generate_velocity_plot(
     apply_smoothing=True,
 ):
     """
-    Generate velocity plot for Magnet vs non-Magnet experiments.
+    Generate speed plot for Magnet vs non-Magnet experiments.
 
     Parameters:
     -----------
@@ -724,14 +724,14 @@ def generate_velocity_plot(
         Whether to apply rolling window smoothing (default: True)
     """
     if output_dir is None:
-        output_dir = Path("/mnt/upramdya_data/MD/MagnetBlock/Plots/velocities")
+        output_dir = Path("/mnt/upramdya_data/MD/MagnetBlock/Plots/speeds")
     else:
         output_dir = Path(output_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n{'='*60}")
-    print("GENERATING MAGNETBLOCK VELOCITY PLOT")
+    print("GENERATING MAGNETBLOCK SPEED PLOT")
     print(f"{'='*60}")
     print(f"Output directory: {output_dir}")
     print(f"Time bins: {n_bins}")
@@ -762,24 +762,24 @@ def generate_velocity_plot(
     print(f"Control group: {control_group}")
     print(f"Test group: {test_group}")
 
-    # Calculate velocities
+    # Calculate speeds
     smoothing_msg = "with" if apply_smoothing else "without"
-    print(f"\nCalculating velocities {smoothing_msg} rolling window smoothing...")
-    data_with_velocities = calculate_velocities(
+    print(f"\nCalculating speeds {smoothing_msg} rolling window smoothing...")
+    data_with_speeds = calculate_speeds(
         data, position_col="y_fly_0", rolling_window=rolling_window, apply_smoothing=apply_smoothing
     )
-    print(f"Velocity data shape: {data_with_velocities.shape}")
+    print(f"Speed data shape: {data_with_speeds.shape}")
 
     def compute_pre_post_median(
         df,
         time_col="time",
-        velocity_col="speed_mm_s_smooth",
+        speed_col="speed_mm_s_smooth",
         group_col="Magnet",
         subject_col="fly",
         pre_window=(3400, 3600),
         post_window=(3800, 4000),
     ):
-        """Return DataFrame with per-fly median velocity in pre and post windows.
+        """Return DataFrame with per-fly median speed in pre and post windows.
 
         Only flies that have values in both windows are returned (so lines can be drawn).
         """
@@ -788,18 +788,18 @@ def generate_velocity_plot(
 
         pre = (
             df[(df[time_col] >= pre_min) & (df[time_col] <= pre_max)]
-            .groupby([group_col, subject_col])[velocity_col]
+            .groupby([group_col, subject_col])[speed_col]
             .median()
             .reset_index()
-            .rename(columns={velocity_col: "pre_median"})
+            .rename(columns={speed_col: "pre_median"})
         )
 
         post = (
             df[(df[time_col] >= post_min) & (df[time_col] <= post_max)]
-            .groupby([group_col, subject_col])[velocity_col]
+            .groupby([group_col, subject_col])[speed_col]
             .median()
             .reset_index()
-            .rename(columns={velocity_col: "post_median"})
+            .rename(columns={speed_col: "post_median"})
         )
 
         merged = pd.merge(pre, post, on=[group_col, subject_col], how="inner")
@@ -923,10 +923,10 @@ def generate_velocity_plot(
 
     # (Pre/post plotting will be done after change comparison so we can annotate significance)
 
-    def compare_velocity_changes(
+    def compare_speed_changes(
         data,
         time_col="time",
-        velocity_col="speed_mm_s_smooth",
+        speed_col="speed_mm_s_smooth",
         group_col="Magnet",
         subject_col="fly",
         pre_window=(3400, 3600),
@@ -934,7 +934,7 @@ def generate_velocity_plot(
         n_permutations=10000,
     ):
         """
-        Compare velocity changes between groups using permutation test.
+        Compare speed changes between groups using permutation test.
 
         Returns both absolute change and percent change comparisons.
         """
@@ -944,18 +944,18 @@ def generate_velocity_plot(
         # Calculate pre and post medians per fly
         pre = (
             data[(data[time_col] >= pre_min) & (data[time_col] <= pre_max)]
-            .groupby([group_col, subject_col])[velocity_col]
+            .groupby([group_col, subject_col])[speed_col]
             .median()
             .reset_index()
-            .rename(columns={velocity_col: "pre_median"})
+            .rename(columns={speed_col: "pre_median"})
         )
 
         post = (
             data[(data[time_col] >= post_min) & (data[time_col] <= post_max)]
-            .groupby([group_col, subject_col])[velocity_col]
+            .groupby([group_col, subject_col])[speed_col]
             .median()
             .reset_index()
-            .rename(columns={velocity_col: "post_median"})
+            .rename(columns={speed_col: "post_median"})
         )
 
         merged = pd.merge(pre, post, on=[group_col, subject_col], how="inner")
@@ -1034,7 +1034,7 @@ def generate_velocity_plot(
 
         # Print results
         print(f"\n{'='*60}")
-        print("VELOCITY CHANGE COMPARISON")
+        print("SPEED CHANGE COMPARISON")
         print(f"{'='*60}")
         print(f"Control group: {control_group} (n={len(control_vals)})")
         print(f"Test group: {test_group} (n={len(test_vals)})")
@@ -1117,11 +1117,11 @@ def generate_velocity_plot(
 
     if compute_stats:
         # Preprocess data
-        print(f"\nPreprocessing velocity data into {n_bins} time bins...")
-        processed = preprocess_velocity_data(
-            data_with_velocities,
+        print(f"\nPreprocessing speed data into {n_bins} time bins...")
+        processed = preprocess_speed_data(
+            data_with_speeds,
             time_col="time",
-            velocity_col="speed_mm_s_smooth",
+            speed_col="speed_mm_s_smooth",
             group_col="Magnet",
             subject_col="fly",
             n_bins=n_bins,
@@ -1143,25 +1143,25 @@ def generate_velocity_plot(
     else:
         print(f"\nSkipping statistical analysis (--no-stats flag enabled)")
 
-    # Compare velocity changes
-    merged_changes, change_results = compare_velocity_changes(
-        data_with_velocities,
+    # Compare speed changes
+    merged_changes, change_results = compare_speed_changes(
+        data_with_speeds,
         pre_window=(3400, 3600),
         post_window=(3800, 4000),
         n_permutations=n_permutations,
     )
 
     # Save pre/post change-comparison CSV
-    change_csv = output_dir / f"velocity_change_comparison_{test_group}_vs_{control_group}.csv"
+    change_csv = output_dir / f"speed_change_comparison_{test_group}_vs_{control_group}.csv"
     save_change_results_csv(change_results, change_csv)
 
     # Generate and save full range plot
-    print(f"\nGenerating full range velocity plot...")
+    print(f"\nGenerating full range speed plot...")
     fig_full, ax_full = plt.subplots(figsize=((245 / 25.4), (120 / 25.4)))
-    create_velocity_plot(
-        data_with_velocities,
+    create_speed_plot(
+        data_with_speeds,
         time_col="time",
-        velocity_col="speed_mm_s_smooth",
+        speed_col="speed_mm_s_smooth",
         group_col="Magnet",
         subject_col="fly",
         n_bins=n_bins,
@@ -1178,9 +1178,9 @@ def generate_velocity_plot(
         show_pvalues=False,
         asterisk_scale=1.5,
     )
-    pdf_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.pdf"
-    png_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.png"
-    svg_path_full = output_dir / f"velocity_{test_group}_vs_{control_group}_full.svg"
+    pdf_path_full = output_dir / f"speed_{test_group}_vs_{control_group}_full.pdf"
+    png_path_full = output_dir / f"speed_{test_group}_vs_{control_group}_full.png"
+    svg_path_full = output_dir / f"speed_{test_group}_vs_{control_group}_full.svg"
     fig_full.tight_layout()
     fig_full.savefig(pdf_path_full, format="pdf", dpi=300, bbox_inches="tight")
     fig_full.savefig(png_path_full, format="png", dpi=300, bbox_inches="tight")
@@ -1191,7 +1191,7 @@ def generate_velocity_plot(
     plt.close(fig_full)
 
     # Generate and save windowed plot
-    print(f"\nGenerating windowed velocity plot...")
+    print(f"\nGenerating windowed speed plot...")
     start = 60 * 60
     window = 10 * 60
     time_window = (start - window, start + window)
@@ -1201,15 +1201,15 @@ def generate_velocity_plot(
     if compute_stats:
         print(f"  Computing permutation test for windowed data ({time_window[0]}s - {time_window[1]}s)...")
         # Subset data to time window
-        data_windowed = data_with_velocities[
-            (data_with_velocities["time"] >= time_window[0]) & (data_with_velocities["time"] <= time_window[1])
+        data_windowed = data_with_speeds[
+            (data_with_speeds["time"] >= time_window[0]) & (data_with_speeds["time"] <= time_window[1])
         ].copy()
 
         # Preprocess windowed data
-        processed_window = preprocess_velocity_data(
+        processed_window = preprocess_speed_data(
             data_windowed,
             time_col="time",
-            velocity_col="speed_mm_s_smooth",
+            speed_col="speed_mm_s_smooth",
             group_col="Magnet",
             subject_col="fly",
             n_bins=n_bins,
@@ -1227,14 +1227,14 @@ def generate_velocity_plot(
         )
 
         # Save windowed permutation statistics CSV
-        window_csv = output_dir / f"velocity_permutation_statistics_window_{test_group}_vs_{control_group}.csv"
+        window_csv = output_dir / f"speed_permutation_statistics_window_{test_group}_vs_{control_group}.csv"
         save_permutation_results_csv(permutation_results_window, window_csv)
 
     fig_window, ax_window = plt.subplots(figsize=((163.33 / 25.4), (80 / 25.4)))
-    create_velocity_plot(
-        data_with_velocities,
+    create_speed_plot(
+        data_with_speeds,
         time_col="time",
-        velocity_col="speed_mm_s_smooth",
+        speed_col="speed_mm_s_smooth",
         group_col="Magnet",
         subject_col="fly",
         n_bins=n_bins,
@@ -1251,9 +1251,9 @@ def generate_velocity_plot(
         show_pvalues=False,
         asterisk_scale=1.5,
     )
-    pdf_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.pdf"
-    png_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.png"
-    svg_path_window = output_dir / f"velocity_{test_group}_vs_{control_group}_window.svg"
+    pdf_path_window = output_dir / f"speed_{test_group}_vs_{control_group}_window.pdf"
+    png_path_window = output_dir / f"speed_{test_group}_vs_{control_group}_window.png"
+    svg_path_window = output_dir / f"speed_{test_group}_vs_{control_group}_window.svg"
     fig_window.tight_layout()
     fig_window.savefig(pdf_path_window, format="pdf", dpi=300, bbox_inches="tight")
     fig_window.savefig(png_path_window, format="png", dpi=300, bbox_inches="tight")
@@ -1267,8 +1267,8 @@ def generate_velocity_plot(
     try:
         pre_window = (3400, 3600)
         post_window = (3800, 4000)
-        merged_pre_post = compute_pre_post_median(data_with_velocities, pre_window=pre_window, post_window=post_window)
-        prepost_out = output_dir / f"velocity_pre_post_by_fly_{test_group}_vs_{control_group}"
+        merged_pre_post = compute_pre_post_median(data_with_speeds, pre_window=pre_window, post_window=post_window)
+        prepost_out = output_dir / f"speed_pre_post_by_fly_{test_group}_vs_{control_group}"
         plot_pre_post_by_group(
             merged_pre_post,
             change_results=change_results,
@@ -1287,12 +1287,12 @@ def generate_velocity_plot(
     # Save statistical results if statistics were computed
     if compute_stats and permutation_results is not None:
         # Save full-range permutation statistics CSV
-        full_csv = output_dir / f"velocity_permutation_statistics_full_{test_group}_vs_{control_group}.csv"
+        full_csv = output_dir / f"speed_permutation_statistics_full_{test_group}_vs_{control_group}.csv"
         save_permutation_results_csv(permutation_results, full_csv)
 
-        stats_file = output_dir / "velocity_permutation_statistics.txt"
+        stats_file = output_dir / "speed_permutation_statistics.txt"
         with open(stats_file, "w") as f:
-            f.write("MagnetBlock Velocity Permutation Test Results\n")
+            f.write("MagnetBlock Speed Permutation Test Results\n")
             f.write("=" * 60 + "\n\n")
             f.write(f"Control group: {permutation_results['control_group']}\n")
             f.write(f"Test group: {permutation_results['test_group']}\n")
@@ -1315,20 +1315,20 @@ def generate_velocity_plot(
         print(f"\n✅ Statistical results saved to: {stats_file}")
 
     print(f"\n{'='*60}")
-    print("✅ Velocity plot generated successfully!")
+    print("✅ Speed plot generated successfully!")
     print(f"{'='*60}")
 
 
 def main():
     """Main function"""
     parser = argparse.ArgumentParser(
-        description="Generate ball velocity plot for MagnetBlock experiments",
+        description="Generate ball speed plot for MagnetBlock experiments",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python plot_magnetblock_velocities.py
-  python plot_magnetblock_velocities.py --n-bins 15 --rolling-window 200
-  python plot_magnetblock_velocities.py --output-dir /path/to/output
+  python plot_magnetblock_speeds.py
+  python plot_magnetblock_speeds.py --n-bins 15 --rolling-window 200
+  python plot_magnetblock_speeds.py --output-dir /path/to/output
         """,
     )
 
@@ -1351,15 +1351,15 @@ Examples:
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="/mnt/upramdya_data/MD/MagnetBlock/Plots/velocities",
-        help="Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/velocities)",
+        default="/mnt/upramdya_data/MD/MagnetBlock/Plots/speeds",
+        help="Directory to save plots (default: /mnt/upramdya_data/MD/MagnetBlock/Plots/speeds)",
     )
 
     parser.add_argument("--no-progress", action="store_true", help="Disable progress bars")
 
     parser.add_argument("--no-stats", action="store_true", help="Skip permutation testing and statistics visualization")
 
-    parser.add_argument("--no-smoothing", action="store_true", help="Skip rolling window smoothing of velocity data")
+    parser.add_argument("--no-smoothing", action="store_true", help="Skip rolling window smoothing of speed data")
 
     args = parser.parse_args()
 
@@ -1368,7 +1368,7 @@ Examples:
     data = load_coordinates_dataset()
 
     # Generate plot
-    generate_velocity_plot(
+    generate_speed_plot(
         data,
         n_bins=args.n_bins,
         n_permutations=args.n_permutations,
