@@ -231,7 +231,7 @@ def main() -> None:
         type=str,
         required=False,
         default="summary",
-        help="Dataset type for Ballpushing_utils.Dataset (e.g., coordinates, summary, event_metrics)",
+        help="Dataset type for ballpushing_utils.Dataset (e.g., coordinates, summary, event_metrics)",
     )
     parser.add_argument(
         "--input-dataset",
