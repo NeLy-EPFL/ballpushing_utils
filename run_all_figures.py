@@ -30,8 +30,23 @@ RESET = "\033[0m"
 
 
 def discover_scripts(root: Path) -> list[Path]:
+    """Find every panel script under ``root``.
+
+    Excludes ``run_all_panels.py`` files: those are per-figure orchestrators
+    that subprocess their sibling panels, so leaving them in the discovery
+    list would double-execute every panel they wrap.
+
+    Excludes anything under an ``old/`` subdir — those are archived legacy
+    versions kept for reference, not meant to ship.
+    """
     scripts = sorted(root.rglob("*.py"))
-    return [s for s in scripts if s.resolve() != THIS_SCRIPT]
+    return [
+        s
+        for s in scripts
+        if s.resolve() != THIS_SCRIPT
+        and s.name != "run_all_panels.py"
+        and "old" not in s.parts
+    ]
 
 
 def run_script(script: Path) -> tuple[bool, float, str]:
