@@ -48,6 +48,7 @@ region_palette = {
     "Vision": "#761313",
 }
 
+
 def c2xy(
     src: np.ndarray | pd.DataFrame | pd.Series,
     flatten=False,
@@ -111,12 +112,13 @@ def xy2c(src: np.ndarray | pd.DataFrame | pd.Series, coord_level=-1, unflatten=F
         a complex number x + y * 1j.
     """
     if isinstance(src, pd.Series):
-        src = src.xs("x", level=coord_level) \
-            + src.xs("y", level=coord_level) * 1j
+        src = src.xs("x", level=coord_level) + src.xs("y", level=coord_level) * 1j
     elif isinstance(src, pd.DataFrame):
         try:
-            src = src.xs("x", axis=1, level=coord_level) \
+            src = (
+                src.xs("x", axis=1, level=coord_level)
                 + src.xs("y", axis=1, level=coord_level) * 1j
+            )
         except TypeError:
             src = src[["x", "y"]] @ (1, 1j)
     else:
@@ -205,18 +207,20 @@ def get_heading(amp: np.ndarray) -> np.ndarray:
 
 
 def reassign_labels(labels):
-    """Reassign labels such that the largest cluster is labeled 0, the second largest is labeled 1, etc.
-    """
+    """Reassign labels such that the largest cluster is labeled 0, the second largest is labeled 1, etc."""
     unique_labels = np.unique(labels)
-    label_counts = {label: np.sum(labels == label) for label in unique_labels if label != -1}
+    label_counts = {
+        label: np.sum(labels == label) for label in unique_labels if label != -1
+    }
     sorted_labels = sorted(label_counts, key=label_counts.get, reverse=True)
-    label_map = {old_label: new_label for new_label, old_label in enumerate(sorted_labels)}
+    label_map = {
+        old_label: new_label for new_label, old_label in enumerate(sorted_labels)
+    }
     return np.array([label_map.get(label, -1) for label in labels])
 
+
 def preprocess(data_path: str) -> pd.DataFrame:
-    df = pd.read_feather(data_path) \
-        .set_index(["fly", "event_id"]) \
-        .sort_index()
+    df = pd.read_feather(data_path).set_index(["fly", "event_id"]).sort_index()
 
     col_slice = np.s_[4:22]
     to_drop = []
@@ -229,9 +233,19 @@ def preprocess(data_path: str) -> pd.DataFrame:
         df.drop(key, inplace=True)
 
     X = df.iloc[:, col_slice].values.reshape((len(df), -1, 2)) @ (1, 1j)
-    X = pd.DataFrame(X, columns=[i.removeprefix("x_") for i in df.columns[col_slice][::2]], index=df.index)
+    X = pd.DataFrame(
+        X,
+        columns=[i.removeprefix("x_") for i in df.columns[col_slice][::2]],
+        index=df.index,
+    )
     for key, df_ in X.groupby(level=["fly", "event_id"]):
-        X.loc[key] = df_.interpolate(method="linear", limit_direction="both", limit=30, axis=0, limit_area="inside")
+        X.loc[key] = df_.interpolate(
+            method="linear",
+            limit_direction="both",
+            limit=30,
+            axis=0,
+            limit_area="inside",
+        )
 
     X.loc[X["Lfront"].isna(), "Lfront"] = X.loc[X["Lfront"].isna(), "Rfront"].values
     X.loc[X["Rfront"].isna(), "Rfront"] = X.loc[X["Rfront"].isna(), "Lfront"].values
@@ -255,9 +269,23 @@ def preprocess(data_path: str) -> pd.DataFrame:
         X.drop(key, inplace=True)
         df.drop(key, inplace=True)
 
-    X = X[["centre_preprocessed", "Thorax", "Head", "Abdomen", "Lfront", "Lmid", "Lhind", "Rfront", "Rmid", "Rhind"]]
+    X = X[
+        [
+            "centre_preprocessed",
+            "Thorax",
+            "Head",
+            "Abdomen",
+            "Lfront",
+            "Lmid",
+            "Lhind",
+            "Rfront",
+            "Rmid",
+            "Rhind",
+        ]
+    ]
 
     return df, X
+
 
 def plot_skeleton(x, ax=None, **kwargs):
     if ax is None:
@@ -306,23 +334,27 @@ def interactive_plot(
         pose_row = X.iloc[idx]
         pose_dict = {}
         # Extract coordinates for each body part
-        for part in ['Head', 'Abdomen', 'Lfront', 'Lmid', 'Lhind', 'Rfront', 'Rmid', 'Rhind']:
+        for part in [
+            "Head",
+            "Abdomen",
+            "Lfront",
+            "Lmid",
+            "Lhind",
+            "Rfront",
+            "Rmid",
+            "Rhind",
+        ]:
             if part in pose_row:
-                pose_dict[f'{part}_x'] = np.real(pose_row[part])
-                pose_dict[f'{part}_y'] = np.imag(pose_row[part])
+                pose_dict[f"{part}_x"] = np.real(pose_row[part])
+                pose_dict[f"{part}_y"] = np.imag(pose_row[part])
             else:
-                pose_dict[f'{part}_x'] = 0
-                pose_dict[f'{part}_y'] = 0
+                pose_dict[f"{part}_x"] = 0
+                pose_dict[f"{part}_y"] = 0
 
         pose_data.append(pose_dict)
 
     # Create main data source
-    source_data = {
-        'x': Z[:, 0],
-        'y': Z[:, 1],
-        'cluster': labels,
-        'index': indices
-    }
+    source_data = {"x": Z[:, 0], "y": Z[:, 1], "cluster": labels, "index": indices}
 
     # Add pose data to source
     for pose in pose_data:
@@ -335,10 +367,7 @@ def interactive_plot(
 
     # Create the left panel - UMAP scatter plot
     p1 = figure(
-        width=400,
-        height=400,
-        title="UMAP",
-        tools="pan,wheel_zoom,box_zoom,reset,save"
+        width=400, height=400, title="UMAP", tools="pan,wheel_zoom,box_zoom,reset,save"
     )
 
     # Color map for clusters
@@ -353,9 +382,12 @@ def interactive_plot(
 
     # Add scatter plot
     scatter = p1.scatter(
-        'x', 'y', size=1,
-        source=source, alpha=0.6,
-        color={'field': 'cluster', 'transform': color_mapper}
+        "x",
+        "y",
+        size=1,
+        source=source,
+        alpha=0.6,
+        color={"field": "cluster", "transform": color_mapper},
     )
 
     p1.title.text_font_size = "14pt"
@@ -367,33 +399,34 @@ def interactive_plot(
         title="Pose",
         tools="pan,wheel_zoom,box_zoom,reset,save",
         x_range=(-60, 60),
-        y_range=(-60, 60)
+        y_range=(-60, 60),
     )
 
     # Create line segments for skeleton
     skeleton_lines = []
     for _, dst in edges:
-        line_source = ColumnDataSource({
-            'x': [0, 0],
-            'y': [0, 0]
-        })
-        color = fly_palette.get(dst, 'black')
-        line = p2.line('x', 'y', source=line_source, line_width=3, color=color, alpha=0.8)
+        line_source = ColumnDataSource({"x": [0, 0], "y": [0, 0]})
+        color = fly_palette.get(dst, "black")
+        line = p2.line(
+            "x", "y", source=line_source, line_width=3, color=color, alpha=0.8
+        )
         skeleton_lines.append((line, line_source))
 
     # Add a circle at thorax position
-    thorax_circle = p2.circle([0], [0], size=8, color='red', alpha=0.8)
+    thorax_circle = p2.circle([0], [0], size=8, color="red", alpha=0.8)
 
     p2.title.text_font_size = "14pt"
     # p2.xaxis.axis_label = "X Position"
     # p2.yaxis.axis_label = "Y Position"
 
     # Create hover callback
-    hover_callback = CustomJS(args=dict(
-        source=source,
-        skeleton_lines=[line_source for _, line_source in skeleton_lines],
-        thorax=thorax_circle.data_source
-    ), code="""
+    hover_callback = CustomJS(
+        args=dict(
+            source=source,
+            skeleton_lines=[line_source for _, line_source in skeleton_lines],
+            thorax=thorax_circle.data_source,
+        ),
+        code="""
         const indices = cb_data.index.indices;
         if (indices.length > 0) {
             const idx = indices[0];
@@ -437,7 +470,8 @@ def interactive_plot(
             thorax.data['y'] = [0];
             thorax.change.emit();
         }
-    """)
+    """,
+    )
 
     # Add hover tool to the scatter plot
     hover = HoverTool(
@@ -448,7 +482,7 @@ def interactive_plot(
             # ("UMAP Y", "@y{0.00}")
         ],
         callback=hover_callback,
-        renderers=[scatter]
+        renderers=[scatter],
     )
 
     p1.add_tools(hover)
@@ -458,6 +492,7 @@ def interactive_plot(
 
     # Display the interactive plot
     show(layout)
+
 
 def get_kde(points, n_bins=512, bound=None, bw=0.1, border_rel=0.1):
     """Estimate pdf using FFT KDE.
@@ -497,11 +532,13 @@ def get_kde(points, n_bins=512, bound=None, bw=0.1, border_rel=0.1):
     pdf = FFTKDE(bw=bw).fit(points).evaluate(grid)
     return pdf.reshape((n_bins, n_bins), order="F"), bound
 
+
 def rotate_embedding(Z):
     from sklearn.decomposition import PCA
 
     Z = Z - Z.mean(0)
     return Z @ PCA(n_components=2).fit(Z).components_.T
+
 
 def get_bbox(a):
     from itertools import combinations
@@ -517,14 +554,17 @@ def get_bbox(a):
         ]
     )
 
+
 def to_rgb_8bit(c):
     hex = to_hex(c)
     return tuple(int(hex[i : i + 2], 16) for i in (1, 3, 5))
+
 
 def choice(a, k, seed=0):
     rng = np.random.default_rng(seed)
     idx = np.sort(rng.choice(len(a), k, replace=False))
     return a[idx]
+
 
 def get_grid_videos(
     fly,
@@ -580,15 +620,25 @@ def get_grid_videos(
             if need_flip:
                 dst = {"l": "r", "r": "l"}.get(dst[0], dst[0]) + dst[1:]
             color = to_rgb_8bit(fly_palette[dst])
-            cv2.line(im, pt1, pt2, color=color, thickness=thickness, lineType=cv2.LINE_AA)
+            cv2.line(
+                im, pt1, pt2, color=color, thickness=thickness, lineType=cv2.LINE_AA
+            )
 
         xy = tuple(map(round, mat @ (*xy.loc["b"], 1)))
         color = to_rgb_8bit(ball_color)
-        cv2.circle(im, xy, radius=ball_radius, color=color, thickness=thickness, lineType=cv2.LINE_AA)
+        cv2.circle(
+            im,
+            xy,
+            radius=ball_radius,
+            color=color,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
 
         results[i_im] = im if not need_flip else im[::-1]
 
     return results
+
 
 def get_non_outliers(Z, pad=0.05, threshold=5e-5):
     from scipy import ndimage as ndi
@@ -648,6 +698,7 @@ def get_areas(Z, labels, bound, n_bins, density_threshold):
 def get_cluster_palette(n_clusters):
     import colorcet as cc
     from matplotlib.colors import ListedColormap
+
     return ListedColormap(cc.rainbow)(np.linspace(0, 1, n_clusters))
 
 
@@ -670,10 +721,18 @@ def plot_map_regions(im_regions, Z, labels, xlim, ylim, bound):
         origin="lower",
     )
     ax.scatter(
-        *Z.T, s=2, c=cluster_palette[labels], alpha=0.05, marker=".", lw=0, rasterized=True
+        *Z.T,
+        s=2,
+        c=cluster_palette[labels],
+        alpha=0.05,
+        marker=".",
+        lw=0,
+        rasterized=True,
     )
     for k in range(n_clusters):
-        ax.add_text(*Z[labels == k].mean(0), str(k + 1), ha="c", va="c", size=6, color="k")
+        ax.add_text(
+            *Z[labels == k].mean(0), str(k + 1), ha="c", va="c", size=6, color="k"
+        )
         set_text_outline(ax.texts[-1], lw=1, c="w")
 
     ax.set_xlim(xlim)
@@ -709,6 +768,7 @@ def get_need_flip(X, Z, labels, flip):
 
 def split_list(lst, k):
     import math
+
     n = len(lst)
     num_chunks = math.ceil(n / k)
     result = [lst[i * k : (i + 1) * k] for i in range(num_chunks)]
@@ -738,12 +798,15 @@ def make_video(
     from imageio import get_writer
 
     n_videos = n_rows * n_cols
-    frames = np.full((n_frames, height * n_rows, width * n_cols, 3), 255, dtype=np.uint8)
+    frames = np.full(
+        (n_frames, height * n_rows, width * n_cols, 3), 255, dtype=np.uint8
+    )
     reshaped = frames.reshape((n_frames, n_rows, height, n_cols, width, 3))
     selected_clips = choice(np.where(labels == k)[0], n_videos, seed=seed)
 
     if verbose:
         from tqdm import tqdm
+
         selected_clips = tqdm(selected_clips)
 
     for i_grid, i_clip in enumerate(selected_clips):
@@ -759,7 +822,7 @@ def make_video(
             need_flip=not need_flip[i_clip],
             width=width,
             height=height,
-            **kwargs
+            **kwargs,
         )
 
     g, t_line, axt = get_plot(k, dpi=dpi)
@@ -863,7 +926,9 @@ def plot_maps_for_lines(
     df_lines.sort_values(["j", "i"], inplace=True)
     df_lines = df_lines.iloc[:, :2]
     line_list = list(df_lines["display_name"].drop_duplicates().values)
-    lines = df_lines.loc[df_flies.loc[df.index.get_level_values(0), "line"].values, "display_name"].values
+    lines = df_lines.loc[
+        df_flies.loc[df.index.get_level_values(0), "line"].values, "display_name"
+    ].values
 
     h = (np.abs(np.diff(ylim) / np.diff(xlim)) * 60).item()
     n_clusters = int(im_regions.max() + 1)
@@ -905,7 +970,11 @@ def plot_maps_for_lines(
                 ha="c",
                 va="b",
                 transform="a",
-                c=region_palette[df_lines.loc[df_lines["display_name"].eq(line), "region"].unique()[0]],
+                c=region_palette[
+                    df_lines.loc[df_lines["display_name"].eq(line), "region"].unique()[
+                        0
+                    ]
+                ],
                 size=6,
                 pad=(0, 0),
             )
@@ -958,7 +1027,7 @@ def energy_test_fly(X, Y, fly_ids_x, fly_ids_y, n_samples, random_state):
         a = d[np.ix_(ix, ix)]
         b = d[np.ix_(iy, iy)]
         c = d[np.ix_(ix, iy)]
-        return (2*np.mean(c) - np.mean(a) - np.mean(b))
+        return 2 * np.mean(c) - np.mean(a) - np.mean(b)
 
     Eobs = estat(np.arange(len(X)), np.arange(len(X), len(XY)))
     rng = np.random.default_rng(random_state)
@@ -982,27 +1051,28 @@ def energy_test_event(X, Y, n_samples, random_state):
     rng = np.random.default_rng(random_state)
     n, m = len(X), len(Y)
     Z = np.vstack([X, Y])
-    D = cdist(Z, Z)                    # pairwise distances
+    D = cdist(Z, Z)  # pairwise distances
 
     # helpers to index blocks
     idxX = np.arange(n)
-    idxY = np.arange(n, n+m)
+    idxY = np.arange(n, n + m)
 
     def estat(ix, iy):
         a = D[np.ix_(ix, ix)]
         b = D[np.ix_(iy, iy)]
         c = D[np.ix_(ix, iy)]
-        return (2*np.mean(c) - np.mean(a) - np.mean(b))
+        return 2 * np.mean(c) - np.mean(a) - np.mean(b)
 
     E_obs = estat(idxX, idxY)
 
     # permutation null
-    labels = np.arange(n+m)
+    labels = np.arange(n + m)
     cnt = 0
     for _ in range(n_samples):
         rng.shuffle(labels)
-        ix = labels[:n]; iy = labels[n:]
-        if estat(ix, iy) >= E_obs:     # upper tail
+        ix = labels[:n]
+        iy = labels[n:]
+        if estat(ix, iy) >= E_obs:  # upper tail
             cnt += 1
     p = (cnt + 1) / (n_samples + 1)
     return E_obs, p
