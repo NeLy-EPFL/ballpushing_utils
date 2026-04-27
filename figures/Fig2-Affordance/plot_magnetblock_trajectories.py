@@ -20,11 +20,9 @@ Arguments:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 # Keep sibling scripts importable (legacy; harmless).
-sys.path.append(str(Path(__file__).parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np

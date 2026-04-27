@@ -23,22 +23,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
+from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils.plotting import set_illustrator_style
 
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
-
-import sys
-
-sys.path.append(str(Path(__file__).parent.parent.parent))
-from ballpushing_utils import figure_output_dir
+set_illustrator_style()
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -58,9 +50,7 @@ FEEDING_COLORS = {
     "starved_noWater": "#8DA0CB",  # blue
 }
 
-DEFAULT_COORDINATES_DIR = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets" "/260220_10_summary_control_folders_Data/coordinates"
-)
+DEFAULT_COORDINATES_DIR = dataset("Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates")
 
 
 # ---------------------------------------------------------------------------

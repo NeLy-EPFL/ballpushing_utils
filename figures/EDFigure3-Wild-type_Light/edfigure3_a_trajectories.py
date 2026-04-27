@@ -15,11 +15,8 @@ Usage:
 """
 
 import argparse
-import sys
 import time
 from pathlib import Path
-
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,16 +25,13 @@ from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
 
 # Add src directory to path for imports
-sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from ballpushing_utils import figure_output_dir
+from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils.plotting import set_illustrator_style
+
+set_illustrator_style()
 
 # Set matplotlib parameters for publication quality
-matplotlib.rcParams["pdf.fonttype"] = 42
-matplotlib.rcParams["ps.fonttype"] = 42
-matplotlib.rcParams["font.family"] = "sans-serif"
-matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
-
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30
 
@@ -657,9 +651,7 @@ def main():
     print(f"Output directory: {output_dir}")
 
     # Load data
-    coordinates_dir = Path(
-        "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/Other/coordinates"
-    )
+    coordinates_dir = dataset("Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/Other/coordinates")
 
     print("\nLoading coordinates data...")
     start_time = time.time()
