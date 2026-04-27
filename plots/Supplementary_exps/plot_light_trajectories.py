@@ -618,7 +618,7 @@ def create_trajectory_plot(
     # Set y-axis limits - start at 0, add modest space at top for annotations
     ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
 
-    # Annotate significance levels - matching magnetblock velocity plot style
+    # Annotate significance levels - matching magnetblock speed plot style
     if permutation_results is not None and light_condition in permutation_results:
         perm_result = permutation_results[light_condition]
 

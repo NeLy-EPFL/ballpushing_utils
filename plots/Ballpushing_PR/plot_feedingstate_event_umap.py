@@ -89,15 +89,15 @@ FEATURE_SPECS: Dict[str, FeatureSpec] = {
         column="min_fly_ball_dist_during_event",
         label="Minimum fly-ball distance during event (px)",
     ),
-    "backoff_velocity_px_s": FeatureSpec(
-        key="backoff_velocity_px_s",
-        column="backoff_velocity_px_s",
-        label="Backoff velocity after event (px/s)",
+    "backoff_speed_px_s": FeatureSpec(
+        key="backoff_speed_px_s",
+        column="backoff_speed_px_s",
+        label="Backoff speed after event (px/s)",
     ),
-    "approach_velocity_px_s": FeatureSpec(
-        key="approach_velocity_px_s",
-        column="approach_velocity_px_s",
-        label="Approach velocity toward next event (px/s)",
+    "approach_speed_px_s": FeatureSpec(
+        key="approach_speed_px_s",
+        column="approach_speed_px_s",
+        label="Approach speed toward next event (px/s)",
     ),
     "ball_max_displacement_px": FeatureSpec(
         key="ball_max_displacement_px",
@@ -136,8 +136,8 @@ DEFAULT_FEATURE_KEYS = [
     "duration_s",
     "min_fly_ball_dist_during_event",
     "backoff_max_dist_from_ball_px",
-    "backoff_velocity_px_s",
-    "approach_velocity_px_s",
+    "backoff_speed_px_s",
+    "approach_speed_px_s",
     "event_idx_normalized",
     "cumulative_ball_disp_before",
     "rolling_backoff_mean_5",
@@ -149,8 +149,8 @@ STATE_FEATURE_KEYS = [
     "iti_prev_s",
     "duration_s",
     "backoff_max_dist_from_ball_px",
-    "backoff_velocity_px_s",
-    "approach_velocity_px_s",
+    "backoff_speed_px_s",
+    "approach_speed_px_s",
     "rolling_backoff_mean_5",
     "rolling_interaction_rate_5",
     "min_fly_ball_dist_during_event",
@@ -308,8 +308,8 @@ def _attach_between_event_dynamics(
 
     event_df = event_df.copy()
     event_df["backoff_max_dist_from_ball_px"] = np.nan
-    event_df["backoff_velocity_px_s"] = np.nan
-    event_df["approach_velocity_px_s"] = np.nan
+    event_df["backoff_speed_px_s"] = np.nan
+    event_df["approach_speed_px_s"] = np.nan
 
     n_events = len(event_df)
     eps = 1e-9
@@ -364,15 +364,15 @@ def _attach_between_event_dynamics(
 
         dt_backoff = peak_time - end_t
         if dt_backoff > eps:
-            # Backoff velocity: only backward (away-from-ball) movement up to max distance.
+            # Backoff speed: only backward (away-from-ball) movement up to max distance.
             dist_seq = np.r_[end_dist, backoff_dists[: peak_local_idx + 1]]
             d_back = np.diff(dist_seq)
             backward_only_disp = float(np.sum(d_back[d_back >= float(backward_step_px)]))
-            event_df.at[idx, "backoff_velocity_px_s"] = backward_only_disp / dt_backoff
+            event_df.at[idx, "backoff_speed_px_s"] = backward_only_disp / dt_backoff
 
         dt_approach = next_onset_t - peak_time
         if dt_approach > eps:
-            event_df.at[idx, "approach_velocity_px_s"] = (peak_dist - next_onset_dist) / dt_approach
+            event_df.at[idx, "approach_speed_px_s"] = (peak_dist - next_onset_dist) / dt_approach
 
     return event_df
 
@@ -476,8 +476,8 @@ def compute_event_feature_table(
             "duration_s",
             "min_fly_ball_dist_during_event",
             "backoff_max_dist_from_ball_px",
-            "backoff_velocity_px_s",
-            "approach_velocity_px_s",
+            "backoff_speed_px_s",
+            "approach_speed_px_s",
             "ball_max_displacement_px",
             "event_idx_normalized",
             "cumulative_ball_disp_before",

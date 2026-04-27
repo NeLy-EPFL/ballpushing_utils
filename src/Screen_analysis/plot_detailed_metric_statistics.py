@@ -249,17 +249,17 @@ METRIC_DISPLAY_NAMES = {
     "nb_events": "Events (< 2mm fly-ball dist.)(#)",
     "persistence_at_end": "Fraction time near end of corridor",
     "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
-    "normalized_velocity": "Normalized walking velocity",
+    "normalized_speed": "Normalized walking speed",
     "first_major_event_time": "First major (>1.2mm) event time (s)",
     "max_event_time": "Max ball displ. time (s)",
     "nb_freeze": "short pauses (>2s <5px) (#)",
     "flailing": "Movement of front legs during contact",
-    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "speed_during_interactions": "Fly speed during ball contact (mm/s)",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing (>30°) ball in corridor",
     "interaction_persistence": "Avg. duration ball interaction events (s)",
     "chamber_exit_time": "Time of first chamber exit (s)",
-    "velocity_trend": "Slope linear fit to fly velocity over time",
+    "speed_trend": "Slope linear fit to fly speed over time",
 }
 
 BRAIN_REGION_DISPLAY_NAMES = {
@@ -295,10 +295,10 @@ METRIC_GROUPS = [
     (
         "Kinematics",
         [
-            "velocity_trend",
-            "normalized_velocity",
+            "speed_trend",
+            "normalized_speed",
             "fraction_not_facing_ball",
-            "velocity_during_interactions",
+            "speed_during_interactions",
             "flailing",
             "head_pushing_ratio",
         ],

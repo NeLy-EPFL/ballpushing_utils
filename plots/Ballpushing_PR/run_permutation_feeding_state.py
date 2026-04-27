@@ -921,14 +921,14 @@ def main(overwrite=True, test_mode=False, period_mode="pooled"):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
         "chamber_time",
         "pushed",
     ]
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "freeze",

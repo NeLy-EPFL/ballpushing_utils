@@ -637,7 +637,7 @@ def main(overwrite=True, test_mode=False, specific_metrics=None):
             "distance_moved",
             "distance_ratio",
             "chamber_exit_time",
-            "normalized_velocity",
+            "normalized_speed",
             "has_finished",
             "has_major",
             "has_significant",

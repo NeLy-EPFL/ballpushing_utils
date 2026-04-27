@@ -1119,7 +1119,7 @@ class Dataset:
             # Add transposed keypoints
             row.update(self._transpose_keypoints(fly, event_df, event_id=event_id, event_type=event_type))
 
-            # Add frame-based features (velocity, angles, etc.)
+            # Add frame-based features (speed, angles, etc.)
             row.update(self._calculate_frame_features(fly, event_df, event_id=event_id, event_type=event_type))
 
             # Add statistical measures
@@ -1190,7 +1190,7 @@ class Dataset:
             return {}
 
     def _calculate_frame_features(self, fly, data, event_id, event_type):
-        """Calculate per-frame velocity and angles using original coordinates."""
+        """Calculate per-frame speed and angles using original coordinates."""
         features = {}
 
         try:
@@ -1224,13 +1224,13 @@ class Dataset:
                 x_vals, y_vals = event_df[x_col].values, event_df[y_col].values
                 dx, dy = np.diff(x_vals, prepend=x_vals[0]), np.diff(y_vals, prepend=y_vals[0])
 
-                velocities = np.hypot(dx, dy)
+                speeds = np.hypot(dx, dy)
                 angles = np.degrees(np.arctan2(dy, dx)) % 360
                 angular_velocity = np.diff(angles, prepend=angles[0])
 
                 # Add features for each frame
                 frames = event_df["adjusted_frame"].values
-                features.update({f"{kp}_frame{frame}_velocity": velocities[i] for i, frame in enumerate(frames)})
+                features.update({f"{kp}_frame{frame}_speed": speeds[i] for i, frame in enumerate(frames)})
                 features.update({f"{kp}_frame{frame}_angle": angles[i] for i, frame in enumerate(frames)})
                 features.update(
                     {f"{kp}_frame{frame}_angular_velocity": angular_velocity[i] for i, frame in enumerate(frames)}

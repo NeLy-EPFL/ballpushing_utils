@@ -62,12 +62,12 @@ def identify_metric_columns(dataset):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
     ]
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "pause",

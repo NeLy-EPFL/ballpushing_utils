@@ -242,7 +242,7 @@ if __name__ == "__main__":
                     "distance_moved",
                     "distance_ratio",
                     "chamber_exit_time",
-                    "normalized_velocity",
+                    "normalized_speed",
                     "has_finished",
                     "has_major",
                     "has_significant",

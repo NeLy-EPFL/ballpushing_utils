@@ -1408,27 +1408,27 @@ class FlyTrackingData:
             warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping dying check.")
             return False
 
-        # Get the velocity of the fly
-        velocity = np.sqrt(
+        # Get the speed of the fly
+        speed = np.sqrt(
             np.diff(fly_data["x_thorax"], prepend=np.nan) ** 2 + np.diff(fly_data["y_thorax"], prepend=np.nan) ** 2
         )
 
-        # Ensure the length of the velocity array matches the length of the DataFrame index
-        if len(velocity) != len(fly_data):
-            velocity = np.append(velocity, np.nan)
+        # Ensure the length of the speed array matches the length of the DataFrame index
+        if len(speed) != len(fly_data):
+            speed = np.append(speed, np.nan)
 
-        fly_data["velocity"] = velocity
+        fly_data["speed"] = speed
 
-        # Get the time points where the fly's velocity is less than 2 px/s
-        low_velocity = fly_data[fly_data["velocity"] < 2]
+        # Get the time points where the fly's speed is less than 2 px/s
+        low_speed = fly_data[fly_data["speed"] < 2]
 
-        # Get consecutive time points where the fly's velocity is less than 2 px/s
-        consecutive_points = np.split(low_velocity.index, np.where(np.diff(low_velocity.index) != 1)[0] + 1)
+        # Get consecutive time points where the fly's speed is less than 2 px/s
+        consecutive_points = np.split(low_speed.index, np.where(np.diff(low_speed.index) != 1)[0] + 1)
 
         # Get the duration of each consecutive period
         durations = [len(group) for group in consecutive_points]
 
-        # Check if there is any consecutive period of 15 minutes where the fly's velocity is less than 2 px/s
+        # Check if there is any consecutive period of 15 minutes where the fly's speed is less than 2 px/s
         for group, events in zip(consecutive_points, durations):
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time

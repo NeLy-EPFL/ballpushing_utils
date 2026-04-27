@@ -140,16 +140,16 @@ class InteractionsMetrics:
             # Final event (1 if it is, 0 if not)
             is_final_event = 1 if final_event_idx is not None and event_idx == final_event_idx else 0
 
-            # Ball velocity during the interaction
-            ball_velocity = displacement / duration if duration > 0 else 0
+            # Ball speed during the interaction
+            ball_speed = displacement / duration if duration > 0 else 0
 
             # Correlation with the previous event
             efficiency_diff = None
             if previous_success is not None:
-                efficiency_diff = ball_velocity - previous_success
+                efficiency_diff = ball_speed - previous_success
 
             # Update the previous success for the next iteration
-            previous_success = ball_velocity
+            previous_success = ball_speed
 
             # Backoff intervals
             backoff_threshold = getattr(self.fly.config, "backoff_threshold", 20)  # Default to 20 if not set
@@ -183,7 +183,7 @@ class InteractionsMetrics:
                 "major_event": major_event,
                 "max_event": is_max_event,
                 "final_event": is_final_event,
-                "ball_velocity": ball_velocity,
+                "ball_speed": ball_speed,
                 "efficiency_diff": efficiency_diff,
                 "event_type": event_type,
                 "backoff_intervals": [

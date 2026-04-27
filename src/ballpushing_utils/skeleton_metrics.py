@@ -446,12 +446,12 @@ class SkeletonMetrics:
             # Check if event has more than one frame to avoid empty diff
             if len(ball_positions) > 1:
                 # Get the derivative of the ball positions
-                ball_velocity = np.mean(abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0)))
+                ball_speed = np.mean(abs(np.diff(ball_positions["y_centre_preprocessed"], axis=0)))
             else:
-                # Single-frame event, no velocity can be computed
-                ball_velocity = 0.0
+                # Single-frame event, no speed can be computed
+                ball_speed = 0.0
 
-            self.ball_displacements.append(ball_velocity)
+            self.ball_displacements.append(ball_speed)
 
         return self.ball_displacements
 

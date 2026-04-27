@@ -113,13 +113,13 @@ def calculate_speed(df: pd.DataFrame, rolling_window: int = 150) -> pd.DataFrame
     # Sort by fly and time for proper per-fly diff
     data = data.sort_values(by=["fly", "time"]).reset_index(drop=True)
 
-    # Calculate velocity, speed, and smooth all in one pass per fly
+    # Calculate speed, speed, and smooth all in one pass per fly
     def calc_per_fly_speed(group):
         # Get fly ID from the group (name is the grouping key value)
         fly_id = group["fly"].iloc[0] if "fly" in group.columns else group.name
         group = group.sort_values("time").reset_index(drop=True)
-        group["velocity_raw"] = group["y_fly_0"].diff() / group["time"].diff()
-        group["speed_raw"] = group["velocity_raw"].abs()
+        group["speed_raw"] = group["y_fly_0"].diff() / group["time"].diff()
+        group["speed_raw"] = group["speed_raw"].abs()
         group["speed_mm_s"] = group["speed_raw"] * PIXELS_TO_MM_S
         # Smooth within each fly
         group["speed_mm_s_smooth"] = (
@@ -433,7 +433,7 @@ def plot_panel_a(
     perm_results.to_csv(stats_csv, index=False)
     print(f"  Saved: {stats_csv}")
 
-    # --- Plot: continuous per-second line (mirrors original create_velocity_plot) ---
+    # --- Plot: continuous per-second line (mirrors original create_speed_plot) ---
     print("  Computing per-second mean ± CI for continuous line...")
     line_data = continuous_line_data(df, resample_s=1.0, n_bootstrap=200, seed=42)
 
