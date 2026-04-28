@@ -74,7 +74,9 @@ dependencies = [
 
 [project.optional-dependencies]
 interactive = [
-    "bokeh>=3.4",
+    # bokeh < 3.8.2 has CVE-2026-21883 (WebSocket origin validation
+    # bypass for deployed Bokeh server instances).
+    "bokeh>=3.8.2",
     "holoviews>=1.19",
     "panel>=1.4",
     "colorcet>=3.1",
@@ -85,7 +87,9 @@ video = [
     "pygame>=2.5",
 ]
 dev = [
-    "pytest>=8.0",
+    # pytest < 9.0.3 has CVE-2025-71176 (vulnerable /tmp/pytest-of-{user}
+    # directory handling on shared UNIX hosts).
+    "pytest>=9.0.3",
     "pytest-cov>=4.1",
     "black>=24.0",
     "ruff>=0.3",

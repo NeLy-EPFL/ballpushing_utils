@@ -1,4 +1,4 @@
-bokeh==3.7.2
+bokeh==3.8.2
 colorcet==3.1.0
 h5py==3.13.0
 holoviews==1.20.2
@@ -14,8 +14,7 @@ panel==1.6.2
 psutil==7.0.0
 pyarrow==19.0.1
 pygame==2.6.1
-pytest==8.3.5
-PyYAML==6.0.2
+pytest==9.0.3
 PyYAML==6.0.2
 scikit_bio==0.6.3
 scikit_learn==1.6.1
