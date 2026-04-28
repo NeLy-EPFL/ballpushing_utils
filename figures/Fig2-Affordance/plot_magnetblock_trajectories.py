@@ -452,9 +452,20 @@ def create_trajectory_plot(
         )
         group_col_plot = "label"
 
-    # Downsample data for plotting (every 290 frames as in notebook)
+    # Downsample data for plotting (every 290 frames per fly).
+    #
+    # The previous implementation used
+    #   data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :])
+    # which silently drops the grouping column (``fly``) from the result on
+    # pandas ≥ 2.2 (DataFrameGroupBy.apply now excludes the grouping
+    # column unless ``include_groups=True`` is passed). The downstream
+    # ``data_ds.groupby(subject_col)`` on line ~520 then raised
+    # ``KeyError: 'fly'``. cumcount() is the idiomatic "every Nth row per
+    # group" pattern and never touches the column, so it sidesteps the
+    # behaviour change entirely.
     print(f"  Downsampling data for plotting...")
-    data_ds = data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :]).reset_index(drop=True)
+    keep_mask = data.groupby(subject_col, observed=True).cumcount() % 290 == 0
+    data_ds = data[keep_mask].reset_index(drop=True)
     print(f"  Downsampled from {len(data)} to {len(data_ds)} points")
 
     # Convert time to minutes for plotting

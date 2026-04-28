@@ -63,6 +63,9 @@ dependencies = [
     # ``tabulate`` is the backend used by ``pandas.DataFrame.to_markdown``,
     # which the diagnostics report writer inlines for table previews.
     "tabulate>=0.9",
+    # ``diptest`` is Hartigan's dip statistic for unimodality, used by
+    # figures/Fig1-setup/compute_distribution_stats.py.
+    "diptest>=0.9",
     # `utils_behavior` is a lab package used throughout the codebase and
     # published via GitHub rather than PyPI — declare the VCS URL directly
     # so `pip install -e .` works out of the box without a private index.
