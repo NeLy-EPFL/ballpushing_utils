@@ -19,7 +19,7 @@ from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 try:
@@ -211,7 +211,7 @@ def cohens_d(group1, group2):
 
 
 def load_data():
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
     dataset = dataset[~dataset["Nickname"].isin(["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"])]
     dataset.rename(

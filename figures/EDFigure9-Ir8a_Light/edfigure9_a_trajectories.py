@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -99,7 +99,7 @@ def load_coordinates(coordinates_path, test_mode=False):
         raise FileNotFoundError(f"Coordinates not found: {coordinates_path}")
 
     print(f"Loading coordinates from: {coordinates_path}")
-    df = pd.read_feather(coordinates_path)
+    df = read_feather(coordinates_path)
     print(f"Loaded: {df.shape}")
 
     # Check required columns

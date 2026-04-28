@@ -26,6 +26,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from scipy.stats import norm, spearmanr
 from statsmodels.stats.multitest import multipletests
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -1167,7 +1168,7 @@ def main():
     print(f"Dataset: {dataset_path}")
     print(f"(Pooled target when ready: {POOLED_DATASET_PATH})")
 
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
 
     genotype_col = detect_column(df, ["Genotype", "genotype"], "genotype")
     pretraining_col = detect_column(df, ["Pretraining", "pretraining"], "pretraining")

@@ -51,6 +51,7 @@ import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # ---------------------------------------------------------------------------
 # Global matplotlib styling — consistent with other MagnetBlock scripts
@@ -129,7 +130,7 @@ def sig_stars(p: float) -> str:
 
 def load_dataset(dataset_path: str) -> pd.DataFrame:
     print(f"Loading dataset from:\n  {dataset_path}")
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
     print(f"  Shape: {df.shape}")
 
     required = ["time", "interaction_event_onset", "Magnet", "fly"]

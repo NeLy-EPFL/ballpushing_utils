@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import warnings
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -93,7 +94,7 @@ def group_metrics_by_family(metrics: list[str]) -> dict[str, list[str]]:
 def load_metrics_data(file_path):
     """Load the metrics dataset - NaN conversion is now handled by pre-cleaned dataset."""
     try:
-        dataset = pd.read_feather(file_path)
+        dataset = read_feather(file_path)
         print(f"✓ Successfully loaded dataset with shape: {dataset.shape}")
         needs_update = False
         # Only add columns if they do not already exist

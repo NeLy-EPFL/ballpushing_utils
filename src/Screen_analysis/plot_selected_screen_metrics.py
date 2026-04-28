@@ -33,6 +33,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 
 import Config
+from ballpushing_utils import read_feather
 
 
 # Illustrator-editable text
@@ -175,7 +176,7 @@ def permutation_test_1d(group1, group2, n_permutations=10000, random_state=42):
 
 
 def load_dataset(data_path):
-    df = pd.read_feather(data_path)
+    df = read_feather(data_path)
     df = Config.cleanup_data(df)
 
     # Convert boolean metrics to integers for consistent numeric handling

@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import (
     paired_boxplot_with_significance,
     resize_axes_cm,
@@ -44,7 +44,7 @@ def main(test_mode: bool = False) -> None:
     set_illustrator_style()
 
     # --- Load ---
-    df = pd.read_feather(DATASET_PATH)[["Magnet", METRIC]].dropna()
+    df = read_feather(DATASET_PATH)[["Magnet", METRIC]].dropna()
     if test_mode:
         df = df.sample(n=min(200, len(df)), random_state=42).reset_index(drop=True)
         print(f"Test mode: {len(df)} rows")

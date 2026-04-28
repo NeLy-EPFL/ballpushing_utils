@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import (
     paired_boxplot_with_significance,
     resize_axes_cm,
@@ -145,7 +145,7 @@ def main(test_mode: bool = False) -> None:
     set_illustrator_style()
 
     print("Loading dataset...")
-    df = pd.read_feather(DATASET_PATH)
+    df = read_feather(DATASET_PATH)
 
     if "Pretraining" not in df.columns:
         raise ValueError(f"'Pretraining' column not found. Columns: {list(df.columns)}")

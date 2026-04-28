@@ -34,6 +34,7 @@ from statsmodels.stats.multitest import multipletests
 
 
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 ### Configuration for the analysis
 
@@ -204,7 +205,7 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
         print(f"Dataset for brain region {brain_region} not found.")
         return pd.DataFrame()
 
-    brain_region_data = pd.read_feather(brain_region_file)
+    brain_region_data = read_feather(brain_region_file)
 
     # Load the dataset for the control region
     control_region = registries["control_region"]
@@ -213,7 +214,7 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
         print(f"Dataset for control region {control_region} not found.")
         return pd.DataFrame()
 
-    control_region_data = pd.read_feather(control_region_file)
+    control_region_data = read_feather(control_region_file)
 
     if brain_region_data.empty:
         raise ValueError(f"Empty dataset for {brain_region}")

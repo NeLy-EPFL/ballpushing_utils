@@ -34,6 +34,7 @@ from scipy.cluster.hierarchy import linkage, dendrogram, leaves_list
 from scipy.spatial.distance import pdist
 from matplotlib.patches import Patch
 from matplotlib.colors import ListedColormap, Normalize
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -189,7 +190,7 @@ def load_raw_data():
     """
     data_path = "/mnt/upramdya_data/MD/Gtacr/Datasets/251219_10_summary_OR67d_Gtacr_Data/summary/pooled_summary.feather"
     print(f"   Loading raw data from: {data_path}")
-    df = pd.read_feather(data_path)
+    df = read_feather(data_path)
     print(f"   Loaded {len(df)} rows")
 
     # Harmonize genotype naming (synonyms)

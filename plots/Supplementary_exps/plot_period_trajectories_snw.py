@@ -38,6 +38,7 @@ import pandas as pd
 from matplotlib.patches import Patch
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -108,7 +109,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
     for i, file_path in enumerate(valid_files, 1):
         print(f"\n[{i}/{len(valid_files)}] {file_path.name}")
         try:
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
             print(f"  Shape: {df.shape}")
 
             required_cols = ["time", "distance_ball_0", "fly", "Light", "FeedingState", "Period"]

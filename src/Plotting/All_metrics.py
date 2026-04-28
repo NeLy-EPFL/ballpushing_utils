@@ -20,6 +20,7 @@ import colorcet as cc
 from bokeh.palettes import Category10
 from bokeh.palettes import all_palettes
 from bokeh.io.export import export_svgs
+from ballpushing_utils import read_feather
 
 hv.extension("bokeh")
 pn.extension()
@@ -27,7 +28,7 @@ pn.extension()
 # sns.set_theme()
 rg = np.random.default_rng()
 
-dataset = pd.read_feather(
+dataset = read_feather(
     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
 

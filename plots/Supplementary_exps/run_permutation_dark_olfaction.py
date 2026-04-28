@@ -41,6 +41,7 @@ from scipy.stats import chi2_contingency, fisher_exact
 import scipy.stats as stats_module
 import time
 import argparse
+from ballpushing_utils import read_feather
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -947,7 +948,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
 
     print(f"Loading dark olfaction dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at: {dataset_path}")

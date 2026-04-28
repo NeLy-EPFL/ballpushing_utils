@@ -40,6 +40,7 @@ import statsmodels.formula.api as smf
 from matplotlib.patches import Rectangle
 from itertools import combinations
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -739,7 +740,7 @@ def load_dataset(dataset_type="summary"):
         raise FileNotFoundError(f"Dataset not found: {path}")
 
     print(f"Loading {dataset_type} dataset from: {path}")
-    df = pd.read_feather(path)
+    df = read_feather(path)
     print(f"  Loaded {len(df)} rows")
     return df
 

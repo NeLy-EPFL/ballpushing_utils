@@ -20,6 +20,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import stats
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -31,7 +32,7 @@ def load_coordinates_dataset():
         "251205_13_summary_magnetblock_TNT_DDC_Data/coordinates/pooled_coordinates.feather"
     )
     print(f"Loading coordinates dataset from: {dataset_path}")
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
 
     required = ["time", "distance_ball_0", "Magnet", "Genotype", "fly"]
     missing = [c for c in required if c not in df.columns]

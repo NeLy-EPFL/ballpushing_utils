@@ -37,6 +37,7 @@ import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 matplotlib.rcParams["pdf.fonttype"] = 42  # To avoid type 3 fonts in PDFs
 matplotlib.rcParams["font.family"] = "Arial"
@@ -197,7 +198,7 @@ def load_coordinates_dataset(test_mode=False):
 
     print(f"Loading from: {Path(dataset_path).name}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Ball scents coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

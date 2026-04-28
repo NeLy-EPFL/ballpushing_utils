@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -75,7 +75,7 @@ def load_final_positions(coordinates_dir: Path) -> pd.DataFrame:
     chunks = []
     for i, fp in enumerate(non_dark, 1):
         print(f"  [{i}/{len(non_dark)}] {fp.name}")
-        df = pd.read_feather(fp)
+        df = read_feather(fp)
 
         # Keep Light=on only
         if "Light" in df.columns:

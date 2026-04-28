@@ -32,7 +32,7 @@ from tqdm import tqdm
 
 # Add repository root to path for imports
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -117,7 +117,7 @@ def load_coordinates_data(coordinates_path=COORDINATES_PATH, test_mode=False):
     print(f"{'='*60}")
     print(f"Loading from: {coordinates_path.name}")
 
-    df = pd.read_feather(coordinates_path)
+    df = read_feather(coordinates_path)
     print(f"✅ Dataset loaded: {df.shape}")
 
     required_cols = ["time", "distance_ball_0", "fly", "BallType"]

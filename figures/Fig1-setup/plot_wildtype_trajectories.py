@@ -33,7 +33,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -60,7 +60,7 @@ DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 def load_dataset(feather_path: Path) -> pd.DataFrame:
     """Load a coordinates feather file and add derived distance columns."""
-    data = pd.read_feather(feather_path)
+    data = read_feather(feather_path)
 
     if data.empty:
         raise ValueError(f"Dataset is empty: {feather_path}")
@@ -103,7 +103,7 @@ def load_sampled_dataset(
 
     chunks = []
     for fp in feather_files:
-        df = pd.read_feather(fp)
+        df = read_feather(fp)
         # Apply each filter; cast both sides to str to handle categorical columns
         mask = pd.Series(True, index=df.index)
         for col, val in filters.items():

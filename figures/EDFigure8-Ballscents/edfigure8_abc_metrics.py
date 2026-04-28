@@ -32,7 +32,7 @@ Arguments:
 import argparse
 from pathlib import Path
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -192,7 +192,7 @@ def load_dataset(test_mode=False):
     print(f"{'='*60}")
 
     try:
-        dataset = pd.read_feather(SUMMARY_PATH)
+        dataset = read_feather(SUMMARY_PATH)
         print(f"✅ Loaded: {dataset.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found: {SUMMARY_PATH}")
@@ -227,7 +227,7 @@ def load_dataset(test_mode=False):
     ctrl_dfs = []
     for path in CTRL_SUMMARY_PATHS:
         try:
-            ctrl_df = pd.read_feather(path)
+            ctrl_df = read_feather(path)
             if "FeedingState" in ctrl_df.columns:
                 ctrl_df = ctrl_df[ctrl_df["FeedingState"] == "starved_noWater"].copy()
                 if len(ctrl_df) == 0:

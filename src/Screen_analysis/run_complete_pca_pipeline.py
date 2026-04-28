@@ -23,6 +23,7 @@ import shutil
 import argparse
 from datetime import datetime
 from pathlib import Path
+from ballpushing_utils import read_feather
 
 # Global variable for statistical testing mode
 STAT_MODE = "permutation"  # Default value (matches argparse default)
@@ -575,7 +576,7 @@ To load PCA results in Python:
 ```python
 import pandas as pd
 # Load PCA scores with metadata
-scores = pd.read_feather("data_files/static_sparsepca_with_metadata_tailoredctrls.feather")
+scores = read_feather("data_files/static_sparsepca_with_metadata_tailoredctrls.feather")
 # Load detailed statistics
 stats = pd.read_csv("data_files/static_sparsepca_stats_simplified_tailoredctrls.csv")
 ```

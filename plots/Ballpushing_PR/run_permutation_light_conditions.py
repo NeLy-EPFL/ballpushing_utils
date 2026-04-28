@@ -34,6 +34,7 @@ from matplotlib.patches import Rectangle, Patch
 from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact, ttest_ind, levene
 from statsmodels.stats.multitest import multipletests
+from ballpushing_utils import read_feather
 
 
 def generate_light_condition_permutation_plots(
@@ -695,7 +696,7 @@ def load_and_clean_exploration_dataset(test_mode=False, test_sample_size=200):
 
     print(f"Loading exploration dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Exploration dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

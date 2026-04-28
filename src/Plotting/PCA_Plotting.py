@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import Config
 import re  # For sanitizing filenames
+from ballpushing_utils import read_feather
 
 
 # Function to sanitize nicknames for filenames
@@ -19,7 +20,7 @@ os.makedirs(output_folder, exist_ok=True)
 posthoc_results = pd.read_csv("all_significant_results.csv")  # Adjust for each category if needed
 
 # Load the PCA dataset
-pca_with_metadata = pd.read_feather("pca_with_metadata.feather")
+pca_with_metadata = read_feather("pca_with_metadata.feather")
 
 # Filter for significant comparisons
 if "adjusted p-value" in posthoc_results.columns:

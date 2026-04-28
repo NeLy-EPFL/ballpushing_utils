@@ -28,7 +28,7 @@ from statsmodels.stats.multitest import multipletests
 
 # Add repository root to path for imports
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -116,7 +116,7 @@ def load_and_clean_dataset(test_mode=False):
     """
     print(f"Loading ball types summary dataset from: {SUMMARY_PATH}")
     try:
-        dataset = pd.read_feather(SUMMARY_PATH)
+        dataset = read_feather(SUMMARY_PATH)
         print(f"Loaded dataset with shape: {dataset.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found at: {SUMMARY_PATH}")

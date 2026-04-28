@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from ballpushing_utils import read_feather
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -118,7 +119,7 @@ def load_coordinates_incrementally(coordinates_dir: Union[str, Path], test_mode:
     chunks = []
     for file_path in files:
         try:
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
         except Exception as exc:
             print(f"  Error reading {file_path.name}: {exc}")
             continue

@@ -9,6 +9,7 @@ import argparse
 import yaml
 import matplotlib.pyplot as plt
 import seaborn as sns
+from ballpushing_utils import read_feather
 
 data_path = Utils.get_data_server()
 
@@ -152,7 +153,7 @@ if __name__ == "__main__":
             print(f"Trajectory plot saved to {output_path}")
 
             # Events
-            events_data = pd.read_feather(
+            events_data = read_feather(
                 Utils.get_data_server()
                 / "MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/event_metrics/pooled_event_metrics.feather"
             )
@@ -183,7 +184,7 @@ if __name__ == "__main__":
             from utils_behavior import Processing
 
             # Load summary metrics dataset (as in summary_notebooks.py)
-            summary_data = pd.read_feather(
+            summary_data = read_feather(
                 Utils.get_data_server()
                 / "MD/Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
             )

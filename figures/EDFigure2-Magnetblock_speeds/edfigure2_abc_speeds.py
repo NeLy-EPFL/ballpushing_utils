@@ -29,7 +29,7 @@ import pandas as pd
 from scipy import stats as scipy_stats
 from tqdm import tqdm
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 from ballpushing_utils.stats import permutation_test
 
@@ -73,7 +73,7 @@ LABELS = {"n": "No access to ball", "y": "Access to immobile ball"}
 def load_data(test_mode: bool = False):
     """Load coordinates and subset to valid flies from summary."""
     print(f"\nLoading coordinates from:\n  {COORDINATES_PATH}")
-    coords = pd.read_feather(COORDINATES_PATH)
+    coords = read_feather(COORDINATES_PATH)
 
     if test_mode:
         # Sample subset for testing
@@ -85,7 +85,7 @@ def load_data(test_mode: bool = False):
 
     # Load summary to get valid flies
     print(f"Loading summary from:\n  {SUMMARY_PATH}")
-    summary = pd.read_feather(SUMMARY_PATH)
+    summary = read_feather(SUMMARY_PATH)
     valid_flies = summary["fly"].unique()
 
     # Subset coordinates to valid flies

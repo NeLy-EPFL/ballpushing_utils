@@ -28,7 +28,7 @@ import time
 from itertools import combinations
 from pathlib import Path
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -116,7 +116,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
     """Load summary feather, filter Light=on, normalise FeedingState."""
     print(f"Loading dataset from: {SUMMARY_PATH}")
     try:
-        dataset = pd.read_feather(SUMMARY_PATH)
+        dataset = read_feather(SUMMARY_PATH)
         print(f"Loaded: {dataset.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found: {SUMMARY_PATH}")

@@ -42,6 +42,7 @@ from scipy.stats import gaussian_kde
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import RobustScaler
+from ballpushing_utils import read_feather
 
 try:
     import umap.umap_ as umap_module
@@ -212,7 +213,7 @@ def load_coordinates_incrementally(coordinates_dir: Union[str, Path], test_mode:
     chunks = []
     for file_path in files:
         try:
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
         except Exception as exc:
             print(f"  Error reading {file_path.name}: {exc}")
             continue

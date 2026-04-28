@@ -46,6 +46,7 @@ from matplotlib.ticker import FuncFormatter
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -93,7 +94,7 @@ def load_coordinates_dataset():
 
     print(f"Loading coordinates dataset from: {coordinates_path}")
     try:
-        dataset = pd.read_feather(coordinates_path)
+        dataset = read_feather(coordinates_path)
         print(f"✅ MagnetBlock coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {coordinates_path}")
@@ -104,7 +105,7 @@ def load_coordinates_dataset():
 
     print(f"Loading summary dataset from: {summary_path}")
     try:
-        summary = pd.read_feather(summary_path)
+        summary = read_feather(summary_path)
         print(f"✅ Summary dataset loaded successfully! Shape: {summary.shape}")
     except FileNotFoundError:
         print(f"❌ Summary dataset not found at {summary_path}")

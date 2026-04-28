@@ -41,6 +41,7 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
@@ -122,7 +123,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
 
         try:
             # Load dataset
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
             print(f"  Original shape: {df.shape}")
 
             # Check for required columns

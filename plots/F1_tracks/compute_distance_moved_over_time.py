@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -74,8 +75,8 @@ BALL_DISTANCE_COLUMNS = {
 def load_datasets():
     """Load F1 coordinates and summary datasets."""
     print("Loading datasets...")
-    df_coords = pd.read_feather(DATASET_PATHS["coordinates"])
-    df_summary = pd.read_feather(DATASET_PATHS["summary"])
+    df_coords = read_feather(DATASET_PATHS["coordinates"])
+    df_summary = read_feather(DATASET_PATHS["summary"])
 
     print(f"  F1 coordinates: {df_coords.shape}")
     print(f"  Summary: {df_summary.shape}")

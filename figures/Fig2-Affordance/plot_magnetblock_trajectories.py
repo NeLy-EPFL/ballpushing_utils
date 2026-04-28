@@ -31,7 +31,7 @@ import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
 
-from ballpushing_utils import dataset as dataset_path_for  # noqa: F401 (used below)
+from ballpushing_utils import dataset as dataset_path_for  # noqa: F401 (used below), read_feather
 from ballpushing_utils import figure_output_dir
 from ballpushing_utils.plotting import set_illustrator_style
 
@@ -144,7 +144,7 @@ def load_coordinates_dataset():
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ MagnetBlock coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

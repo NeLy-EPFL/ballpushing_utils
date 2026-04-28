@@ -41,6 +41,7 @@ import scipy.stats as stats_module
 from statsmodels.stats.multitest import multipletests
 import time
 import argparse
+from ballpushing_utils import read_feather
 
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
@@ -842,7 +843,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
 
     print(f"Loading ball types dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Ball types dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")
@@ -952,7 +953,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
     for summ_path in ctrl_summary_paths:
         try:
             print(f"  Loading Ctrl summary from: {summ_path}")
-            ctrl_df = pd.read_feather(summ_path)
+            ctrl_df = read_feather(summ_path)
 
             # Filter to FeedingState == 'starved_noWater' if available
             if "FeedingState" in ctrl_df.columns:

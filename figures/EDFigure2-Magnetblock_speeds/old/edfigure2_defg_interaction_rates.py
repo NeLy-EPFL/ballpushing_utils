@@ -28,7 +28,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 matplotlib.rcParams["pdf.fonttype"] = 42
@@ -58,7 +58,7 @@ LABELS = {"n": "No access to ball", "y": "Access to immobile ball"}
 
 def load_data(test_mode: bool = False) -> pd.DataFrame:
     print(f"\nLoading dataset from:\n  {DATASET_PATH}")
-    df = pd.read_feather(DATASET_PATH)
+    df = read_feather(DATASET_PATH)
     if test_mode:
         sample_flies = df["fly"].unique()[:10]
         df = df[df["fly"].isin(sample_flies)].copy()

@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 
 # ---- defaults matching the two sibling scripts ---------------------------
 # All paths route through ``dataset()`` / ``figure_output_dir()`` so the
@@ -91,12 +91,12 @@ def simulate_final_positions(num_simulations: int, steps: int, seed: int, delta:
 def load_wildtype_final_positions(feather_path: Path | None, coordinates_dir: Path | None) -> np.ndarray:
     """Return array of per-fly final aligned ball positions (mm)."""
     if feather_path is not None:
-        frames = [pd.read_feather(feather_path)]
+        frames = [read_feather(feather_path)]
     else:
         feather_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
         if not feather_files:
             raise FileNotFoundError(f"No feather files in {coordinates_dir}")
-        frames = [pd.read_feather(fp) for fp in feather_files]
+        frames = [read_feather(fp) for fp in feather_files]
 
     combined = pd.concat(frames, ignore_index=True)
 

@@ -23,14 +23,14 @@ from scipy import stats
 
 # Add src directory to path for imports
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
 
 # Resolve the path at module level — putting the ``dataset(...)`` call
 # inside ``load_and_clean_exploration_dataset()`` would conflict with
-# the local ``dataset = pd.read_feather(...)`` assignment on line 101
+# the local ``dataset = read_feather(...)`` assignment on line 101
 # (Python sees one assignment to ``dataset`` anywhere in the function
 # and treats the name as local for the whole function, raising
 # UnboundLocalError on the earlier ``dataset(...)`` call).
@@ -106,7 +106,7 @@ def load_and_clean_exploration_dataset(test_mode=False):
     # Load the exploration dataset
     print(f"Loading exploration dataset from: {SUMMARY_PATH}")
     try:
-        dataset = pd.read_feather(SUMMARY_PATH)
+        dataset = read_feather(SUMMARY_PATH)
         print(f"Loaded dataset with shape: {dataset.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found at: {SUMMARY_PATH}")

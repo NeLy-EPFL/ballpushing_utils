@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 import warnings
 import argparse
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -641,7 +642,7 @@ def prepare_data():
     """Load and preprocess data (same as original script)"""
     print("📊 Loading and preprocessing data...")
 
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     print(f"   Raw dataset: {len(dataset)} rows, {len(dataset.columns)} columns")
     dataset = Config.cleanup_data(dataset)
     print(f"   After cleanup: {len(dataset)} rows")

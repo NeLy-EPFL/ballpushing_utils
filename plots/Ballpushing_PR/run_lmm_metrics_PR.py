@@ -35,6 +35,7 @@ import statsmodels.formula.api as smf
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 from statsmodels.stats.multitest import multipletests
 from io import StringIO
+from ballpushing_utils import read_feather
 
 # =========================
 # Configuration (EDIT ME)
@@ -92,7 +93,7 @@ def load_dataset(test_mode=False, test_sample_size=200):
 
     # Load based on extension
     if p.suffix == ".feather":
-        df = pd.read_feather(p)
+        df = read_feather(p)
     elif p.suffix in [".parquet"]:
         df = pd.read_parquet(p)
     elif p.suffix in [".csv", ".tsv"]:

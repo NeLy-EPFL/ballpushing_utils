@@ -26,7 +26,7 @@ from tqdm import tqdm
 
 # Add src directory to path for imports
 
-from ballpushing_utils import figure_output_dir, dataset
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -110,7 +110,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
         print(f"\n[{i}/{len(feather_files)}] Loading: {file_path.name}")
 
         try:
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
             print(f"   Shape: {df.shape}")
 
             # Check required columns

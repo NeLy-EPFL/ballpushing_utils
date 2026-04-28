@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from statsmodels.stats.multitest import multipletests
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -100,7 +101,7 @@ def load_and_prepare():
     to mm for all downstream use.
     """
     print("Loading summary dataset...")
-    df = pd.read_feather(SUMMARY_PATH)
+    df = read_feather(SUMMARY_PATH)
     print(f"  Full summary: {df.shape}")
 
     # Keep only test-ball rows

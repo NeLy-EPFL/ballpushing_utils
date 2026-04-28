@@ -47,6 +47,7 @@ import seaborn as sns
 from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact
 import scipy.stats as stats_module
+from ballpushing_utils import read_feather
 
 
 def load_nickname_mapping():
@@ -99,12 +100,12 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=500):
 
     print(f"Loading dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")
         print("Falling back to older dataset...")
-        dataset = pd.read_feather(
+        dataset = read_feather(
             "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250803_20_summary_TNT_screen_Data/summary/pooled_summary.feather"
         )
         print(f"✅ Fallback dataset loaded! Shape: {dataset.shape}")

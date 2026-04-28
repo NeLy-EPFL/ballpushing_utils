@@ -32,6 +32,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 
 def load_coordinates_dataset():
@@ -40,7 +41,7 @@ def load_coordinates_dataset():
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Dissected coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

@@ -57,6 +57,7 @@ except ImportError:
 
 sys.path.append("/home/matthias/ballpushing_utils")
 import Config
+from ballpushing_utils import read_feather
 
 # === CONFIGURATION ===
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -656,7 +657,7 @@ def prepare_data():
     """Load and preprocess data (same as consistency analysis)"""
     print("📊 Loading and preprocessing data...")
 
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
 
     # Exclude problematic nicknames

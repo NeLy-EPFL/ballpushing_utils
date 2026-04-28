@@ -3,6 +3,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import re
 from Config import get_subset_data, color_dict
+from ballpushing_utils import read_feather
 
 
 # Function to sanitize filenames
@@ -17,7 +18,7 @@ hits_df = pd.read_csv("/home/matthias/ballpushing_utils/src/Plotting/Umap_hits.c
 hits_df = hits_df[hits_df["significant_clusters"] != "[]"]
 
 # Load UMAP data
-umap_data = pd.read_feather("/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather")
+umap_data = read_feather("/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather")
 
 # Process each hit
 for _, hit in hits_df.iterrows():

@@ -34,7 +34,7 @@ from scipy.stats import mannwhitneyu
 from sklearn.preprocessing import RobustScaler
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 # Rebuild font cache if needed
@@ -308,7 +308,7 @@ def apply_simplified_nicknames(genotype_list, nickname_mapping):
 
 def prepare_data():
     print("📊 Loading and preprocessing data...")
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
     exclude = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"]
     dataset = dataset[~dataset["Nickname"].isin(exclude)]

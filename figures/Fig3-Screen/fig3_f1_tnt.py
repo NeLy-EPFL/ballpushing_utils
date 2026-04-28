@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 from ballpushing_utils.stats import permutation_test
 
@@ -212,7 +212,7 @@ def build_stats_df(panel_data, raw_pvals, corr_pvals):
 
 
 def load_data():
-    df = pd.read_feather(DATA_PATH)
+    df = read_feather(DATA_PATH)
     if "ball_identity" in df.columns:
         df = df[df["ball_identity"] == "test"].copy()
     df = df[df["Genotype"].isin(GENOTYPE_ORDER)].copy()
