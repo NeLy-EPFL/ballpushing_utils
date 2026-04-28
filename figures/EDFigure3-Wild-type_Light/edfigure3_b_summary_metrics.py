@@ -28,7 +28,17 @@ from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
 
-# Set matplotlib parameters for publication quality
+# Resolve the path at module level — putting the ``dataset(...)`` call
+# inside ``load_and_clean_exploration_dataset()`` would conflict with
+# the local ``dataset = pd.read_feather(...)`` assignment on line 101
+# (Python sees one assignment to ``dataset`` anywhere in the function
+# and treats the name as local for the whole function, raising
+# UnboundLocalError on the earlier ``dataset(...)`` call).
+SUMMARY_PATH = dataset(
+    "Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/summary/pooled_summary.feather"
+)
+
+
 def cohens_d(group1, group2):
     """Calculate Cohen's d effect size (group2 - group1)."""
     n1, n2 = len(group1), len(group2)
@@ -94,14 +104,12 @@ def load_and_clean_exploration_dataset(test_mode=False):
         If True, sample a subset of data for faster processing
     """
     # Load the exploration dataset
-    dataset_path = dataset("Ballpushing_Exploration/Datasets/250806_10_coordinates_control_folders_Data/summary/pooled_summary.feather")
-
-    print(f"Loading exploration dataset from: {dataset_path}")
+    print(f"Loading exploration dataset from: {SUMMARY_PATH}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = pd.read_feather(SUMMARY_PATH)
         print(f"Loaded dataset with shape: {dataset.shape}")
     except FileNotFoundError:
-        raise FileNotFoundError(f"Dataset not found at: {dataset_path}")
+        raise FileNotFoundError(f"Dataset not found at: {SUMMARY_PATH}")
 
     # Drop TNT-specific metadata columns
     tnt_metadata_columns = [

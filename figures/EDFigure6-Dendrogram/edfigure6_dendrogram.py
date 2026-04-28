@@ -50,7 +50,18 @@ except ImportError:
     HAS_SEABORN = False
     print("⚠️  seaborn not available - using matplotlib only")
 
-import Config  # noqa: E402 — external module from src/Plotting/Config.py
+# ``Config`` lives in ``src/Plotting/Config.py`` outside the figures
+# tree; load it by path instead of relying on a particular CWD or a
+# ``sys.path.append`` so this script runs from any directory (including
+# when executed by run_all_figures.py with cwd=script.parent).
+import importlib.util as _importlib_util  # noqa: E402
+
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "src" / "Plotting" / "Config.py"
+_spec = _importlib_util.spec_from_file_location("Config", _CONFIG_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Could not locate Config module at {_CONFIG_PATH}")
+Config = _importlib_util.module_from_spec(_spec)
+_spec.loader.exec_module(Config)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
