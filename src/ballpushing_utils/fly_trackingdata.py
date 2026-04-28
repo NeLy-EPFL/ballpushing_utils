@@ -427,10 +427,15 @@ class FlyTrackingData:
         )
 
         if not has_track_names:
-            print(f"⚠️  WARNING: No SLEAP track names found for {self.fly.metadata.name}!")
-            # No track names - handle based on number of balls
+            # No track names in the .h5 — handle based on how many
+            # balls were tracked. Single-ball files don't need a
+            # track-name system (there's nothing to disambiguate),
+            # so missing names there is the architectural norm and
+            # should be silent. Multi-ball files without names IS an
+            # anomaly worth flagging.
             if num_balls == 1:
-                # Single ball without track names - regular experiment
+                # Single ball without track names → regular non-F1
+                # experiment. Expected state; silent unless debugging.
                 self.training_ball_idx = 0
                 if self.fly.config.debugging:
                     print(
@@ -438,7 +443,9 @@ class FlyTrackingData:
                     )
                 return
             else:
-                # Multiple balls without track names - issue warning
+                # Multiple balls without track names → real anomaly.
+                # F1 experiments require named tracks to disambiguate
+                # training vs test. Bail with a clear warning.
                 print(
                     f"⚠️  WARNING: Multiple balls ({num_balls}) detected for {self.fly.metadata.name} but no SLEAP track names found!"
                 )
@@ -1563,7 +1570,12 @@ class FlyTrackingData:
         """
 
         if self.skeletontrack is None:
-            warnings.warn(f"No skeleton tracking file found for {self.fly.metadata.name}.")
+            # F1 experiments don't currently have a SLEAP skeleton model
+            # — missing skeleton data is the expected state, not an
+            # anomaly. Only warn for paradigms where a skeleton track
+            # SHOULD have been produced.
+            if getattr(self.fly.config, "experiment_type", None) != "F1":
+                warnings.warn(f"No skeleton tracking file found for {self.fly.metadata.name}.")
             return None
 
         # Get the first track
