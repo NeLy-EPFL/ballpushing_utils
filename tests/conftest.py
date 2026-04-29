@@ -71,6 +71,27 @@ _MAGNETBLOCK_FLY_REL = f"{_MAGNETBLOCK_EXPERIMENT_REL}/arena4/corridor4"
 _FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "sample_data"
 
 
+_LFS_POINTER_MAX_BYTES = 512  # real LFS payloads (.h5, .mp4) are always >> this
+
+
+def _lfs_pulled(directory: Path) -> bool:
+    """Return True only if the large binary fixtures look like real data.
+
+    Git-LFS pointer stubs are ~134 bytes.  Actual SLEAP .h5 files are
+    several MB.  Checking size is therefore a reliable proxy for whether
+    ``git lfs pull`` has been run.  If the directory has no .h5 or .mp4
+    files at all we assume it's fine (e.g. a metadata-only folder).
+    """
+    binary_files = [
+        p
+        for p in directory.rglob("*")
+        if p.is_file() and p.suffix in {".h5", ".mp4"}
+    ]
+    if not binary_files:
+        return True
+    return all(p.stat().st_size > _LFS_POINTER_MAX_BYTES for p in binary_files)
+
+
 def _resolve(relative: str) -> Path | None:
     """Return the first existing location of *relative*, or ``None``.
 
@@ -79,6 +100,10 @@ def _resolve(relative: str) -> Path | None:
     deliberate — :func:`ballpushing_utils.paths.dataset` falls back to a
     hardcoded lab path when the env var is unset, which would silently
     bypass the fixtures on workstations where the lab share is mounted.
+
+    Also returns ``None`` (causing a clean :func:`pytest.skip`) when the
+    fixture directory exists but its LFS payloads are still pointer stubs
+    — i.e. ``git lfs pull`` has not been run.
     """
     candidates: list[Path] = []
     explicit_root = os.environ.get("BALLPUSHING_DATA_ROOT", "").strip()
@@ -86,7 +111,7 @@ def _resolve(relative: str) -> Path | None:
         candidates.append(Path(explicit_root).expanduser() / relative)
     candidates.append(_FIXTURES_ROOT / relative)
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.exists() and _lfs_pulled(candidate):
             return candidate
     return None
 

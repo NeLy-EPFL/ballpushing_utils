@@ -106,7 +106,7 @@ class Experiment:
         # Load the fps value from the fps.npy file in the experiment directory
         fps_file = self.directory / "fps.npy"
         if fps_file.exists():
-            raw = np.load(fps_file, allow_pickle=True)
+            raw = np.load(fps_file)
             # ``raw`` is typically a 0-d ndarray; ``.item()`` unwraps it
             # to a native Python int/float. Guarded for the rare case
             # where ``raw`` is already a Python scalar.
