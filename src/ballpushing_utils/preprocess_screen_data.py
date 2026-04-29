@@ -112,7 +112,11 @@ def preprocess_data(
     return df, df_fly
 
 
-def get_preprocessed_data(cache_dir: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
+def get_preprocessed_data(
+    cache_dir: Path,
+    genotype_name_csv: str | Path | None = None,
+    excluded_genotypes: list[str] | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
     if (cache_dir / "contacts.parquet").exists() and (cache_dir / "flies.parquet").exists():
         df = pl.read_parquet(cache_dir / "contacts.parquet")
         df_fly = pl.read_parquet(cache_dir / "flies.parquet")
@@ -120,4 +124,13 @@ def get_preprocessed_data(cache_dir: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
         df, df_fly = map(pl.concat, zip(*(preprocess_data(path) for path in tqdm(data_paths))))
         df.write_parquet(cache_dir / "contacts.parquet")
         df_fly.write_parquet(cache_dir / "flies.parquet")
+
+    if genotype_name_csv is not None:
+        genotype_names = dict(zip(*pl.read_csv(genotype_name_csv).to_dict().values()))
+        df_fly = df_fly.with_columns(pl.col("genotype").replace(genotype_names))
+
+    if excluded_genotypes:
+        df_fly = df_fly.filter(~pl.col("genotype").is_in(excluded_genotypes))
+        df = df.filter(pl.col("fly").is_in(df_fly["fly"].implode()))
+
     return df, df_fly

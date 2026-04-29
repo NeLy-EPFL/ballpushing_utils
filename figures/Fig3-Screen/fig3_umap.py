@@ -1,4 +1,3 @@
-from pathlib import Path
 import numpy as np
 import polars as pl
 
@@ -86,45 +85,6 @@ def get_embedding(df_features):
     return embedding
 
 
-def get_kde(points, n_bins=512, bound=None, bw=0.1, border_rel=0.1):
-    """Estimate pdf using FFT KDE.
-
-    Parameters
-    ----------
-    points : array_like
-        Datapoints to estimate from, with shape (# of samples, 2).
-    n_bins : int
-        Number of bins for each dimension.
-    bound : float, optional
-        Upper bound of the absolute values of the data.
-        Will be calculated as max(abs(points)) * (1 + border_rel) if not provided.
-    bw : float
-        The bandwidth.
-    border_rel : float, optional
-        See description for bound.
-
-    Returns
-    -------
-    ndarray
-        Estimated 2D pdf.
-    """
-    from KDEpy.FFTKDE import FFTKDE
-
-    if bound is None:
-        bound = np.abs(points).max()
-        if border_rel > 0:
-            border = bound * border_rel
-        else:
-            border = 1e-7
-        bound += border
-
-    points = points[np.abs(points).max(1) < bound]
-    grid = np.mgrid[-bound : bound : n_bins * 1j, -bound : bound : n_bins * 1j]
-    grid = grid.reshape((2, -1)).T
-    pdf = FFTKDE(bw=bw).fit(points).evaluate(grid)
-    return pdf.reshape((n_bins, n_bins), order="F"), bound
-
-
 def cluster_points(embedding, n_clusters):
     from sklearn.cluster import KMeans
 
@@ -170,6 +130,7 @@ def get_bbox(a):
 
 def get_cluster_regions(embedding, labels, bound, n_bins, density_threshold):
     from scipy.ndimage import binary_fill_holes
+    from ballpushing_utils.stats.kde import get_kde
 
     n_clusters = labels.max() + 1
     grid_y, grid_x = np.mgrid[-bound : bound : n_bins * 1j, -bound : bound : n_bins * 1j]
