@@ -1,0 +1,11 @@
+# Large binary files under tests/fixtures/ are stored via Git LFS. This keeps
+# the repo clone lightweight and lets CI opt in to pulling the sample data
+# only when it actually needs to run data-gated tests.
+#
+# Install git-lfs (https://git-lfs.com) and run `git lfs install` once per
+# clone. `git clone` on a fresh clone will automatically download the LFS
+# objects, unless you set GIT_LFS_SKIP_SMUDGE=1 (see README for the
+# lightweight-clone recipe).
+tests/fixtures/**/*.mp4 filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/**/*.h5  filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/**/*.npy filter=lfs diff=lfs merge=lfs -text

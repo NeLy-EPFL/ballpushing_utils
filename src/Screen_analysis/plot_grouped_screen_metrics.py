@@ -13,11 +13,11 @@ annotated with red stars above the target panel, matching the selected screen st
 Examples
 --------
 python plot_grouped_screen_metrics.py \
-  --metrics velocity_during_interactions first_major_event distance_ratio \
+  --metrics speed_during_interactions first_major_event distance_ratio \
   --genotypes LC10-2 TNTxMB247 DDC-gal4
 
 python plot_grouped_screen_metrics.py \
-  --metrics velocity_during_interaction,first_major_event,distance_ratio \
+  --metrics speed_during_interaction,first_major_event,distance_ratio \
   --genotypes LC10-2 TNTxMB247 DDC-Gal4 \
   --panel-width-mm 60 \
   --panel-height-mm 85
@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 import Config
+from ballpushing_utils import read_feather
 
 
 # Illustrator-editable text
@@ -94,22 +95,22 @@ METRIC_DISPLAY_NAMES = {
     "nb_events": "Events (< 2mm fly-ball dist.)(#)",
     "persistence_at_end": "Fraction time near end of corridor",
     "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
-    "normalized_velocity": "Normalized walking velocity",
+    "normalized_speed": "Normalized walking speed",
     "first_major_event_time": "First major (>1.2mm) event time (s)",
     "max_event_time": "Max ball displ. time (s)",
     "nb_freeze": "short pauses (>2s <5px) (#)",
     "flailing": "Movement of front legs during contact",
-    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "speed_during_interactions": "Fly speed during ball contact (mm/s)",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing (>30deg) ball in corridor",
     "interaction_persistence": "Avg. duration ball interaction events (s)",
     "chamber_exit_time": "Time of first chamber exit (s)",
-    "velocity_trend": "Slope linear fit to fly velocity over time",
+    "speed_trend": "Slope linear fit to fly speed over time",
 }
 
 # Friendly aliases for common typo/variants in CLI input.
 METRIC_ALIASES = {
-    "velocity_during_interaction": "velocity_during_interactions",
+    "speed_during_interaction": "speed_during_interactions",
 }
 
 
@@ -334,7 +335,7 @@ def permutation_test_1d(group1, group2, n_permutations=10000, random_state=42):
 
 
 def load_dataset(data_path):
-    df = pd.read_feather(data_path)
+    df = read_feather(data_path)
     df = Config.cleanup_data(df)
 
     for col in df.columns:

@@ -12,6 +12,7 @@ from pathlib import Path
 import pandas as pd
 from scipy.ndimage import gaussian_filter
 import argparse
+from ballpushing_utils import read_feather
 
 
 def binarize_template(template, invert_background=True):
@@ -421,7 +422,7 @@ def main():
 
     # Load dataset
     print("\n2. Loading dataset...")
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
     print(f"   Dataset shape: {df.shape}")
     print(f"   Number of unique flies: {df['fly'].nunique()}")
 

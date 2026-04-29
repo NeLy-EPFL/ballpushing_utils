@@ -87,8 +87,8 @@ DEFAULT_METRIC_RANGES: Mapping[str, RangeCheck] = {
         _r("has_major", lo=0, hi=1),
         _r("has_long_pauses", lo=0, hi=1),
         _r("overall_interaction_rate", lo=0.0),
-        _r("velocity_during_interactions", lo=0.0),
-        _r("normalized_velocity", lo=0.0),
+        _r("speed_during_interactions", lo=0.0),
+        _r("normalized_speed", lo=0.0),
         _r("fly_distance_moved", lo=0.0, note="mm"),
     ]
 }

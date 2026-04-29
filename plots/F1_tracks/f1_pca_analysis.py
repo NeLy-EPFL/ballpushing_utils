@@ -48,6 +48,7 @@ from itertools import combinations
 
 # Import multivariate statistical analysis functions
 from pca_multivariate_stats import perform_multivariate_statistical_analysis
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -242,7 +243,7 @@ def load_dataset(mode):
         raise FileNotFoundError(f"Dataset not found for mode '{mode}': {dataset_path}")
 
     print(f"Loading dataset for mode '{mode}' from: {dataset_path}")
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
     print(f"  Loaded {len(df)} rows")
     return df
 

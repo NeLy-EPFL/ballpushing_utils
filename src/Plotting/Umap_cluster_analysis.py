@@ -5,6 +5,7 @@ from statsmodels.stats.multitest import multipletests
 from scikit_posthocs import posthoc_dunn
 
 import Config
+from ballpushing_utils import read_feather
 
 
 def find_behavioral_hits(umap_data, config, alpha=0.05):
@@ -93,7 +94,7 @@ def find_behavioral_hits(umap_data, config, alpha=0.05):
 
 
 # Load UMAP data
-umap_data = pd.read_feather("/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather")
+umap_data = read_feather("/home/matthias/ballpushing_utils/tests/integration/outputs/umap_TNT_1.feather")
 
 # Find hits
 hits = find_behavioral_hits(umap_data, Config, alpha=0.05)

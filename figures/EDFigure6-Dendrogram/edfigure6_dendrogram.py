@@ -34,7 +34,7 @@ from scipy.stats import mannwhitneyu
 from sklearn.preprocessing import RobustScaler
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 # Rebuild font cache if needed
@@ -50,18 +50,24 @@ except ImportError:
     HAS_SEABORN = False
     print("⚠️  seaborn not available - using matplotlib only")
 
-import Config  # noqa: E402 — external module from src/Plotting/Config.py
+# ``Config`` lives in ``src/Plotting/Config.py`` outside the figures
+# tree; load it by path instead of relying on a particular CWD or a
+# ``sys.path.append`` so this script runs from any directory (including
+# when executed by run_all_figures.py with cwd=script.parent).
+import importlib.util as _importlib_util  # noqa: E402
+
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "src" / "Plotting" / "Config.py"
+_spec = _importlib_util.spec_from_file_location("Config", _CONFIG_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Could not locate Config module at {_CONFIG_PATH}")
+Config = _importlib_util.module_from_spec(_spec)
+_spec.loader.exec_module(Config)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_PATH = dataset(
-    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-)
-CONSISTENCY_DIR = (
-    _REPO_ROOT
-    / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
-)
+DATA_PATH = dataset("Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather")
+CONSISTENCY_DIR = _REPO_ROOT / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
 METRICS_PATH = _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
 OUTPUT_DIR = figure_output_dir("EDFigure6", __file__, create=False)
 
@@ -88,26 +94,26 @@ METRIC_DISPLAY_NAMES = {
     "distance_ratio": "Dist. ball moved / corridor length",
     "distance_moved": "Dist. ball moved",
     "pulled": "Signif. (>0.3 mm) pulling events (#)",
-    "max_event": "Event max. ball displ. (n)",
+    "max_event": "Event max. ball displ. (#)",
     "number_of_pauses": "Long pauses (>5s <5px) (#)",
-    "first_major_event": "First major (>1.2mm) event(n)",
+    "first_major_event": "First major (>1.2mm) event(#)",
     "significant_ratio": "Fraction signif. (>0.3 mm) events",
     "max_distance": "Max ball displacement (mm)",
     "chamber_ratio": "Fraction time in chamber",
     "nb_events": "Events (< 2mm fly-ball dist.)(#)",
     "persistence_at_end": "Fraction time near end of corridor",
     "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
-    "normalized_velocity": "Normalized walking velocity",
+    "normalized_speed": "Normalized walking speed",
     "first_major_event_time": "First major (>1.2mm) event time (s)",
     "max_event_time": "Max ball displ. time (s)",
     "nb_freeze": "short pauses (>2s <5px) (#)",
     "flailing": "Movement of front legs during contact",
-    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "speed_during_interactions": "Fly speed during ball contact (mm/s)",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing (>30°) ball in corridor",
     "interaction_persistence": "Avg. duration ball interaction events (s)",
     "chamber_exit_time": "Time of first chamber exit (s)",
-    "velocity_trend": "Slope linear fit to fly velocity over time",
+    "speed_trend": "Slope linear fit to fly speed over time",
 }
 
 
@@ -302,7 +308,7 @@ def apply_simplified_nicknames(genotype_list, nickname_mapping):
 
 def prepare_data():
     print("📊 Loading and preprocessing data...")
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
     exclude = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"]
     dataset = dataset[~dataset["Nickname"].isin(exclude)]

@@ -18,6 +18,7 @@ import yaml
 
 # Import the helper functions from the control script
 import sys
+from ballpushing_utils import read_feather
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -457,7 +458,7 @@ def main():
 
         # Load primary dataset
         print(f"   Loading primary dataset from: {primary_mode}")
-        df_primary = pd.read_feather(Path(primary_config["fly_positions_path"]))
+        df_primary = read_feather(Path(primary_config["fly_positions_path"]))
         print(f"   Primary dataset shape: {df_primary.shape}")
 
         # Get genotypes to pool and modes to pool from
@@ -482,7 +483,7 @@ def main():
 
                     if pool_positions_path:
                         try:
-                            df_pool = pd.read_feather(Path(pool_positions_path))
+                            df_pool = read_feather(Path(pool_positions_path))
 
                             # Find genotype column in pooled dataset
                             pool_genotype_col = None
@@ -516,7 +517,7 @@ def main():
     else:
         # Regular mode - load single dataset
         fly_positions_path = Path(mode_config["fly_positions_path"])
-        df = pd.read_feather(fly_positions_path)
+        df = read_feather(fly_positions_path)
 
     print(f"   Dataset shape: {df.shape}")
     print(f"   Number of unique flies: {df['fly'].nunique()}")

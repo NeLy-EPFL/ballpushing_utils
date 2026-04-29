@@ -18,6 +18,7 @@ import cv2
 from matplotlib import colors
 from arena_alignment import load_template, detect_arena_in_video, transform_dataframe_to_template
 from masked_heatmap import create_average_fly_masked_heatmap, create_heatmap_with_template_overlay
+from ballpushing_utils import read_feather
 
 
 def load_background_image(video_path, frame_number=0):
@@ -457,7 +458,7 @@ def main():
             path_obj = Path(path)
             if path_obj.exists():
                 print(f"Loading dataset from: {path}")
-                df = pd.read_feather(path)
+                df = read_feather(path)
                 used_path = path
                 print(f"Dataset loaded successfully. Shape: {df.shape}")
                 break

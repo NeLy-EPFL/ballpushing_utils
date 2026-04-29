@@ -19,7 +19,7 @@ import pandas as pd
 from matplotlib.patches import Circle
 from scipy.ndimage import gaussian_filter
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -207,7 +207,7 @@ def main(test_mode=False):
 
     # Load dataset
     print("Loading dataset...")
-    df = pd.read_feather(DATASET_PATH)
+    df = read_feather(DATASET_PATH)
     print(f"  {len(df):,} rows, {df['fly'].nunique()} flies")
 
     # Find position columns

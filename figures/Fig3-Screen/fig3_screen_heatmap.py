@@ -19,7 +19,7 @@ from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 try:
@@ -33,7 +33,18 @@ fm._load_fontmanager(try_read_cache=False)
 set_illustrator_style()
 warnings.filterwarnings("ignore")
 
-import Config  # noqa: E402 — external module from src/Plotting/Config.py
+# ``Config`` lives in ``src/Plotting/Config.py`` outside the figures
+# tree; load it by path instead of relying on a particular CWD or a
+# ``sys.path.append`` so this script runs from any directory (including
+# when executed by run_all_figures.py with cwd=script.parent).
+import importlib.util as _importlib_util  # noqa: E402
+
+_CONFIG_PATH = Path(__file__).resolve().parents[2] / "src" / "Plotting" / "Config.py"
+_spec = _importlib_util.spec_from_file_location("Config", _CONFIG_PATH)
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Could not locate Config module at {_CONFIG_PATH}")
+Config = _importlib_util.module_from_spec(_spec)
+_spec.loader.exec_module(Config)
 
 # ── PATHS ─────────────────────────────────────────────────────────────────────
 DATA_PATH = dataset(
@@ -120,10 +131,10 @@ METRIC_GROUPS = [
     (
         "Kinematics",
         [
-            "velocity_trend",
-            "normalized_velocity",
+            "speed_trend",
+            "normalized_speed",
             "fraction_not_facing_ball",
-            "velocity_during_interactions",
+            "speed_during_interactions",
             "flailing",
             "head_pushing_ratio",
         ],
@@ -155,17 +166,17 @@ METRIC_DISPLAY_NAMES = {
     "nb_events": "Events (< 2mm fly-ball dist.) (#)",
     "persistence_at_end": "Fraction time near end of corridor",
     "time_chamber_beginning": "Time in chamber first 25% exp. (s)",
-    "normalized_velocity": "Normalized walking velocity",
+    "normalized_speed": "Normalized walking speed",
     "first_major_event_time": "First major (>1.2mm) event time (s)",
     "max_event_time": "Max ball displ. time (s)",
     "nb_freeze": "Short pauses (>2s <5px) (#)",
     "flailing": "Movement of front legs during contact",
-    "velocity_during_interactions": "Fly speed during ball contact (mm/s)",
+    "speed_during_interactions": "Fly speed during ball contact (mm/s)",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing (>30°) ball in corridor",
     "interaction_persistence": "Avg. duration ball interaction events (s)",
     "chamber_exit_time": "Time of first chamber exit (s)",
-    "velocity_trend": "Slope linear fit to fly velocity over time",
+    "speed_trend": "Slope linear fit to fly speed over time",
 }
 
 
@@ -200,7 +211,7 @@ def cohens_d(group1, group2):
 
 
 def load_data():
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
     dataset = dataset[~dataset["Nickname"].isin(["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"])]
     dataset.rename(

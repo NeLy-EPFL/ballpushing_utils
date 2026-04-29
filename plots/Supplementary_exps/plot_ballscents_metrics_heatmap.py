@@ -19,6 +19,7 @@ import seaborn as sns
 from scipy.cluster.hierarchy import linkage, dendrogram
 from scipy.spatial.distance import pdist
 from matplotlib.colors import Normalize
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -681,7 +682,7 @@ def load_raw_data():
         "/mnt/upramdya_data/MD/Ball_scents/Datasets/251103_10_summary_ballscents_Data/summary/pooled_summary.feather"
     )
     print(f"Loading raw data from: {data_path}")
-    df = pd.read_feather(data_path)
+    df = read_feather(data_path)
     return df
 
 

@@ -30,16 +30,21 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+from ballpushing_utils import dataset, figure_output_dir, read_feather
+
 # ---- defaults matching the two sibling scripts ---------------------------
-DEFAULT_FEATHER = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets"
-    "/260220_10_summary_control_folders_Data/coordinates"
-    "/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
+# All paths route through ``dataset()`` / ``figure_output_dir()`` so the
+# script picks up ``BALLPUSHING_DATA_ROOT`` / ``BALLPUSHING_FIGURES_ROOT``
+# env vars on machines where the lab share isn't mounted at the default
+# location.
+DEFAULT_FEATHER = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data"
+    "/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
 )
-DEFAULT_COORDINATES_DIR = Path(
-    "/mnt/upramdya_data/MD/Ballpushing_Exploration/Datasets" "/260220_10_summary_control_folders_Data/coordinates"
+DEFAULT_COORDINATES_DIR = dataset(
+    "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates"
 )
-DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/Affordance_Figures/Figure1")
+DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 PX_PER_MM = 500 / 30
 
@@ -86,12 +91,12 @@ def simulate_final_positions(num_simulations: int, steps: int, seed: int, delta:
 def load_wildtype_final_positions(feather_path: Path | None, coordinates_dir: Path | None) -> np.ndarray:
     """Return array of per-fly final aligned ball positions (mm)."""
     if feather_path is not None:
-        frames = [pd.read_feather(feather_path)]
+        frames = [read_feather(feather_path)]
     else:
         feather_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
         if not feather_files:
             raise FileNotFoundError(f"No feather files in {coordinates_dir}")
-        frames = [pd.read_feather(fp) for fp in feather_files]
+        frames = [read_feather(fp) for fp in feather_files]
 
     combined = pd.concat(frames, ignore_index=True)
 

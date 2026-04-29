@@ -3,9 +3,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D  # Required for 3D plotting
 import Config
+from ballpushing_utils import read_feather
 
 # Load the PCA dataset
-pca_with_metadata = pd.read_feather("pca_with_metadata.feather")
+pca_with_metadata = read_feather("pca_with_metadata.feather")
 
 # Create the output folder if it doesn't exist
 output_folder = "PCA_hits"

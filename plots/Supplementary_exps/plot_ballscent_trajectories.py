@@ -37,6 +37,7 @@ import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 matplotlib.rcParams["pdf.fonttype"] = 42  # To avoid type 3 fonts in PDFs
 matplotlib.rcParams["font.family"] = "Arial"
@@ -44,14 +45,10 @@ matplotlib.rcParams["font.family"] = "Arial"
 # Fixed color mapping for ball scents - matches colors from run_permutation_ballscents.py
 # Ensures consistent colors across all plots
 BALLSCENT_COLORS = {
-    "New": "#7f7f7f",  # Grey - control (new clean ball)
-    "New + Pre-exposed": "#1f77b4",  # Blue
+    "New": "#7f7f7f",  # Grey — control (new clean ball)
+    "Pre-exposed": "#1f77b4",  # Blue  (CtrlScent: pre-exposed to fly odors)
     "Washed": "#2ca02c",  # Green
     "Washed + Pre-exposed": "#ff7f0e",  # Orange
-    "Pre-exposed": "#9467bd",  # Purple (if present in data)
-    "Scented": "#ff7f0e",  # Orange - alias for "Washed + Pre-exposed"
-    "Ctrl": "#7f7f7f",  # Grey - control
-    "CtrlScent": "#9467bd",  # Purple
 }
 
 # Pixel to mm conversion factor (500 px = 30 mm)
@@ -201,7 +198,7 @@ def load_coordinates_dataset(test_mode=False):
 
     print(f"Loading from: {Path(dataset_path).name}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Ball scents coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")
@@ -251,9 +248,9 @@ def load_coordinates_dataset(test_mode=False):
         n_points = len(downsampled[downsampled["BallScent"] == scent])
         print(f"  {scent}: {n_flies} flies, {n_points} datapoints")
 
-    # Filter to only include specific ball scent conditions (matching permutation tests)
-    # Keep: New (control), New + Pre-exposed, Washed, Washed + Pre-exposed
-    allowed_scents = ["New", "New + Pre-exposed", "Washed", "Washed + Pre-exposed"]
+    # Filter to only include specific ball scent conditions
+    # Pre-exposed = CtrlScent (ball pre-exposed to fly odors); excludes NewScent
+    allowed_scents = ["New", "Pre-exposed", "Washed", "Washed + Pre-exposed"]
     initial_shape = downsampled.shape
     downsampled = downsampled[downsampled["BallScent"].isin(allowed_scents)].copy()
     print(f"\n📊 Filtered to allowed ball scents: {allowed_scents}")

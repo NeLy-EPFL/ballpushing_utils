@@ -16,6 +16,7 @@ __version__ = "0.1.0"
 
 from .ballpushing_metrics import BallPushingMetrics
 from .behavior_umap import BehaviorUMAP  # noqa: F401 (re-exported helper)
+from .compat import normalize_legacy_columns, read_feather
 from .config import Config
 from .dataset import Dataset
 from .experiment import Experiment
@@ -47,4 +48,6 @@ __all__ = [
     "figure_output_dir",
     "figures_root",
     "load_dotenv",
+    "normalize_legacy_columns",
+    "read_feather",
 ]

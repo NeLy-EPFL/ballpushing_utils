@@ -26,6 +26,7 @@ from pathlib import Path
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 
 # Global conversion constant used by plotting and CSV export helpers
@@ -1193,7 +1194,7 @@ def main():
     # Load coordinates dataset
     print(f"Loading dark olfaction coordinates dataset from: {coordinates_dataset_path}")
     try:
-        df = pd.read_feather(coordinates_dataset_path)
+        df = read_feather(coordinates_dataset_path)
         print(f"✅ Dark olfaction coordinates dataset loaded successfully! Shape: {df.shape}")
     except Exception as e:
         print(f"❌ Could not load dark olfaction coordinates dataset: {e}")

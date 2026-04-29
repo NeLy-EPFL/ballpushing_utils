@@ -38,6 +38,7 @@ import statsmodels.formula.api as smf
 from matplotlib.patches import Rectangle
 from itertools import combinations
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -247,9 +248,9 @@ def get_elegant_metric_name(metric_name):
         "pulled": "Number of pulls",
         "pulling_ratio": "Pulling ratio",
         "head_pushing_ratio": "Head pushing ratio",
-        "normalized_velocity": "Normalized velocity",
-        "velocity_during_interactions": "Velocity during interactions",
-        "velocity_trend": "Velocity trend",
+        "normalized_speed": "Normalized speed",
+        "speed_during_interactions": "Speed during interactions",
+        "speed_trend": "Speed trend",
         "has_long_pauses": "Has long pauses",
         "nb_stops": "Number of stops",
         "total_stop_duration": "Total stop duration",
@@ -370,7 +371,7 @@ def load_dataset():
         raise FileNotFoundError(f"Dataset not found: {DATASET_PATH}")
 
     print(f"Loading dataset from: {DATASET_PATH}")
-    df = pd.read_feather(DATASET_PATH)
+    df = read_feather(DATASET_PATH)
     print(f"  Loaded {len(df)} rows")
     return df
 

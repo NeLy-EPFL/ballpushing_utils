@@ -21,6 +21,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from ballpushing_utils import read_feather
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -73,7 +74,7 @@ def load_final_positions(coordinates_dir: Path) -> pd.DataFrame:
     chunks = []
     for i, fp in enumerate(non_dark, 1):
         print(f"  [{i}/{len(non_dark)}] {fp.name}")
-        df = pd.read_feather(fp)
+        df = read_feather(fp)
 
         # Keep Light=on only
         if "Light" in df.columns:

@@ -31,6 +31,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent))
 from statsmodels.stats.multitest import multipletests
+from ballpushing_utils import read_feather
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +286,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
         "260220_10_summary_control_folders_Data/summary/pooled_summary.feather"
     )
     print(f"Loading dataset from: {dataset_path}")
-    dataset = pd.read_feather(dataset_path)
+    dataset = read_feather(dataset_path)
     print(f"Loaded. Shape: {dataset.shape}")
 
     # Filter Light ON
@@ -440,14 +441,14 @@ def main(overwrite=True, test_mode=False):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
         "chamber_time",
         "pushed",
     ]
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "freeze",

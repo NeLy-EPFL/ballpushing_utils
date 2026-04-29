@@ -50,6 +50,7 @@ from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu
 import scipy.stats as stats_module
 from statsmodels.stats.multitest import multipletests
 import time
+from ballpushing_utils import read_feather
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
 PIXELS_PER_MM = 500 / 30  # 16.67 pixels per mm
@@ -235,10 +236,10 @@ def get_elegant_metric_name(metric_name):
         "pulled": "Number of pulls",
         "pulling_ratio": "Pulling ratio",
         "head_pushing_ratio": "Head pushing ratio",
-        # Velocity metrics
-        "normalized_velocity": "Normalized velocity",
-        "velocity_during_interactions": "Velocity during interactions",
-        "velocity_trend": "Velocity trend",
+        # Speed metrics
+        "normalized_speed": "Normalized speed",
+        "speed_during_interactions": "Speed during interactions",
+        "speed_trend": "Speed trend",
         # Pause/stop metrics
         "has_long_pauses": "Has long pauses",
         "nb_stops": "Number of stops",
@@ -716,7 +717,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
 
     print(f"Loading MagnetBlock dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ Dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

@@ -41,6 +41,7 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 
 # Pixel to mm conversion factor (500 pixels = 30 mm)
@@ -122,7 +123,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
 
         try:
             # Load dataset
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
             print(f"  Original shape: {df.shape}")
 
             # Check for required columns
@@ -618,7 +619,7 @@ def create_trajectory_plot(
     # Set y-axis limits - start at 0, add modest space at top for annotations
     ax.set_ylim(0, y_max_shifted + 0.08 * y_range)
 
-    # Annotate significance levels - matching magnetblock velocity plot style
+    # Annotate significance levels - matching magnetblock speed plot style
     if permutation_results is not None and light_condition in permutation_results:
         perm_result = permutation_results[light_condition]
 

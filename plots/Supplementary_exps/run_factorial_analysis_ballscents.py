@@ -24,6 +24,7 @@ from statsmodels.stats.multitest import multipletests
 from statsmodels.formula.api import ols, mixedlm
 from statsmodels.stats.anova import anova_lm
 import warnings
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -759,7 +760,7 @@ def load_dataset(test_mode=False):
 
     print(f"\\nLoading dataset from: {dataset_path.name}")
     try:
-        data = pd.read_feather(dataset_path)
+        data = read_feather(dataset_path)
         print(f"  ✓ Main dataset loaded: {data.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found at {dataset_path}")
@@ -774,7 +775,7 @@ def load_dataset(test_mode=False):
     ctrl_dfs = []
     for ctrl_path in ctrl_paths:
         try:
-            ctrl_df = pd.read_feather(ctrl_path)
+            ctrl_df = read_feather(ctrl_path)
             if "FeedingState" in ctrl_df.columns:
                 ctrl_df = ctrl_df[ctrl_df["FeedingState"] == "starved_noWater"].copy()
             ctrl_df["BallScent"] = "Ctrl"

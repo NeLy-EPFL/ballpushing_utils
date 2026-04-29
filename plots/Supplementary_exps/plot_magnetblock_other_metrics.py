@@ -51,6 +51,7 @@ import seaborn as sns
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # ---------------------------------------------------------------------------
 # Global matplotlib styling — consistent with other MagnetBlock scripts
@@ -129,7 +130,7 @@ def sig_stars(p: float) -> str:
 
 def load_dataset(dataset_path: str) -> pd.DataFrame:
     print(f"Loading dataset from:\n  {dataset_path}")
-    df = pd.read_feather(dataset_path)
+    df = read_feather(dataset_path)
     print(f"  Shape: {df.shape}")
 
     required = ["time", "interaction_event_onset", "Magnet", "fly"]
@@ -1714,7 +1715,7 @@ def plot_summary_dashboard(
     Right column — Magnet=y individual flies (spaghetti + bold mean).
 
     Rows: rate, duration, proximity, IEI, ball displacement,
-          approach velocity, time in chamber.
+          approach speed, time in chamber.
     """
     groups = sorted(rate_df["Magnet"].unique())
     n_per_group = {g: rate_df[rate_df["Magnet"] == g]["fly"].nunique() for g in groups}
@@ -1738,7 +1739,7 @@ def plot_summary_dashboard(
         "Fly-ball proximity (during events)",
         "Inter-event interval",
         "Ball displacement per event",
-        "Approach velocity (2s pre-event)",
+        "Approach speed (2s pre-event)",
         "Time in chamber (r=50px)",
     ]
 
@@ -1864,7 +1865,7 @@ def plot_summary_dashboard(
 
 
 # ---------------------------------------------------------------------------
-# IEI · Ball displacement · Approach velocity · First-push alignment
+# IEI · Ball displacement · Approach speed · First-push alignment
 # ---------------------------------------------------------------------------
 
 
@@ -2072,7 +2073,7 @@ def plot_boxplot_per_bin(
         positions = list(range(n_bins))
         bin_data = [sub.loc[sub["bin_center_min"] == b, y_col].values for b in bins]
 
-        # Velocity-style boxplot: unfilled boxes with black outlines
+        # Speed-style boxplot: unfilled boxes with black outlines
         ax.boxplot(
             bin_data,
             positions=positions,
@@ -2247,7 +2248,7 @@ def bin_displacement_per_fly(
     return pd.DataFrame(rows).sort_values(["fly", "bin_idx"]).reset_index(drop=True)
 
 
-def compute_approach_velocity_per_event(
+def compute_approach_speed_per_event(
     df: pd.DataFrame,
     fps: float = FPS,
     pre_window_s: float = 2.0,
@@ -2296,18 +2297,18 @@ def compute_approach_velocity_per_event(
 
     result = pd.DataFrame(results)
     print(
-        f"\nApproach velocity ({pre_window_s}s pre-event window): {len(result)} events, "
+        f"\nApproach speed ({pre_window_s}s pre-event window): {len(result)} events, "
         f"mean = {result['approach_speed_px_s'].mean():.2f} px/s"
     )
     return result
 
 
-def bin_approach_velocity_per_fly(
+def bin_approach_speed_per_fly(
     vel_df: pd.DataFrame,
     df_full: pd.DataFrame,
     bin_size_min: float = 5.0,
 ) -> pd.DataFrame:
-    """Average approach velocity (px/s) into time bins per fly."""
+    """Average approach speed (px/s) into time bins per fly."""
     time_max_min = df_full["time"].max() / 60.0
     bin_edges = np.arange(0, time_max_min + bin_size_min, bin_size_min)
     n_bins = len(bin_edges) - 1
@@ -4690,20 +4691,20 @@ def main():
     )
 
     # ------------------------------------------------------------------ #
-    # Approach velocity
+    # Approach speed
     # ------------------------------------------------------------------ #
     print("\n" + "=" * 60)
-    print("APPROACH VELOCITY ANALYSIS")
+    print("APPROACH SPEED ANALYSIS")
     print("=" * 60)
 
-    print("\nComputing approach velocity per event (2s pre-event window)...")
-    vel_event_df = compute_approach_velocity_per_event(df, fps=FPS, pre_window_s=2.0)
+    print("\nComputing approach speed per event (2s pre-event window)...")
+    vel_event_df = compute_approach_speed_per_event(df, fps=FPS, pre_window_s=2.0)
 
-    print(f"\nBinning approach velocity (bin size = {args.bin_size} min)...")
-    vel_df = bin_approach_velocity_per_fly(vel_event_df, df_full=df, bin_size_min=args.bin_size)
+    print(f"\nBinning approach speed (bin size = {args.bin_size} min)...")
+    vel_df = bin_approach_speed_per_fly(vel_event_df, df_full=df, bin_size_min=args.bin_size)
 
     print("\n" + "-" * 60)
-    print("BETWEEN-GROUP TEST — approach velocity per time bin")
+    print("BETWEEN-GROUP TEST — approach speed per time bin")
     print("-" * 60)
     vel_between = permutation_test_between_groups(
         vel_df.dropna(subset=["mean_approach_speed_px_s"]),
@@ -4713,14 +4714,14 @@ def main():
         n_permutations=args.n_permutations,
     )
 
-    print("\nTREND TEST — approach velocity slope per fly, hour 1")
+    print("\nTREND TEST — approach speed slope per fly, hour 1")
     vel_trend_h1 = trend_test_per_group(
         vel_df.dropna(subset=["mean_approach_speed_px_s"]),
         focus_hours=args.focus_hours,
         metric="mean_approach_speed_px_s",
         n_permutations=args.n_permutations,
     )
-    print("TREND TEST — approach velocity slope per fly, hour 2")
+    print("TREND TEST — approach speed slope per fly, hour 2")
     vel_trend_h2 = trend_test_per_group(
         vel_df.dropna(subset=["mean_approach_speed_px_s"]),
         start_hours=args.focus_hours,
@@ -4729,7 +4730,7 @@ def main():
         n_permutations=args.n_permutations,
     )
 
-    print("\nGenerating approach velocity plots...")
+    print("\nGenerating approach speed plots...")
     _generic_group_plot(
         df=vel_df,
         y_col="mean_approach_speed_px_s",
@@ -4741,16 +4742,16 @@ def main():
         focus_hours=args.focus_hours,
         bin_size_min=args.bin_size,
         n_permutations=args.n_permutations,
-        output_path=output_dir / "approach_velocity_over_time",
+        output_path=output_dir / "approach_speed_over_time",
     )
     _generic_individual_plot(
         df=vel_df,
         y_col="mean_approach_speed_px_s",
         ylabel="Approach speed (px/s)",
-        title="Approach velocity — Magnet=y individual flies",
+        title="Approach speed — Magnet=y individual flies",
         focus_hours=args.focus_hours,
         bin_size_min=args.bin_size,
-        output_path=output_dir / "approach_velocity_individual_flies",
+        output_path=output_dir / "approach_speed_individual_flies",
     )
 
     # ------------------------------------------------------------------ #

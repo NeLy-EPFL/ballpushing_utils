@@ -65,17 +65,17 @@ METRIC_DISPLAY_NAMES = {
     "nb_events": "Ball contact events (#)",
     "persistence_at_end": "Fraction time near end",
     "time_chamber_beginning": "Time in chamber early",
-    "normalized_velocity": "Normalized velocity",
+    "normalized_speed": "Normalized speed",
     "first_major_event_time": "First major event time",
     "max_event_time": "Max event time",
     "nb_freeze": "Short pauses (#)",
     "flailing": "Front leg movement",
-    "velocity_during_interactions": "Speed during contact",
+    "speed_during_interactions": "Speed during contact",
     "head_pushing_ratio": "Head pushing ratio",
     "fraction_not_facing_ball": "Fraction not facing ball",
     "interaction_persistence": "Avg interaction duration",
     "chamber_exit_time": "Time to first chamber exit",
-    "velocity_trend": "Velocity trend",
+    "speed_trend": "Speed trend",
 }
 
 

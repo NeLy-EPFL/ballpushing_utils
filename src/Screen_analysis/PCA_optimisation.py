@@ -22,6 +22,7 @@ warnings.filterwarnings("ignore")
 
 # Import your Config module
 import Config
+from ballpushing_utils import read_feather
 
 # === CONFIGURATION ===
 DATA_PATH = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250924_14_summary_TNT_screen_Data/summary/pooled_summary.feather"
@@ -472,7 +473,7 @@ def main():
     # === LOAD AND PREPROCESS DATA ===
     print("\n📊 Loading and preprocessing data...")
 
-    dataset = pd.read_feather(DATA_PATH)
+    dataset = read_feather(DATA_PATH)
     dataset = Config.cleanup_data(dataset)
 
     # Exclude problematic nicknames

@@ -20,11 +20,9 @@ Arguments:
 
 import argparse
 import os
-import sys
 from pathlib import Path
 
 # Keep sibling scripts importable (legacy; harmless).
-sys.path.append(str(Path(__file__).parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,7 +31,7 @@ import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
 
-from ballpushing_utils import dataset as dataset_path_for  # noqa: F401 (used below)
+from ballpushing_utils import dataset as dataset_path_for, read_feather  # noqa: F401
 from ballpushing_utils import figure_output_dir
 from ballpushing_utils.plotting import set_illustrator_style
 
@@ -146,7 +144,7 @@ def load_coordinates_dataset():
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"✅ MagnetBlock coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")
@@ -454,9 +452,20 @@ def create_trajectory_plot(
         )
         group_col_plot = "label"
 
-    # Downsample data for plotting (every 290 frames as in notebook)
+    # Downsample data for plotting (every 290 frames per fly).
+    #
+    # The previous implementation used
+    #   data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :])
+    # which silently drops the grouping column (``fly``) from the result on
+    # pandas ≥ 2.2 (DataFrameGroupBy.apply now excludes the grouping
+    # column unless ``include_groups=True`` is passed). The downstream
+    # ``data_ds.groupby(subject_col)`` on line ~520 then raised
+    # ``KeyError: 'fly'``. cumcount() is the idiomatic "every Nth row per
+    # group" pattern and never touches the column, so it sidesteps the
+    # behaviour change entirely.
     print(f"  Downsampling data for plotting...")
-    data_ds = data.groupby(subject_col, group_keys=False).apply(lambda df: df.iloc[::290, :]).reset_index(drop=True)
+    keep_mask = data.groupby(subject_col, observed=True).cumcount() % 290 == 0
+    data_ds = data[keep_mask].reset_index(drop=True)
     print(f"  Downsampled from {len(data)} to {len(data_ds)} points")
 
     # Convert time to minutes for plotting

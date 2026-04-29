@@ -49,6 +49,14 @@ class FlyTrackingData:
 
         except Exception as e:
             print(f"Error loading files for {self.fly.metadata.name}: {e}")
+            # Print the full traceback when debugging is on so callers can
+            # see *where* the failure happened, not just the message.
+            # ``debugging`` is the existing escape hatch on FlyConfig used
+            # by the rest of this module for diagnostic output.
+            if getattr(self.fly.config, "debugging", False):
+                import traceback
+
+                traceback.print_exc()
             self.valid_data = False
             if self.log_missing:
                 self.log_missing_fly()
@@ -419,10 +427,15 @@ class FlyTrackingData:
         )
 
         if not has_track_names:
-            print(f"⚠️  WARNING: No SLEAP track names found for {self.fly.metadata.name}!")
-            # No track names - handle based on number of balls
+            # No track names in the .h5 — handle based on how many
+            # balls were tracked. Single-ball files don't need a
+            # track-name system (there's nothing to disambiguate),
+            # so missing names there is the architectural norm and
+            # should be silent. Multi-ball files without names IS an
+            # anomaly worth flagging.
             if num_balls == 1:
-                # Single ball without track names - regular experiment
+                # Single ball without track names → regular non-F1
+                # experiment. Expected state; silent unless debugging.
                 self.training_ball_idx = 0
                 if self.fly.config.debugging:
                     print(
@@ -430,7 +443,9 @@ class FlyTrackingData:
                     )
                 return
             else:
-                # Multiple balls without track names - issue warning
+                # Multiple balls without track names → real anomaly.
+                # F1 experiments require named tracks to disambiguate
+                # training vs test. Bail with a clear warning.
                 print(
                     f"⚠️  WARNING: Multiple balls ({num_balls}) detected for {self.fly.metadata.name} but no SLEAP track names found!"
                 )
@@ -1400,27 +1415,27 @@ class FlyTrackingData:
             warnings.warn(f"'y_thorax' or 'x_thorax' missing for {self.fly.metadata.name}. Skipping dying check.")
             return False
 
-        # Get the velocity of the fly
-        velocity = np.sqrt(
+        # Get the speed of the fly
+        speed = np.sqrt(
             np.diff(fly_data["x_thorax"], prepend=np.nan) ** 2 + np.diff(fly_data["y_thorax"], prepend=np.nan) ** 2
         )
 
-        # Ensure the length of the velocity array matches the length of the DataFrame index
-        if len(velocity) != len(fly_data):
-            velocity = np.append(velocity, np.nan)
+        # Ensure the length of the speed array matches the length of the DataFrame index
+        if len(speed) != len(fly_data):
+            speed = np.append(speed, np.nan)
 
-        fly_data["velocity"] = velocity
+        fly_data["speed"] = speed
 
-        # Get the time points where the fly's velocity is less than 2 px/s
-        low_velocity = fly_data[fly_data["velocity"] < 2]
+        # Get the time points where the fly's speed is less than 2 px/s
+        low_speed = fly_data[fly_data["speed"] < 2]
 
-        # Get consecutive time points where the fly's velocity is less than 2 px/s
-        consecutive_points = np.split(low_velocity.index, np.where(np.diff(low_velocity.index) != 1)[0] + 1)
+        # Get consecutive time points where the fly's speed is less than 2 px/s
+        consecutive_points = np.split(low_speed.index, np.where(np.diff(low_speed.index) != 1)[0] + 1)
 
         # Get the duration of each consecutive period
         durations = [len(group) for group in consecutive_points]
 
-        # Check if there is any consecutive period of 15 minutes where the fly's velocity is less than 2 px/s
+        # Check if there is any consecutive period of 15 minutes where the fly's speed is less than 2 px/s
         for group, events in zip(consecutive_points, durations):
             if events > 15 * 60 * self.fly.experiment.fps:
                 # Get the corresponding time
@@ -1555,7 +1570,12 @@ class FlyTrackingData:
         """
 
         if self.skeletontrack is None:
-            warnings.warn(f"No skeleton tracking file found for {self.fly.metadata.name}.")
+            # F1 experiments don't currently have a SLEAP skeleton model
+            # — missing skeleton data is the expected state, not an
+            # anomaly. Only warn for paradigms where a skeleton track
+            # SHOULD have been produced.
+            if getattr(self.fly.config, "experiment_type", None) != "F1":
+                warnings.warn(f"No skeleton tracking file found for {self.fly.metadata.name}.")
             return None
 
         # Get the first track
@@ -1731,7 +1751,10 @@ class FlyTrackingData:
         # Create interaction mask
         interaction_mask = np.zeros(len(ball_data), dtype=bool)
         if self.interaction_events and 0 in self.interaction_events and ball_idx in self.interaction_events[0]:
-            for event_start, event_end in self.interaction_events[0][ball_idx]:
+            for event in self.interaction_events[0][ball_idx]:
+                # Each event is [start, end, length]; mirror the unpacking
+                # pattern used at the top of ``compute_spontaneous_movement``.
+                event_start, event_end = event[0], event[1]
                 buffer_frames = self.fly.config.gap_between_events * 2
                 start_buffered = max(0, event_start - buffer_frames)
                 end_buffered = min(len(ball_data), event_end + buffer_frames)

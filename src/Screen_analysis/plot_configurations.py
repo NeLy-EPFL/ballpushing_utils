@@ -7,6 +7,7 @@ This file defines all the different plot types and their styling parameters.
 import os
 import pandas as pd
 from pathlib import Path
+from ballpushing_utils import read_feather
 
 # Data source configurations (static only)
 DATA_SOURCES = {
@@ -343,7 +344,7 @@ def get_dynamic_data_source(pca_type="static", workspace_root="."):
 
     # Dynamically detect available PCA columns
     try:
-        df = pd.read_feather(actual_file)
+        df = read_feather(actual_file)
         # Detect columns matching 'PC*', 'PCA*', or 'sPC*' with any number of components
         import re
 
@@ -386,7 +387,7 @@ def get_available_pca_columns(pca_type="static", workspace_root="."):
         raise FileNotFoundError(f"PCA data file not found: {data_file}")
 
     # Load just the column names
-    df = pd.read_feather(data_file)
+    df = read_feather(data_file)
 
     # Look for columns matching 'PC*', 'PCA*', or 'sPC*' with any number of components
     import re

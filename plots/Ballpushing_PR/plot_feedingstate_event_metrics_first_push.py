@@ -16,6 +16,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from ballpushing_utils import read_feather
 
 matplotlib.rcParams["pdf.fonttype"] = 42
 matplotlib.rcParams["ps.fonttype"] = 42
@@ -51,13 +52,13 @@ METRIC_SPECS: Dict[str, Dict[str, str]] = {
         "label": "Max fly-ball distance after event before next approach (px)",
         "slug": "backoff_max_dist",
     },
-    "backoff_velocity_px_s": {
-        "label": "Backoff velocity after event (px/s)",
-        "slug": "backoff_velocity",
+    "backoff_speed_px_s": {
+        "label": "Backoff speed after event (px/s)",
+        "slug": "backoff_speed",
     },
-    "approach_velocity_px_s": {
-        "label": "Approach velocity toward next event (px/s)",
-        "slug": "approach_velocity",
+    "approach_speed_px_s": {
+        "label": "Approach speed toward next event (px/s)",
+        "slug": "approach_speed",
     },
     "ball_max_displacement_px": {
         "label": "Ball max displacement during event (px)",
@@ -70,8 +71,8 @@ DEFAULT_METRICS = [
     "duration_s",
     "min_fly_ball_dist_during_event",
     "backoff_max_dist_from_ball_px",
-    "backoff_velocity_px_s",
-    "approach_velocity_px_s",
+    "backoff_speed_px_s",
+    "approach_speed_px_s",
     "ball_max_displacement_px",
 ]
 
@@ -118,7 +119,7 @@ def load_coordinates_incrementally(coordinates_dir: Union[str, Path], test_mode:
     chunks = []
     for file_path in files:
         try:
-            df = pd.read_feather(file_path)
+            df = read_feather(file_path)
         except Exception as exc:
             print(f"  Error reading {file_path.name}: {exc}")
             continue
@@ -214,8 +215,8 @@ def _attach_between_event_dynamics(
 
     event_df = event_df.copy()
     event_df["backoff_max_dist_from_ball_px"] = np.nan
-    event_df["backoff_velocity_px_s"] = np.nan
-    event_df["approach_velocity_px_s"] = np.nan
+    event_df["backoff_speed_px_s"] = np.nan
+    event_df["approach_speed_px_s"] = np.nan
 
     n_events = len(event_df)
     eps = 1e-9
@@ -268,11 +269,11 @@ def _attach_between_event_dynamics(
             dist_seq = np.r_[end_dist, backoff_dists[: peak_idx + 1]]
             d_back = np.diff(dist_seq)
             backward_only_disp = float(np.sum(d_back[d_back >= float(backward_step_px)]))
-            event_df.at[idx, "backoff_velocity_px_s"] = backward_only_disp / dt_backoff
+            event_df.at[idx, "backoff_speed_px_s"] = backward_only_disp / dt_backoff
 
         dt_approach = next_onset_t - peak_time
         if dt_approach > eps:
-            event_df.at[idx, "approach_velocity_px_s"] = (peak_dist - next_onset_dist) / dt_approach
+            event_df.at[idx, "approach_speed_px_s"] = (peak_dist - next_onset_dist) / dt_approach
 
     return event_df
 
@@ -321,8 +322,8 @@ def compute_event_feature_table(
             "duration_s",
             "min_fly_ball_dist_during_event",
             "backoff_max_dist_from_ball_px",
-            "backoff_velocity_px_s",
-            "approach_velocity_px_s",
+            "backoff_speed_px_s",
+            "approach_speed_px_s",
             "ball_max_displacement_px",
         ]
     ]
@@ -632,7 +633,7 @@ def main() -> None:
         "--backward-step-px",
         type=float,
         default=0.2,
-        help="Minimum positive fly-ball distance step (px/frame) for backoff velocity",
+        help="Minimum positive fly-ball distance step (px/frame) for backoff speed",
     )
     parser.add_argument(
         "--clear-forward-step-px",

@@ -142,7 +142,7 @@ These are the fundamental building blocks used to generate summary metrics:
 
 **Description**: Average motion energy of front legs during interaction events
 
-**Calculation**: Motion energy computed as sum of squared velocity differences for leg keypoints during ball interactions
+**Calculation**: Motion energy computed as sum of squared speed differences for leg keypoints during ball interactions
 
 **Units**: dimensionless motion energy
 
@@ -167,23 +167,23 @@ These are the fundamental building blocks used to generate summary metrics:
 
 ## 3. Locomotor Activity Metrics
 
-### Velocity and Movement
+### Speed and Movement
 
-#### `normalized_velocity`
-**Description**: Fly velocity normalized by available space
-**Calculation**: Average velocity divided by ball distance
+#### `normalized_speed`
+**Description**: Fly speed normalized by available space
+**Calculation**: Average speed divided by ball distance
 **Units**: dimensionless
 **Interpretation**: Speed relative to available space.
 
-#### `velocity_during_interactions`
+#### `speed_during_interactions`
 **Description**: Average fly speed during ball contact
-**Calculation**: Mean velocity during all interaction events
+**Calculation**: Mean speed during all interaction events
 **Units**: pixels/second
-**Interpretation**: Velocity during interactions
+**Interpretation**: Speed during interactions
 
-#### `velocity_trend`
-**Description**: Change in fly velocity over time
-**Calculation**: Linear regression slope of velocity vs. time
+#### `speed_trend`
+**Description**: Change in fly speed over time
+**Calculation**: Linear regression slope of speed vs. time
 **Units**: pixels/second²
 **Interpretation**: Positive = accelerating, negative = decelerating over session
 

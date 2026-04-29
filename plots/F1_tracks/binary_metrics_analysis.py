@@ -12,6 +12,7 @@ import numpy as np
 from pathlib import Path
 from scipy import stats
 from scipy.stats import chi2_contingency, fisher_exact
+from ballpushing_utils import read_feather
 
 
 def calculate_proportions_and_stats(data, group_col, binary_col):
@@ -145,7 +146,7 @@ def main():
 
     # Load dataset
     try:
-        df = pd.read_feather(dataset_path)
+        df = read_feather(dataset_path)
         print(f"Dataset loaded successfully! Shape: {df.shape}")
     except Exception as e:
         print(f"Error loading dataset: {e}")

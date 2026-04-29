@@ -40,6 +40,7 @@ import statsmodels.formula.api as smf
 from matplotlib.patches import Rectangle
 from itertools import combinations
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -152,8 +153,8 @@ SUPPLEMENTARY_CONTINUOUS_METRICS = [
     "pushed",  # Number of pushes
     "pulling_ratio",  # Ratio of pulls
     "interaction_persistence",  # Interaction persistence
-    "normalized_velocity",  # Normalized velocity
-    "velocity_during_interactions",  # Velocity during interactions
+    "normalized_speed",  # Normalized speed
+    "speed_during_interactions",  # Speed during interactions
     "nb_long_pauses",  # Number of long pauses
     "median_long_pause_duration",  # Median long pause duration
     "total_pause_duration",  # Total pause duration
@@ -457,10 +458,10 @@ def get_elegant_metric_name(metric_name):
         "pulled": "Number of pulls",
         "pulling_ratio": "Pulling ratio",
         "head_pushing_ratio": "Head pushing ratio",
-        # Velocity metrics
-        "normalized_velocity": "Normalized velocity",
-        "velocity_during_interactions": "Velocity during interactions",
-        "velocity_trend": "Velocity trend",
+        # Speed metrics
+        "normalized_speed": "Normalized speed",
+        "speed_during_interactions": "Speed during interactions",
+        "speed_trend": "Speed trend",
         # Pause/stop metrics
         "has_long_pauses": "Has long pauses",
         "nb_stops": "Number of stops",
@@ -739,7 +740,7 @@ def load_dataset(dataset_type="summary"):
         raise FileNotFoundError(f"Dataset not found: {path}")
 
     print(f"Loading {dataset_type} dataset from: {path}")
-    df = pd.read_feather(path)
+    df = read_feather(path)
     print(f"  Loaded {len(df)} rows")
     return df
 

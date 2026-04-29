@@ -21,6 +21,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import matplotlib.ticker as mticker
+from ballpushing_utils import read_feather
 
 warnings.filterwarnings("ignore")
 
@@ -58,8 +59,8 @@ CONTROL_BG = "#f5f5f5"  # faint grey background for control panels
 
 def load_datasets():
     print("Loading datasets...")
-    df_coords = pd.read_feather(COORDINATES_PATH)
-    df_summary = pd.read_feather(SUMMARY_PATH)
+    df_coords = read_feather(COORDINATES_PATH)
+    df_summary = read_feather(SUMMARY_PATH)
     print(f"  F1 coordinates: {df_coords.shape}")
     print(f"  Summary:        {df_summary.shape}")
     return df_coords, df_summary

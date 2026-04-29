@@ -20,6 +20,7 @@ import colorcet as cc
 from bokeh.palettes import Category10
 from bokeh.palettes import all_palettes
 from bokeh.io.export import export_svgs
+from ballpushing_utils import read_feather
 
 hv.extension("bokeh")
 pn.extension()
@@ -27,7 +28,7 @@ pn.extension()
 # sns.set_theme()
 rg = np.random.default_rng()
 
-dataset = pd.read_feather(
+dataset = read_feather(
     "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
 )
 
@@ -88,9 +89,9 @@ metric_names = [
     "avg_displacement_after_success",
     "avg_displacement_after_failure",
     "influence_ratio",
-    "normalized_velocity",
-    "velocity_during_interactions",
-    "velocity_trend",
+    "normalized_speed",
+    "speed_during_interactions",
+    "speed_trend",
 ]
 # Define metadata columns as any column not in metric_names
 metadata_names = [col for col in dataset.columns if col not in metric_names]
@@ -116,9 +117,9 @@ events_metrics = [
 ]
 
 activity_metrics = [
-    "velocity_during_interactions",
-    "velocity_trend",
-    "normalized_velocity",
+    "speed_during_interactions",
+    "speed_trend",
+    "normalized_speed",
     "chamber_exit_time",
     "interaction_proportion",
     "interaction_persistence",

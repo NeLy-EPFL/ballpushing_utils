@@ -9,11 +9,12 @@ warnings.filterwarnings("ignore")
 from sklearn.preprocessing import RobustScaler
 from scipy.spatial.distance import squareform
 from scipy.cluster.hierarchy import linkage, fcluster
+from ballpushing_utils import read_feather
 
 
 def load_metrics_data(file_path):
     try:
-        dataset = pd.read_feather(file_path)
+        dataset = read_feather(file_path)
         print(f"✓ Loaded dataset: shape={dataset.shape}")
 
         needs_update = False
@@ -62,12 +63,12 @@ def identify_metric_columns(dataset):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
     ]
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "pause",

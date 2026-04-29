@@ -40,6 +40,7 @@ import pandas as pd
 from scipy import stats
 from statsmodels.stats.multitest import multipletests
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 
 # Pixel to mm conversion factor (500 px = 30 mm)
@@ -105,7 +106,7 @@ def load_dark_olfaction_data(coordinates_path, test_mode=False):
     print(f"Loading from: {coordinates_path.name}")
 
     try:
-        df = pd.read_feather(coordinates_path)
+        df = read_feather(coordinates_path)
         print(f"✅ Dataset loaded successfully! Shape: {df.shape}")
     except Exception as e:
         print(f"❌ Error loading dataset: {e}")

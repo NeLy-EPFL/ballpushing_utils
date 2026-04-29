@@ -63,9 +63,13 @@ dependencies = [
     # ``tabulate`` is the backend used by ``pandas.DataFrame.to_markdown``,
     # which the diagnostics report writer inlines for table previews.
     "tabulate>=0.9",
-    # `utils_behavior` is a lab-internal package used throughout the codebase.
-    # Install from GitHub: https://github.com/NeLy-EPFL/utils_behavior
-    "utils-behavior",
+    # ``diptest`` is Hartigan's dip statistic for unimodality, used by
+    # figures/Fig1-setup/compute_distribution_stats.py.
+    "diptest>=0.9",
+    # `utils_behavior` is a lab package used throughout the codebase and
+    # published via GitHub rather than PyPI — declare the VCS URL directly
+    # so `pip install -e .` works out of the box without a private index.
+    "utils_behavior @ git+https://github.com/NeLy-EPFL/utils_behavior.git",
     "colorcet>=3.1.0",
     "imageio[ffmpeg]>=2.37.3",
     "ipykernel>=7.2.0",
@@ -80,7 +84,9 @@ dependencies = [
 
 [project.optional-dependencies]
 interactive = [
-    "bokeh>=3.4",
+    # bokeh < 3.8.2 has CVE-2026-21883 (WebSocket origin validation
+    # bypass for deployed Bokeh server instances).
+    "bokeh>=3.8.2",
     "holoviews>=1.19",
     "panel>=1.4",
     "colorcet>=3.1",
@@ -91,14 +97,23 @@ video = [
     "pygame>=2.5",
 ]
 dev = [
-    "pytest>=8.0",
+    # pytest < 9.0.3 has CVE-2025-71176 (vulnerable /tmp/pytest-of-{user}
+    # directory handling on shared UNIX hosts).
+    "pytest>=9.0.3",
     "pytest-cov>=4.1",
     "black>=24.0",
     "ruff>=0.3",
     "pre-commit>=3.6",
 ]
+# Notebook execution: needed to run ``tools/execute_doc_notebooks.py``
+# and to view the bundled walkthroughs in the notebooks/ folder.
+docs = [
+    "jupyter>=1.0",
+    "nbconvert>=7.0",
+    "ipykernel>=6.0",
+]
 all = [
-    "ballpushing_utils[interactive,video,dev]",
+    "ballpushing_utils[interactive,video,dev,docs]",
 ]
 
 [project.urls]

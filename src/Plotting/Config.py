@@ -34,6 +34,7 @@ from statsmodels.stats.multitest import multipletests
 
 
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 ### Configuration for the analysis
 
@@ -136,7 +137,25 @@ def prepare_registries(SplitRegistry):
 registries = prepare_registries(SplitRegistry)
 
 
-def get_subset_data(df, col="Nickname", value="random"):
+def get_subset_data(df, col="Nickname", value="random", force_control=None):
+    """Return a 2-row-group subset of ``df`` containing one nickname and its control.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input data with at least ``Nickname`` and (when ``force_control`` is
+        ``None``) ``Split`` columns.
+    col : str
+        Currently advisory only — the function always groups on ``Nickname``.
+    value : str
+        Either an explicit nickname or ``"random"`` to pick one at random.
+    force_control : str or None
+        If given, use this nickname as the control instead of looking the
+        control up in ``SplitRegistry`` / ``control_nicknames_dict``. Useful
+        for figures that need to lock the control to a single genotype
+        (e.g. ``"Empty-Split"`` or ``"TNTxPR"``) regardless of what split
+        the test genotype came from. ``None`` keeps the default behaviour.
+    """
 
     control_nicknames_dict = registries["control_nicknames_dict"]
 
@@ -149,8 +168,10 @@ def get_subset_data(df, col="Nickname", value="random"):
 
     print(f"Nickname selected: {nickname}")
 
-    # Check if 'Split' column exists
-    if "Split" not in df.columns:
+    # If we're going to look the control up by split, ``Split`` must be
+    # present. With ``force_control`` we skip that lookup entirely, so
+    # ``Split`` is no longer required.
+    if force_control is None and "Split" not in df.columns:
         print("Error: 'Split' column not found in dataframe.")
         return pd.DataFrame()
 
@@ -159,15 +180,19 @@ def get_subset_data(df, col="Nickname", value="random"):
         print(f"Nickname {nickname} not found in dataframe.")
         return pd.DataFrame()
 
-    # Get the associated control
-    split_value = SplitRegistry[SplitRegistry["Nickname"] == nickname]["Split"].iloc[0]
-    associated_control = control_nicknames_dict.get(split_value)
+    if force_control is not None:
+        associated_control = force_control
+        print(f"Using forced control: {associated_control}")
+    else:
+        # Get the associated control via the split registry
+        split_value = SplitRegistry[SplitRegistry["Nickname"] == nickname]["Split"].iloc[0]
+        associated_control = control_nicknames_dict.get(split_value)
 
-    if not associated_control:
-        print(f"No associated control found for split value {split_value}.")
-        return pd.DataFrame()
+        if not associated_control:
+            print(f"No associated control found for split value {split_value}.")
+            return pd.DataFrame()
 
-    print(f"Associated control is: {associated_control}")
+        print(f"Associated control is: {associated_control}")
 
     # Get the subset of the data for the random Nickname
     subset_data = df[df["Nickname"] == nickname]
@@ -194,7 +219,7 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
         print(f"Dataset for brain region {brain_region} not found.")
         return pd.DataFrame()
 
-    brain_region_data = pd.read_feather(brain_region_file)
+    brain_region_data = read_feather(brain_region_file)
 
     # Load the dataset for the control region
     control_region = registries["control_region"]
@@ -203,7 +228,7 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
         print(f"Dataset for control region {control_region} not found.")
         return pd.DataFrame()
 
-    control_region_data = pd.read_feather(control_region_file)
+    control_region_data = read_feather(control_region_file)
 
     if brain_region_data.empty:
         raise ValueError(f"Empty dataset for {brain_region}")

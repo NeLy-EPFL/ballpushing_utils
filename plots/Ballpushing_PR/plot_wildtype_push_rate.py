@@ -39,6 +39,7 @@ import pandas as pd
 import seaborn as sns
 from scipy import stats
 from tqdm import tqdm
+from ballpushing_utils import read_feather
 
 # ---------------------------------------------------------------------------
 # Global matplotlib styling
@@ -121,7 +122,7 @@ def load_wildtype_data(
 
     chunks = []
     for fp in feather_files:
-        df = pd.read_feather(fp)
+        df = read_feather(fp)
         mask = pd.Series(True, index=df.index)
         for col, val in filters.items():
             if col not in df.columns:

@@ -15,6 +15,7 @@ from functools import lru_cache
 
 from utils_behavior import Utils
 
+from ballpushing_utils.config import Config
 from ballpushing_utils.fly_trackingdata import FlyTrackingData
 from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 from ballpushing_utils.skeleton_metrics import SkeletonMetrics
@@ -141,9 +142,15 @@ class Fly:
         Apply custom configuration values to the Fly's config.
 
         Args:
-            custom_config (str or dict): A path to a JSON/YAML file or a dictionary of custom configuration values.
+            custom_config: One of
+                * a path (``str`` / :class:`~pathlib.Path`) to a JSON or
+                  YAML file containing ``{key: value}`` overrides;
+                * a plain ``dict`` of overrides;
+                * a :class:`Config` instance — its public attributes
+                  are extracted and applied as overrides. Useful for
+                  scripts that build up a ``Config`` object inline.
         """
-        if isinstance(custom_config, str):
+        if isinstance(custom_config, (str, Path)):
             # Load configuration from a JSON or YAML file
             config_path = Path(custom_config)
             if config_path.suffix in [".json"]:
@@ -154,9 +161,19 @@ class Fly:
                     custom_config = yaml.safe_load(f)
             else:
                 raise ValueError("Unsupported file format. Use JSON or YAML.")
+        elif isinstance(custom_config, Config):
+            # Accept a fully-built Config object: extract its public
+            # attrs into a dict so the rest of this method can treat it
+            # uniformly with the dict-and-file paths.
+            custom_config = {
+                k: v for k, v in vars(custom_config).items() if not k.startswith("_")
+            }
 
         if not isinstance(custom_config, dict):
-            raise ValueError("Custom configuration must be a dictionary or a path to a JSON/YAML file.")
+            raise ValueError(
+                "Custom configuration must be a dict, a Config instance, "
+                "or a path to a JSON/YAML file."
+            )
 
         # Update the Fly's config with the custom values
         for key, value in custom_config.items():

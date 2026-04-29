@@ -32,6 +32,7 @@ sys.path.append(str(Path(__file__).parent.parent))  # Go up to src directory
 sys.path.append(str(Path(__file__).parent))  # Also add current directory
 sys.path.append(str(Path(__file__).parent.parent / "Plotting"))  # Add Plotting directory
 from statsmodels.stats.multitest import multipletests
+from ballpushing_utils import read_feather
 
 
 # ---------------------------------------------------------------------------
@@ -683,7 +684,7 @@ def load_and_clean_dataset(test_mode=False, test_sample_size=200):
     )
     print(f"Loading dataset from: {dataset_path}")
     try:
-        dataset = pd.read_feather(dataset_path)
+        dataset = read_feather(dataset_path)
         print(f"Loaded successfully. Shape: {dataset.shape}")
     except FileNotFoundError:
         raise FileNotFoundError(f"Dataset not found at: {dataset_path}")
@@ -921,14 +922,14 @@ def main(overwrite=True, test_mode=False, period_mode="pooled"):
         "distance_moved",
         "distance_ratio",
         "chamber_exit_time",
-        "normalized_velocity",
+        "normalized_speed",
         "auc",
         "overall_interaction_rate",
         "chamber_time",
         "pushed",
     ]
     additional_patterns = [
-        "velocity",
+        "speed",
         "speed",
         "pause",
         "freeze",
