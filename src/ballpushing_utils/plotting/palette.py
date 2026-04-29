@@ -53,3 +53,21 @@ BRAIN_REGION_COLORS: dict[str, str] = {
     "JON": "#ffbb78",
     "DN": "#c5b0d5",
 }
+
+FLY_COLORS = {
+    "lf": "#0f7399",
+    "lm": "#188bad",
+    "lh": "#76bcc9",
+    "rf": "#b82032",
+    "rm": "#c95750",
+    "rh": "#d38279",
+    "head": "green",
+    "abdomen": "purple",
+}
+
+def get_cluster_palette(n_clusters: int):
+    import numpy as np
+    import colorcet as cc
+    from matplotlib.colors import ListedColormap
+
+    return ListedColormap(cc.rainbow)(np.linspace(0, 1, n_clusters))

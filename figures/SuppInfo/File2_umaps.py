@@ -166,7 +166,7 @@ if __name__ == "__main__":
         with np.load(cache_dir / "umap.npz") as f:
             umap_data["embedding"] = f["embedding"]
             umap_data["bound"] = f["bound"].item()
-            umap_data["xlim"] = f["xlim"]
+            umap_data["xlim"] = f["xlim"][::-1]
             umap_data["ylim"] = f["ylim"]
             umap_data["im_regions"] = f["im_regions"]
     else:
@@ -178,17 +178,16 @@ if __name__ == "__main__":
         df_test = run_energy_tests(umap_data["embedding"], df_events, df_genotypes, control_genotypes)
         df_test.write_parquet(cache_dir / "energy_test.parquet")
 
-    out_dir = figure_output_dir("SuppInfoFile2", __file__)
+    out_dir = figure_output_dir("SuppInfo", __file__)
 
-    split_type = "m"
-    g = plot_umaps(
-        df_events,
-        df_genotypes,
-        df_test,
-        control_genotypes,
-        split_type="m",
-        **umap_data,
-    )
-    save_name = {"m": "mutant", "y": "split-gal4", "n": "gal4"}[split_type]
-    g.savefig(out_dir / f"genotype_{split_type}.pdf")
-    plt.close(g.fig)
+    for split_type, save_name in {"m": "mutant", "y": "split-gal4", "n": "gal4"}.items():
+        g = plot_umaps(
+            df_events,
+            df_genotypes,
+            df_test,
+            control_genotypes,
+            split_type,
+            **umap_data,
+        )
+        g.savefig(out_dir / f"genotype_{save_name}.pdf")
+        plt.close(g.fig)

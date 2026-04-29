@@ -8,51 +8,6 @@ n_bins = 512
 density_threshold = 5e-5
 
 
-def get_heading(body_coords: np.ndarray) -> np.ndarray:
-    """Calculate the heading vector from the coordinates of the nodes by
-    fitting a line through the neck, thorax, and abdomen nodes.
-
-    Parameters
-    ----------
-    body_coords : np.ndarray
-        Array of shape (..., 3, 2) containing the coordinates of the anterior,
-        medial, and posterior nodes.
-
-    Returns
-    -------
-    np.ndarray
-        Array of shape (..., 2) containing the heading vectors.
-    """
-    cov = np.einsum(
-        "...pi,...pj->...ij",
-        *(body_coords - body_coords.mean(axis=-2, keepdims=True),) * 2,
-    )
-    heading = np.linalg.eigh(cov)[1][..., -1]
-    dot_prod = np.einsum("...i,...i->...", body_coords[..., 0, :] - body_coords[..., -1, :], heading)
-    invert = dot_prod < 0
-    heading[invert] = -heading[invert]
-    return heading
-
-
-def get_features(df: pl.DataFrame) -> pl.DataFrame:
-    heading = get_heading(
-        df.select(f"{i}_{c}" for i in ["head", "thorax", "abdomen"] for c in "xy").to_numpy().reshape((-1, 3, 2))
-    )
-    front_leg_rel_pos = df.select((pl.col(f"lf_{c}") + pl.col(f"rf_{c}")) / 2 - pl.col(f"thorax_{c}") for c in "xy")
-    front_leg_ap_pos = np.einsum("...i,...i->...", front_leg_rel_pos, heading)
-    df_features = df.select(
-        -pl.col("ball_y").alias("Ball horizontal\ndisplacement\n(px)"),
-        (pl.col("thorax_y") - pl.col("ball_y")).alias("Ball-fly\nhorizontal\ndistance (px)"),
-        pl.Series("Front leg\nhorizontal\nposition (px)", front_leg_ap_pos),
-        pl.Series("Heading/\ninclination\nangle (°)", np.angle(heading @ (1j, -1), deg=True)),
-    )
-    ball_onset_position = df_features["Ball horizontal\ndisplacement\n(px)"][frames_per_event // 2 :: frames_per_event]
-    df_features = df_features.with_columns(
-        (pl.col("Ball horizontal\ndisplacement\n(px)") - np.repeat(ball_onset_position, frames_per_event))
-    )
-    return df_features
-
-
 def get_embedding(df_features):
     from pynndescent.distances import euclidean
     from numba import njit
@@ -142,13 +97,6 @@ def get_cluster_regions(embedding, labels, bound, n_bins, density_threshold):
     return region_map, xlim, ylim
 
 
-def get_cluster_palette(n_clusters: int):
-    import colorcet as cc
-    from matplotlib.colors import ListedColormap
-
-    return ListedColormap(cc.rainbow)(np.linspace(0, 1, n_clusters))
-
-
 def plot_map_regions(
     im_regions: np.ndarray,
     embedding: np.ndarray,
@@ -160,6 +108,7 @@ def plot_map_regions(
     from mplex import Grid
     from matplotlib import patheffects
     from matplotlib.colors import to_hex
+    from ballpushing_utils.plotting.palette import get_cluster_palette
 
     n_clusters = labels.max() + 1
     cluster_palette = get_cluster_palette(n_clusters)
@@ -250,6 +199,7 @@ def flip_if_needed(heading, embedding, labels=None):
 def plot_features(df_features, labels):
     from mplex import Grid
     from matplotlib.ticker import MaxNLocator
+    from ballpushing_utils.plotting.palette import get_cluster_palette
 
     n_features = df_features.shape[1]
     n_clusters = labels.max() + 1
@@ -289,7 +239,7 @@ def plot_features(df_features, labels):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from ballpushing_utils.preprocess_screen_data import get_preprocessed_data
+    from ballpushing_utils.preprocess_screen_data import get_preprocessed_data, get_features
     from ballpushing_utils.paths import figure_output_dir, get_cache_dir
 
     cache_dir = get_cache_dir()

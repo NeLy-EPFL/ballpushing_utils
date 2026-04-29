@@ -1,17 +1,6 @@
 from pathlib import Path
 import numpy as np
 
-fly_palette = {
-    "lf": "#0f7399",
-    "lm": "#188bad",
-    "lh": "#76bcc9",
-    "rf": "#b82032",
-    "rm": "#c95750",
-    "rh": "#d38279",
-    "head": "green",
-    "abdomen": "purple",
-}
-
 
 def load_data(
     cache_dir: Path,
@@ -34,7 +23,6 @@ def load_data(
 def plot_contact_image(
     data: dict[str, float],
     im: np.ndarray,
-    fly_palette: dict[str, str],
     line_width=1,
     ball_radius=12,
     ball_color="#00aeef",
@@ -42,14 +30,14 @@ def plot_contact_image(
     from matplotlib.patches import Circle
     from matplotlib.transforms import Affine2D
     from mplex import Grid
-    from ballpushing_utils import figure_output_dir
+    from ballpushing_utils.plotting.palette import FLY_COLORS
 
     affine2d = Affine2D().translate(-data["ball_x"], -data["ball_y"]).rotate_deg(90)
     g = Grid()
     ax = g.item()
     transform = affine2d + ax.transData
     ax.imshow(im, transform=transform)
-    for key, color in fly_palette.items():
+    for key, color in FLY_COLORS.items():
         ax.plot(
             [data["thorax_x"], data[f"{key}_x"]],
             [data["thorax_y"], data[f"{key}_y"]],
@@ -82,6 +70,6 @@ if __name__ == "__main__":
     out_dir = figure_output_dir("Figure3", __file__)
 
     data, im = load_data(cache_dir=cache_dir)
-    g = plot_contact_image(data, im, fly_palette)
+    g = plot_contact_image(data, im)
     g.savefig(out_dir / "fig3_contact.pdf")
     plt.close(g.fig)
