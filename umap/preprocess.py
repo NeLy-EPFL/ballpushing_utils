@@ -1,5 +1,3 @@
-from importlib.resources import path
-
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
@@ -49,8 +47,8 @@ new_info_cols = [
 
 
 # Interpolate per-event chunks of length every_n and flatten back to a 1D array.
-def interp(a, every_n: int, **kwargs) -> np.ndarray:
-    reshaped = np.reshape(a, (-1, every_n))
+def interp(values, every_n: int, **kwargs) -> np.ndarray:
+    reshaped = np.reshape(values, (-1, every_n))
     return pd.DataFrame(reshaped).interpolate(axis=1, **kwargs).to_numpy().ravel()
 
 
@@ -84,8 +82,6 @@ def preprocess_data(
     df = df.select(
         *index_cols, *(pl.col(col).cast(pl.Float64) for col in new_data_cols)
     )
-
-    df = df.with_columns(pl.col(col).cast(pl.Float64) for col in new_data_cols)
 
     strict_interp_kwargs = {
         "method": "linear",
@@ -123,8 +119,6 @@ def preprocess_data(
     }
     for col in new_data_cols:
         df = interp_column(df, col, frames_per_event, **relaxed_interp_kwargs)
-
-    df = df.drop_nans().filter(pl.len().over(["fly", "event_id"]).eq(frames_per_event))
 
     df = df.drop_nans().filter(pl.len().over(["fly", "event_id"]).eq(frames_per_event))
 

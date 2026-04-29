@@ -28,8 +28,8 @@ df = pl.read_parquet(cache_dir / "contacts.parquet")
 df_fly = pl.read_parquet(cache_dir / "flies.parquet")
 genotype_names = dict(zip(*pl.read_csv("data/genotype_names.csv").to_dict().values()))
 df_fly = df_fly.with_columns(pl.col("genotype").replace(genotype_names))
-unused_genotypes = ["Wild-type(PR)", "Wild-type(Canton-S)", "TH", "TH-2"]
-df_fly = df_fly.filter(~pl.col("genotype").is_in(unused_genotypes))
+excluded_genotypes = ["Wild-type(PR)", "Wild-type(Canton-S)", "TH", "TH-2"]
+df_fly = df_fly.filter(~pl.col("genotype").is_in(excluded_genotypes))
 df = df.filter(pl.col("fly").is_in(df_fly["fly"].implode()))
 
 
@@ -72,9 +72,13 @@ feature_names = [
     "Front leg\nhorizontal\nposition (px)",
     "Heading/\ninclination\nangle (°)",
 ]
-X = np.reshape(df_features, (-1, frames_per_event, n_features)).transpose(0, 2, 1)
-std = X.std(axis=(0, 2), keepdims=True)
-X = (X / std).reshape((-1, n_features * frames_per_event))
+feature_matrix = np.reshape(df_features, (-1, frames_per_event, n_features)).transpose(
+    0, 2, 1
+)
+feature_std = feature_matrix.std(axis=(0, 2), keepdims=True)
+feature_matrix = (feature_matrix / feature_std).reshape(
+    (-1, n_features * frames_per_event)
+)
 
 import numba
 from pynndescent.distances import euclidean
@@ -94,27 +98,27 @@ def my_dist(a: np.ndarray, b: np.ndarray) -> float:
 
 
 if Path(cache_dir / "umap_embedding.npy").exists():
-    Z = np.load(cache_dir / "umap_embedding.npy")
+    embedding = np.load(cache_dir / "umap_embedding.npy")
 else:
     umap = UMAP(n_components=2, random_state=0, metric=my_dist)
-    Z = umap.fit_transform(X)
-    np.save(cache_dir / "umap_embedding.npy", Z)
+    embedding = umap.fit_transform(feature_matrix)
+    np.save(cache_dir / "umap_embedding.npy", embedding)
 
-Z = rotate_embedding(Z)
-bound = np.abs(Z).max() * 1.05
-im = get_kde(Z, bound=bound)[0]
-n_bins = len(im)
+embedding = rotate_embedding(embedding)
+bound = np.abs(embedding).max() * 1.05
+kde_image = get_kde(embedding, bound=bound)[0]
+n_bins = len(kde_image)
 
 n_clusters = 20
-labels = cluster_points(Z, n_clusters=n_clusters)
+labels = cluster_points(embedding, n_clusters=n_clusters)
 labels = (labels - 1) % n_clusters
-labels = sort_labels(labels, Z)
+labels = sort_labels(labels, embedding)
 
 density_threshold = 5e-5
-im_regions, xlim, ylim = get_areas(Z, labels, bound, n_bins, density_threshold)
+im_regions, xlim, ylim = get_areas(embedding, labels, bound, n_bins, density_threshold)
 xlim = xlim[::-1]
 
-g = plot_map_regions(im_regions, Z, labels, xlim, ylim, bound)
+g = plot_map_regions(im_regions, embedding, labels, xlim, ylim, bound)
 bar_length = 2.5
 ax = g.item()
 ax.add_scale_bars(
@@ -134,21 +138,23 @@ ax.add_scale_bars(
 g.savefig(output_dir / "map.pdf")
 plt.close(g.fig)
 
-do_flip = determine_flip_needed(X, Z, labels, flip)
-X_flipped = (
+do_flip = determine_flip_needed(feature_matrix, embedding, labels, flip)
+feature_matrix_flipped = (
     np.reshape(df_features, (-1, frames_per_event, n_features))
     .transpose(0, 2, 1)
     .reshape((-1, n_features * frames_per_event))
 )
-X_flipped[do_flip] = flip(X_flipped[do_flip])
+feature_matrix_flipped[do_flip] = flip(feature_matrix_flipped[do_flip])
 for k in range(n_clusters):
     mask = labels == k
-    mean_heading = X_flipped[mask, -frames_per_event:].mean()
+    mean_heading = feature_matrix_flipped[mask, -frames_per_event:].mean()
     if mean_heading < 0:
-        X_flipped[mask] = flip(X_flipped[mask])
+        feature_matrix_flipped[mask] = flip(feature_matrix_flipped[mask])
         do_flip[mask] = ~do_flip[mask]
 
-X_flipped = X_flipped.reshape((-1, n_features, frames_per_event))
+feature_matrix_flipped = feature_matrix_flipped.reshape(
+    (-1, n_features, frames_per_event)
+)
 from matplotlib.ticker import MaxNLocator
 
 cluster_palette = get_cluster_palette(n_clusters)
@@ -167,8 +173,8 @@ for i_cluster, cluster_id in enumerate(cluster_ids):
     ax = g[0, i_cluster]
     ax.set_title(cluster_id + 1, size=4, pad=0)
     for i, feature_name in enumerate(feature_names):
-        mu = X_flipped[labels == cluster_id, i].mean(0)
-        s = X_flipped[labels == cluster_id, i].std(0)
+        mu = feature_matrix_flipped[labels == cluster_id, i].mean(0)
+        s = feature_matrix_flipped[labels == cluster_id, i].std(0)
         ax = g[i, i_cluster]
         c = cluster_palette[cluster_id]
         ax.plot(t, mu, color=c, lw=1)
@@ -201,8 +207,8 @@ plt.close(g.fig)
 kwargs = dict(
     save_dir=output_dir / "videos",
     t=t,
-    Z=Z,
-    X_flipped=X_flipped,
+    embedding=embedding,
+    feature_matrix_flipped=feature_matrix_flipped,
     feature_names=feature_names,
     labels=labels,
     im_regions=im_regions,
@@ -248,13 +254,13 @@ df_genotypes = df_genotypes.join(
 from joblib import Parallel, delayed
 
 
-def func(genotype):
+def run_energy_test(genotype):
     control = control_genotypes[
         df_genotypes.filter(pl.col("genotype").eq(genotype))["split"].item()
     ]
     results = energy_test_fly(
-        Z[df_events["genotype"] == control],
-        Z[df_events["genotype"] == genotype],
+        embedding[df_events["genotype"] == control],
+        embedding[df_events["genotype"] == genotype],
         df_events.filter(pl.col("genotype").eq(control))["fly"]
         .cast(pl.Categorical)
         .to_physical()
@@ -273,7 +279,8 @@ if (output_dir / "energy_test.parquet").exists():
 else:
     df_test = pl.DataFrame(
         Parallel(n_jobs=-1)(
-            delayed(func)(genotype) for genotype in tqdm(df_genotypes["genotype"])
+            delayed(run_energy_test)(genotype)
+            for genotype in tqdm(df_genotypes["genotype"])
         ),
         schema=["genotype", "E", "p"],
         orient="row",
@@ -283,21 +290,21 @@ else:
 bar_length = 3
 n_cols = 10
 cmap = "gray_r"
-h = (np.abs(np.diff(ylim) / np.diff(xlim)) * 60).item()
+fig_height = (np.abs(np.diff(ylim) / np.diff(xlim)) * 60).item()
 
-for (split_type,), df_ in df_genotypes.join(
+for (split_type,), df_split in df_genotypes.join(
     df_test, on="genotype", how="left"
 ).group_by("split"):
-    df_ = df_.sort(["p", "E"], descending=[True, False])
-    n_rows = int(np.ceil(len(df_) / n_cols))
+    df_split = df_split.sort(["p", "E"], descending=[True, False])
+    n_rows = int(np.ceil(len(df_split) / n_cols))
     if n_rows == 1:
-        n_cols = len(df_)
-    g = Grid((60, h), (n_rows, n_cols), space=(6, 24), facecolor="w")
+        n_cols = len(df_split)
+    g = Grid((60, fig_height), (n_rows, n_cols), space=(6, 24), facecolor="w")
     g.set_visible_sides("")
-    for i, row in enumerate(df_.iter_rows(named=True)):
+    for i, row in enumerate(df_split.iter_rows(named=True)):
         ax = g.axs.ravel()[i]
         im_kde = get_kde(
-            Z[df_events["genotype"] == row["genotype"]], bound=bound, bw=0.4
+            embedding[df_events["genotype"] == row["genotype"]], bound=bound, bw=0.4
         )[0]
         im_kde /= im_kde.mean()
         ax.imshow(
@@ -322,15 +329,15 @@ for (split_type,), df_ in df_genotypes.join(
         ax.set_aspect("equal")
 
         if row["genotype"] == control_genotypes[split_type]:
-            txt = f"{row['genotype']}\n(control)"
+            annotation_text = f"{row['genotype']}\n(control)"
         else:
-            txt = f"{row['genotype']}\np={row['p']:.3f}, E={row['E']:.3f}"
+            annotation_text = f"{row['genotype']}\np={row['p']:.3f}, E={row['E']:.3f}"
 
-        txt += f"\n{row['n_flies']} flies, {row['n_events_mean']}$\\pm${row['n_events_std']} events"
+        annotation_text += f"\n{row['n_flies']} flies, {row['n_events_mean']}$\\pm${row['n_events_std']} events"
         ax.add_text(
             0.5,
             1,
-            txt,
+            annotation_text,
             ha="c",
             va="b",
             transform="a",
