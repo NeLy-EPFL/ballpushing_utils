@@ -40,6 +40,7 @@ __all__ = [
     "figures_root",
     "dataset",
     "figure_output_dir",
+    "get_cache_dir",
     "load_dotenv",
     "DEFAULT_DATA_ROOT",
     "DEFAULT_FIGURES_ROOT_NAME",
@@ -110,6 +111,16 @@ def figure_output_dir(
         base.mkdir(parents=True, exist_ok=True)
     return base
 
+
+def get_cache_dir() -> Path:
+    """Return the project-level cache directory.
+
+    The cache lives at ``<repo_root>/.cache`` so scripts run from any working
+    directory share the same cached artifacts.
+    """
+    cache_dir = Path(__file__).resolve().parents[2] / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
 def load_dotenv(path: str | os.PathLike[str] = ".env") -> dict[str, str]:
     """Minimal ``.env`` loader with no external dependencies.

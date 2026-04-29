@@ -80,6 +80,7 @@ dependencies = [
     "python-tsp>=0.2.0",
     "video-reader-rs>=0.4.2",
     "polars>=1.40.1",
+    "flyplotlib>=0.5.2",
 ]
 
 [project.optional-dependencies]
@@ -134,7 +135,7 @@ target-version = ["py310", "py311", "py312"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py310"flyplotlib = { git = "https://github.com/tkclam/flyplotlib.git" }
 extend-exclude = ["docs", "build", "dist"]
 
 [tool.ruff.lint]

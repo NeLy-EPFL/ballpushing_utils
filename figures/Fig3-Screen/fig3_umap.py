@@ -7,7 +7,6 @@ n_clusters = 20
 map_pad = 0.05
 n_bins = 512
 density_threshold = 5e-5
-cache_dir = Path(".cache/")
 
 
 def get_heading(body_coords: np.ndarray) -> np.ndarray:
@@ -330,11 +329,12 @@ def plot_features(df_features, labels):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from ballpushing_utils.preprocess_screen_data import get_preprocessed_data
-    from ballpushing_utils import figure_output_dir
+    from ballpushing_utils.paths import figure_output_dir, get_cache_dir
 
+    cache_dir = get_cache_dir()
     out_dir = figure_output_dir("Figure3", __file__)
 
-    df, df_fly = get_preprocessed_data()
+    df, df_fly = get_preprocessed_data(cache_dir)
 
     genotype_names = dict(zip(*pl.read_csv("data/genotype_names.csv").to_dict().values()))
     df_fly = df_fly.with_columns(pl.col("genotype").replace(genotype_names))

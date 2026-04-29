@@ -8,8 +8,6 @@ root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
 dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
 data_dir = root_dir / dataset_name / "standardized_contacts"
 data_paths = sorted(data_dir.glob("2*.feather"))
-cache_dir = Path(".cache")
-cache_dir.mkdir(exist_ok=True, parents=True)
 
 index_cols = ["fly", "event_id", "frame"]
 keypoints = {
@@ -114,7 +112,7 @@ def preprocess_data(
     return df, df_fly
 
 
-def get_preprocessed_data() -> tuple[pl.DataFrame, pl.DataFrame]:
+def get_preprocessed_data(cache_dir: Path) -> tuple[pl.DataFrame, pl.DataFrame]:
     if (cache_dir / "contacts.parquet").exists() and (cache_dir / "flies.parquet").exists():
         df = pl.read_parquet(cache_dir / "contacts.parquet")
         df_fly = pl.read_parquet(cache_dir / "flies.parquet")
