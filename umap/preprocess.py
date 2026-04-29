@@ -1,24 +1,11 @@
-import numpy as np
-import pandas as pd
-from utils import c2xy
-from pathlib import Path
-from tqdm import tqdm
+from importlib.resources import path
 
-idx_col = ["fly", "event_id", "frame"]
-data_cols = [
-    "centre_preprocessed",
-    "Thorax",
-    "Head",
-    "Abdomen",
-    "Lfront",
-    "Lmid",
-    "Lhind",
-    "Rfront",
-    "Rmid",
-    "Rhind",
-]
-new_data_cols = ["b", "t", "h", "a", "lf", "lm", "lh", "rf", "rm", "rh"]
-data_xy_cols = [f"{c}_{col}" for col in data_cols for c in "xy"]
+from tqdm import tqdm
+import numpy as np
+from pathlib import Path
+import polars as pl
+import pandas as pd
+
 root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
 dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
 data_dir = root_dir / dataset_name / "standardized_contacts"
@@ -26,49 +13,124 @@ data_paths = sorted(data_dir.glob("2*.feather"))
 save_dir = Path(".cache")
 save_dir.mkdir(exist_ok=True, parents=True)
 
-for data_path in tqdm(data_paths):
-    save_name = data_path.stem.removesuffix("_Videos_Tracked_standardized_contacts")
+index_cols = ["fly", "event_id", "frame"]
+keypoints = {
+    "centre_preprocessed": "ball",
+    "Thorax": "thorax",
+    "Head": "head",
+    "Abdomen": "abdomen",
+    "Lfront": "lf",
+    "Lmid": "lm",
+    "Lhind": "lh",
+    "Rfront": "rf",
+    "Rmid": "rm",
+    "Rhind": "rh",
+}
+data_cols = [f"{coord}_{name}" for name in keypoints for coord in "xy"]
+new_data_cols = [f"{name}_{coord}" for name in keypoints.values() for coord in "xy"]
+info_cols = [
+    "flypath",
+    "Genotype",
+    "Nickname",
+    "Simplified Nickname",
+    "Brain region",
+    "Split",
+    "event_type",
+]
+new_info_cols = [
+    "path",
+    "genotype",
+    "nickname",
+    "simplified_nickname",
+    "brain_region",
+    "split",
+    "event_type",
+]
 
-    df = pd.read_feather(data_path)
-    df = df[df["event_type"].eq("contact")]
-    assert len(df) == len(df[idx_col].drop_duplicates())
-    df.set_index(idx_col, inplace=True)
-    df.sort_index(inplace=True)
-    df_flies = (
-        df.reset_index()[["fly", "Genotype", "flypath"]]
-        .drop_duplicates()
-        .rename({"Genotype": "line", "flypath": "path"}, axis=1)
-        .reset_index(drop=True)
-    )
-    df = pd.DataFrame(
-        df[data_xy_cols].values.reshape((len(df), -1, 2)) @ (1, 1j),
-        columns=new_data_cols,
-        index=df.index,
-    )
-    to_drop = []
-    for key, df_ in df.groupby(["fly", "event_id"]):
-        if (~np.isfinite(df_.values)).all():
-            to_drop.append(key)
-    size = df.groupby(["fly", "event_id"]).size()
-    df.drop(size[size.ne(120)].index, inplace=True)
-    for key, df_ in df.groupby(level=["fly", "event_id"]):
-        df.loc[key] = df_.interpolate(
-            method="linear",
-            limit_direction="both",
-            limit=30,
-            axis=0,
-            limit_area="inside",
+
+# Interpolate per-event chunks of length every_n and flatten back to a 1D array.
+def interp(a, every_n: int, **kwargs) -> np.ndarray:
+    reshaped = np.reshape(a, (-1, every_n))
+    return pd.DataFrame(reshaped).interpolate(axis=1, **kwargs).to_numpy().ravel()
+
+
+def interp_column(df: pl.DataFrame, col: str, every_n: int, **kwargs) -> pl.DataFrame:
+    return df.with_columns(pl.Series(col, interp(df[col], every_n, **kwargs)))
+
+
+def preprocess_data(
+    data_path: Path,
+    frames_per_event: int = 120,
+    ball_y_threshold: float = 8,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    df = (
+        pl.read_ipc(
+            data_path,
+            memory_map=False,
+            columns=index_cols + info_cols + data_cols,
         )
-    df.loc[df["lf"].isna(), "lf"] = df.loc[df["lf"].isna(), "rf"].values
-    df.loc[df["rf"].isna(), "rf"] = df.loc[df["rf"].isna(), "lf"].values
-    df.loc[df["lm"].isna(), "lm"] = df.loc[df["lm"].isna(), "rm"].values
-    df.loc[df["rm"].isna(), "rm"] = df.loc[df["rm"].isna(), "lm"].values
-    df.loc[df["lh"].isna(), "lh"] = df.loc[df["lh"].isna(), "rh"].values
-    df.loc[df["rh"].isna(), "rh"] = df.loc[df["rh"].isna(), "lh"].values
-    for key, df_ in df.groupby(level=["fly", "event_id"]):
-        df.loc[key] = df_.interpolate(method="linear", limit=10, axis=0)
-    df.dropna(inplace=True, axis=0)
-    size = df.groupby(["fly", "event_id"]).size()
-    df.drop(size[size.ne(120)].index, inplace=True)
-    c2xy(df).to_feather(save_dir / f"{save_name}_contacts.feather")
-    df_flies.to_feather(save_dir / f"{save_name}_flies.feather")
+        .rename(dict(zip(info_cols + data_cols, new_info_cols + new_data_cols)))
+        .filter(
+            pl.col("event_type").eq("contact")
+            & pl.len().over(["fly", "event_id"]).eq(frames_per_event)
+        )
+        .sort(index_cols)
+    )
+
+    df_fly = df.select(
+        pl.col(col).cast(pl.String) for col in ["fly", *new_info_cols[:-1]]
+    ).unique()
+
+    df = df.select(
+        *index_cols, *(pl.col(col).cast(pl.Float64) for col in new_data_cols)
+    )
+
+    df = df.with_columns(pl.col(col).cast(pl.Float64) for col in new_data_cols)
+
+    strict_interp_kwargs = {
+        "method": "linear",
+        "limit_direction": "both",
+        "limit": 30,
+        "limit_area": "inside",
+    }
+
+    relaxed_interp_kwargs = {
+        "method": "linear",
+        "limit": 10,
+    }
+
+    y_ball = interp(df["ball_y"], frames_per_event, **strict_interp_kwargs)
+    y_ball = interp(y_ball, frames_per_event, **relaxed_interp_kwargs)
+    y_ball_mid = y_ball[frames_per_event // 2 :: frames_per_event]
+    y_ball_end = y_ball[frames_per_event - 1 :: frames_per_event]
+    diff_y_ball = np.abs(y_ball_end - y_ball_mid)
+    df = df.filter(np.repeat(diff_y_ball > ball_y_threshold, frames_per_event))
+
+    for col in new_data_cols:
+        df = interp_column(df, col, frames_per_event, **strict_interp_kwargs)
+
+    legs = ["lf", "lm", "lh", "rf", "rm", "rh"]
+    opposite_leg = {leg: {"l": "r", "r": "l"}[leg[0]] + leg[1] for leg in legs}
+    df = df.with_columns(
+        pl.col(f"{leg}_{coord}").fill_nan(pl.col(f"{opposite_leg[leg]}_{coord}"))
+        for leg in legs
+        for coord in ["x", "y"]
+    )
+
+    relaxed_interp_kwargs = {
+        "method": "linear",
+        "limit": 10,
+    }
+    for col in new_data_cols:
+        df = interp_column(df, col, frames_per_event, **relaxed_interp_kwargs)
+
+    df = df.drop_nans().filter(pl.len().over(["fly", "event_id"]).eq(frames_per_event))
+
+    df = df.drop_nans().filter(pl.len().over(["fly", "event_id"]).eq(frames_per_event))
+
+    return df, df_fly
+
+
+df, df_fly = zip(*(preprocess_data(path) for path in tqdm(data_paths)))
+pl.concat(df).write_parquet(save_dir / "contacts.parquet")
+pl.concat(df_fly).write_parquet(save_dir / "flies.parquet")
