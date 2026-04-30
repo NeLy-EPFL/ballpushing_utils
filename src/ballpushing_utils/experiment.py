@@ -19,6 +19,7 @@ class Experiment:
         custom_config=None,
         multiprocess=False,
         num_processes=None,
+        metadata=None,
     ):
         """
         Parameters
@@ -33,6 +34,13 @@ class Experiment:
             Whether to use multiprocessing for loading flies.
         num_processes : int
             Number of processes to use for multiprocessing. If None, uses os.cpu_count().
+        metadata : dict, optional
+            Pre-built metadata dict to use instead of reading
+            ``directory/Metadata.json``. Schema must match
+            :meth:`load_metadata`'s output: ``{var: {arenaN: value}}`` with
+            lower-cased arena keys. Used by the Dataverse loader (which
+            ships HDF5 tracks but no ``Metadata.json``) — see
+            :mod:`ballpushing_utils.dataverse`.
 
         Attributes
         ----------
@@ -46,7 +54,7 @@ class Experiment:
 
         self.config = Config()
         self.directory = Path(directory)
-        self.metadata = self.load_metadata()
+        self.metadata = metadata if metadata is not None else self.load_metadata()
         self.fps = self.load_fps()
 
         # If metadata_only is True, don't load the flies
@@ -99,8 +107,14 @@ class Experiment:
         (int, float))`` checks elsewhere; coerce here so callers can
         treat ``self.fps`` as a normal scalar.
 
+        The default of 29 matches the canonical MultiMazeRecorder /
+        F1 rig rate used throughout paper acquisition. The Dataverse
+        archive ships HDF5 tracks only (no ``fps.npy``) — every paper
+        recording was at 29 fps, so this default round-trips correctly
+        for re-runs against the published archive.
+
         Returns:
-            int | float: The frame rate of the videos. Defaults to 30
+            int | float: The frame rate of the videos. Defaults to 29
             if ``fps.npy`` is missing.
         """
         # Load the fps value from the fps.npy file in the experiment directory
@@ -112,8 +126,7 @@ class Experiment:
             # where ``raw`` is already a Python scalar.
             fps = raw.item() if hasattr(raw, "item") else raw
         else:
-            fps = 30
-            # print(f"Warning: fps.npy file not found in {self.directory}; Defaulting to 30 fps.")
+            fps = 29
 
         return fps
 

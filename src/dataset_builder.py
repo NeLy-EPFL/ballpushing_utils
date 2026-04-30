@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 import json
 import gc
 import psutil
@@ -62,6 +63,14 @@ from ballpushing_utils import utilities, config
 #
 # Process individual fly directories from a combined YAML file:
 # python dataset_builder.py --mode flies --yaml combined_flies.yaml --datasets summary
+#
+# Re-run the full pipeline against a Dataverse-layout subtree
+# (<root>/<condition>/<date>/arenaN/corridorM/{ball,fly,skeleton}.h5):
+# python dataset_builder.py --dataverse-root /data/Screen \
+#       --experiment-type TNT --datasets summary
+# (the condition folder name becomes the value of arena_metadata[Genotype]
+#  for TNT, [Magnet] for MagnetBlock, [Pretraining] for F1; override with
+#  --condition-field if your subtree uses a different schema.)
 #
 # Tune cache management (batch size + memory threshold):
 # python dataset_builder.py --mode flies --yaml flies.yaml --datasets summary \
@@ -780,6 +789,111 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
         logging.error(f"Traceback: {traceback.format_exc()}")
 
 
+def process_dataverse_fly(
+    dataverse_fly,
+    metrics,
+    output_data,
+    experiment_type,
+    condition_field,
+    force_cache_clear=False,
+):
+    """Build per-fly feathers from one Dataverse-layout corridor folder.
+
+    Mirrors :func:`process_fly_directory` but for the Dataverse archive,
+    where there is no parent ``Metadata.json``: per-arena metadata is
+    synthesised from the condition folder name via
+    ``Fly(..., dataverse_condition={...})``.
+
+    Parameters
+    ----------
+    dataverse_fly : ballpushing_utils.DataverseFly
+        Record describing one corridor under
+        ``<root>/<condition>/<date>/arenaN/corridorM``.
+    metrics : list[str]
+        Requested dataset types (filtered against the experiment type's
+        eligibility table before any work happens).
+    output_data : Path
+        Output root containing one subdirectory per metric.
+    experiment_type : str
+        Resolved experiment type — drives metric eligibility and the
+        paradigm-specific branches inside the package (e.g. F1 exit-time
+        adjustment, MagnetBlock 3600 s cutoff).
+    condition_field : str
+        Arena-metadata column the condition folder maps to (e.g.
+        ``Genotype`` for the screen, ``Magnet`` for MagnetBlock,
+        ``Pretraining`` for F1). Becomes a feather column.
+    force_cache_clear : bool
+        Pass-through to :func:`clear_fly_caches_conditional`.
+    """
+    fly_dir = dataverse_fly.directory
+    fly_name = (
+        f"{dataverse_fly.date_folder.name}_{dataverse_fly.arena}_{dataverse_fly.corridor}"
+    )
+    logging.info(
+        f"Processing Dataverse fly: condition={dataverse_fly.condition!r} -> {fly_name}"
+    )
+
+    try:
+        fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
+        if not fly_metrics:
+            logging.warning(
+                f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
+            )
+            return
+
+        all_datasets_exist = all(
+            (output_data / metric / f"{fly_name}_{metric}.feather").exists()
+            for metric in fly_metrics
+        )
+        if all_datasets_exist:
+            logging.info(f"All datasets for {fly_name} already exist. Skipping.")
+            return
+
+        # Expand the condition folder name into one or more metadata
+        # columns (F1 emits Pretraining + F1_condition; everything else
+        # emits a single column). ``condition_field`` only kicks in for
+        # paradigms without a registered transformer.
+        from ballpushing_utils.dataverse import expand_condition
+
+        fields = expand_condition(
+            experiment_type,
+            dataverse_fly.condition,
+            condition_field=condition_field,
+        )
+        fly = ballpushing_utils.Fly(
+            fly_dir,
+            as_individual=True,
+            custom_config={"experiment_type": experiment_type},
+            dataverse_condition={"fields": fields},
+        )
+
+        for metric in fly_metrics:
+            dataset_path = output_data / metric / f"{fly_name}_{metric}.feather"
+            if dataset_path.exists():
+                logging.info(f"Dataset {dataset_path} already exists. Skipping.")
+                continue
+
+            dataset = ballpushing_utils.Dataset(fly, dataset_type=metric)
+            if dataset.data is not None and not dataset.data.empty:
+                dataset_path.parent.mkdir(parents=True, exist_ok=True)
+                dataset.data.to_feather(dataset_path)
+                logging.info(
+                    f"Saved {metric} dataset for {fly_name} to {dataset_path} "
+                    f"({len(dataset.data)} rows)"
+                )
+            else:
+                logging.warning(f"No data available for {fly_name} with metric {metric}")
+
+        clear_fly_caches_conditional(fly, force=force_cache_clear)
+        del fly
+
+    except Exception as e:
+        logging.error(f"Error processing Dataverse fly {fly_dir}: {str(e)}")
+        import traceback
+
+        logging.error(f"Traceback: {traceback.format_exc()}")
+
+
 def extract_experiment_folders_from_fly_dirs(fly_dirs):
     """
     Extract unique experiment folders from a list of fly directories.
@@ -1203,6 +1317,31 @@ if __name__ == "__main__":
             "directory (typically still in the MultiMazeRecorder catch-all)."
         ),
     )
+    parser.add_argument(
+        "--dataverse-root",
+        type=str,
+        default=None,
+        help=(
+            "Build feathers from a Dataverse-layout subtree "
+            "(<root>/<condition>/<date>/arenaN/corridorM/{ball,fly,skeleton}.h5). "
+            "Requires --experiment-type so the synthetic metadata uses "
+            "the right paradigm. The condition folder name becomes the "
+            "value of the column selected by --condition-field (default: "
+            "depends on experiment_type). Mutually exclusive with "
+            "--yaml/--mode."
+        ),
+    )
+    parser.add_argument(
+        "--condition-field",
+        type=str,
+        default=None,
+        help=(
+            "Arena-metadata column the Dataverse condition folder name "
+            "maps to (e.g. Genotype, Magnet, Pretraining). Defaults to "
+            "the per-experiment-type value from "
+            "ballpushing_utils.dataverse.DEFAULT_CONDITION_FIELD."
+        ),
+    )
     args = parser.parse_args()
 
     # Update CONFIG with command line arguments
@@ -1270,6 +1409,147 @@ if __name__ == "__main__":
         logging.info(f"Verification completed in {runtime:.2f} seconds")
         exit(0)
 
+    # Handle Dataverse mode (self-contained: discovery, processing, pooling).
+    if args.dataverse_root:
+        from ballpushing_utils.dataverse import (
+            CONDITION_TRANSFORMERS,
+            DEFAULT_CONDITION_FIELD,
+            expand_condition,
+            iter_dataverse_flies,
+        )
+
+        if args.experiment_type is None:
+            raise ValueError(
+                "--dataverse-root requires --experiment-type (the synthetic "
+                "metadata needs to know which paradigm-specific code path to "
+                "take, e.g. F1 chamber-exit adjustment vs MagnetBlock 3600s "
+                "cutoff)."
+            )
+
+        # Paradigms with a registered transformer (F1) ignore
+        # --condition-field; their folder name expands into multiple
+        # columns deterministically. Everything else uses
+        # --condition-field, falling back to the per-paradigm default.
+        if args.experiment_type in CONDITION_TRANSFORMERS:
+            condition_field = None
+            if args.condition_field is not None:
+                logging.warning(
+                    f"--condition-field={args.condition_field!r} ignored: "
+                    f"{args.experiment_type} uses a registered transformer "
+                    f"(see dataverse.CONDITION_TRANSFORMERS)."
+                )
+        else:
+            condition_field = args.condition_field or DEFAULT_CONDITION_FIELD.get(
+                args.experiment_type
+            )
+            if condition_field is None:
+                raise ValueError(
+                    f"No default condition field for experiment type "
+                    f"{args.experiment_type!r}. Pass --condition-field explicitly."
+                )
+
+        dv_root = Path(args.dataverse_root).expanduser()
+        if not dv_root.is_dir():
+            from ballpushing_utils.paths import missing_data_message
+
+            logging.error(missing_data_message(dv_root, context="Dataverse root"))
+            sys.exit(2)
+
+        # Output dir mirrors the YAML-mode convention but keys off the
+        # Dataverse subtree name so two separate runs against different
+        # subtrees don't clobber each other.
+        if CONFIG["PATHS"]["output_summary_dir"]:
+            output_dir_name = CONFIG["PATHS"]["output_summary_dir"]
+        else:
+            today_date = datetime.now().strftime("%y%m%d_%H")
+            output_dir_name = f"{today_date}_{args.datasets[0]}_dataverse_{dv_root.name}"
+        output_data = CONFIG["PATHS"]["dataset_dir"] / f"{output_dir_name}_Data"
+        output_data.mkdir(parents=True, exist_ok=True)
+        for metric in args.datasets:
+            (output_data / metric).mkdir(exist_ok=True)
+
+        # Persist the run config alongside the feathers, same as the
+        # YAML/experiment paths do, so the resulting tree can be shipped
+        # back to the Dataverse if needed.
+        config_save_path = output_data / CONFIG["PATHS"]["config_path"]
+        try:
+            config_to_save = {
+                "dataset_builder_config": CONFIG,
+                "ballpushing_config": current_config.__dict__,
+                "processing_info": {
+                    "mode": "dataverse",
+                    "dataverse_root": str(dv_root),
+                    "experiment_type": args.experiment_type,
+                    "condition_field": condition_field,
+                    "datasets_requested": args.datasets,
+                    "timestamp": datetime.now().isoformat(),
+                },
+            }
+            with open(config_save_path, "w") as f:
+                json.dump(config_to_save, f, indent=2, default=str)
+            logging.info(f"Configuration saved to: {config_save_path}")
+        except Exception as e:
+            logging.error(f"Failed to save configuration: {e}")
+
+        dataverse_flies = list(iter_dataverse_flies(dv_root))
+        if not dataverse_flies:
+            from ballpushing_utils.paths import detect_layout, missing_data_message
+
+            detected = detect_layout(dv_root)
+            if detected == "server":
+                logging.error(
+                    f"{dv_root} looks like a server-style tree (Metadata.json "
+                    f"detected) — call dataset_builder.py with --yaml instead "
+                    f"of --dataverse-root."
+                )
+            else:
+                logging.error(
+                    f"No Dataverse-layout flies found under {dv_root}.\n"
+                    f"Expected: <root>/<condition>/<date>/arenaN/corridorM/*ball*.h5\n\n"
+                    + missing_data_message(dv_root, context="Dataverse root")
+                )
+            sys.exit(2)
+        logging.info(
+            f"Found {len(dataverse_flies)} flies across "
+            f"{len(set(f.condition for f in dataverse_flies))} conditions in {dv_root}"
+        )
+        # Show the user exactly which columns each condition folder will
+        # populate, so they can sanity-check before kicking off a long run.
+        sample_condition = next(iter(sorted({f.condition for f in dataverse_flies})))
+        sample_fields = expand_condition(
+            args.experiment_type, sample_condition, condition_field=condition_field
+        )
+        logging.info(
+            f"Condition expansion preview "
+            f"(experiment_type={args.experiment_type!r}): "
+            f"{sample_condition!r} -> {sample_fields}"
+        )
+
+        for dv_fly in tqdm(dataverse_flies, desc="Dataverse flies"):
+            process_dataverse_fly(
+                dv_fly,
+                args.datasets,
+                output_data,
+                experiment_type=args.experiment_type,
+                condition_field=condition_field,
+                force_cache_clear=args.force_cache_clear,
+            )
+
+        # Pool per-metric feathers (skip whatever the user excluded).
+        for metric in args.datasets:
+            if metric in args.skip_pooling:
+                logging.info(f"Skipping pooling for metric '{metric}'")
+                continue
+            metric_dir = output_data / metric
+            files = [f for f in metric_dir.glob("*.feather") if not f.name.startswith("pooled_")]
+            if files:
+                create_pooled_dataset(metric_dir, metric, files, force=False)
+
+        end_time = time.time()
+        runtime = end_time - start_time
+        logging.info(f"Dataverse build completed in {runtime:.2f} seconds")
+        exit(0)
+
     # Determine output directories (skip if in complement mode since we already have them)
     if not skip_folder_discovery:
         if CONFIG["PATHS"]["output_summary_dir"]:
@@ -1288,10 +1568,16 @@ if __name__ == "__main__":
                 experiment_filter = CONFIG["PROCESSING"]["experiment_filter"]
                 CONFIG["PATHS"]["output_summary_dir"] = f"{today_date}_{dataset_type}_{experiment_filter}"
             else:
-                raise ValueError(
-                    "Either --yaml must be provided or an experiment_filter must be set in the configuration. "
-                    "Processing the entire dataset is not allowed."
+                from ballpushing_utils.paths import missing_data_message
+
+                logging.error(
+                    "Pass one of --yaml (server / on-rig layout), "
+                    "--dataverse-root (Dataverse archive layout), or set "
+                    "experiment_filter in CONFIG. Processing the entire "
+                    "data root in one shot is not allowed.\n\n"
+                    + missing_data_message(context="data root")
                 )
+                sys.exit(2)
 
         # Automatically set output_data_dir based on output_summary_dir
         CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
@@ -1347,8 +1633,26 @@ if __name__ == "__main__":
         if CONFIG["PATHS"]["excluded_folders"]:
             Exp_folders = [folder for folder in Exp_folders if folder.name not in CONFIG["PATHS"]["excluded_folders"]]
 
+        # Filter out missing dirs upfront so the breadcrumb fires once
+        # if everything is gone, rather than logging per-fly later.
+        if Exp_folders:
+            missing_exp = [f for f in Exp_folders if not f.exists()]
+            if missing_exp:
+                logging.warning(
+                    f"{len(missing_exp)} experiment folder(s) from "
+                    f"{args.yaml or 'CONFIG'} not found on disk; will be skipped."
+                )
+                Exp_folders = [f for f in Exp_folders if f.exists()]
+
         if not Exp_folders:
-            raise ValueError("No experiment folders found to process. Check your YAML file or experiment filter.")
+            from ballpushing_utils.paths import missing_data_message
+
+            logging.error(
+                "No experiment folders found to process. The YAML / "
+                "experiment_filter resolved zero existing directories.\n\n"
+                + missing_data_message(context="experiment data")
+            )
+            sys.exit(2)
 
         logging.info(f"Experiment folders to analyze: {[f.name for f in Exp_folders]}")
         processing_items = Exp_folders
@@ -1367,7 +1671,14 @@ if __name__ == "__main__":
             fly_dirs = [d for d in fly_dirs if d.exists()]
 
         if not fly_dirs:
-            raise ValueError("No valid fly directories found in YAML file.")
+            from ballpushing_utils.paths import missing_data_message
+
+            logging.error(
+                f"No valid fly directories found in {args.yaml}. None of "
+                f"the entries resolved on disk.\n\n"
+                + missing_data_message(context="fly tracks")
+            )
+            sys.exit(2)
 
         logging.info(f"Fly directories to analyze: {len(fly_dirs)} directories")
         logging.info(f"Sample directories: {[str(d) for d in fly_dirs[:5]]}")

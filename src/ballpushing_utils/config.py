@@ -175,6 +175,14 @@ class Config:
     padding: int = 20
     y_crop: tuple = (74, 0)
 
+    # Default original video frame size (W, H). Used by FlyMetadata when no
+    # ``.mp4`` is available next to the SLEAP tracks (e.g. when re-running
+    # the pipeline from the Dataverse archive, which ships only HDF5
+    # files). SkeletonMetrics reads this for ball-coordinate normalisation;
+    # override per-fly via ``custom_config={"default_video_size": (W, H)}``
+    # if the rig used a non-standard sensor.
+    default_video_size: tuple = (1280, 1024)
+
     # # Skeleton metrics
 
     contact_nodes = ["Rfront", "Lfront", "Head"]

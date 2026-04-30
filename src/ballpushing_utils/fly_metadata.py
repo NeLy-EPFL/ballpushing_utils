@@ -24,7 +24,7 @@ class FlyMetadata:
         if fly.config.experiment_type == "F1":
             self.compute_F1_condition()
 
-        self.nickname, self.brain_region = self.load_brain_regions(brain_regions_path)
+        self.nickname, self.brain_region = self.load_brain_regions(brain_regions_path())
 
         self.video = self.load_video()
         self.fps = self.experiment.fps
@@ -51,6 +51,14 @@ class FlyMetadata:
         self.brain_region = "Control"
         self.simplified_nickname = "PR"
         self.split = "m"
+
+        # The Region_map CSV is shipped with the Screen Dataverse archive
+        # but optional otherwise (the figure scripts that need it resolve
+        # it independently). Skip gracefully if absent so non-Screen
+        # paradigms — and Dataverse users who didn't download the Screen
+        # archive — don't fail every Fly() load.
+        if brain_regions_path is None or not Path(brain_regions_path).exists():
+            return self.nickname, self.brain_region
 
         # Load brain regions lookup table
         brain_regions = pd.read_csv(brain_regions_path, index_col=0)
@@ -91,7 +99,15 @@ class FlyMetadata:
         return self.nickname, self.brain_region
 
     def load_video(self):
-        """Load the video file for the fly."""
+        """Locate the recording video for this fly (``.mp4``).
+
+        Returns ``None`` when no video is present in the corridor folder.
+        The Dataverse archive ships only HDF5 tracks (see
+        :mod:`ballpushing_utils.dataverse`); skeleton/ball metric
+        computation does not need the video, only video-export helpers
+        (``Fly.generate_clips``, ``Fly.generate_preview``) do, and those
+        check ``self.video`` before using it.
+        """
         try:
             return list(self.directory.glob(f"{self.corridor}.mp4"))[0]
         except IndexError:
@@ -102,10 +118,23 @@ class FlyMetadata:
                     # Look for a video file in the corridor directory
                     return list(self.directory.glob("*.mp4"))[0]
                 except IndexError:
-                    raise FileNotFoundError(f"No video found for {self.name}.")
+                    return None
 
     def get_video_size(self):
-        """Get the size of the video."""
+        """Read the original recording dimensions for ball-coord normalisation.
+
+        When the video is absent (Dataverse layout) we fall back to
+        ``self.fly.config.default_video_size`` so ``SkeletonMetrics`` can
+        still resize ball coordinates into template space. The default
+        targets the standard MultiMazeRecorder rig output; override
+        ``Config.default_video_size`` if your recordings use a different
+        sensor.
+        """
+
+        if self.video is None:
+            from .dataverse import DEFAULT_VIDEO_SIZE
+
+            return tuple(getattr(self.fly.config, "default_video_size", DEFAULT_VIDEO_SIZE))
 
         # Load the video
         video = cv2.VideoCapture(str(self.video))

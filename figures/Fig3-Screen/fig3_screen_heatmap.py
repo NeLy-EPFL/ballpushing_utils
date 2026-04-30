@@ -47,14 +47,12 @@ Config = _importlib_util.module_from_spec(_spec)
 _spec.loader.exec_module(Config)
 
 # ── PATHS ─────────────────────────────────────────────────────────────────────
-DATA_PATH = dataset(
-    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
-)
-METRICS_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
-)
-REGION_MAP_PATH = dataset("Region_map_250908.csv")
+DATA_PATH = dataset("Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather")
+METRICS_PATH = Path(__file__).resolve().parents[2] / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
+# Region map ships with the package (src/ballpushing_utils/assets/) —
+from ballpushing_utils.utilities import brain_regions_path
+
+REGION_MAP_PATH = brain_regions_path()
 OUTPUT_DIR = figure_output_dir("Figure3", __file__, create=False)
 
 # ── TILE DIMENSIONS ───────────────────────────────────────────────────────────

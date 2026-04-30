@@ -285,7 +285,9 @@ def load_metrics_list():
 
 
 def load_nickname_mapping():
-    region_map_path = dataset("Region_map_250908.csv")
+    # Bundled with the package (src/ballpushing_utils/assets/).
+    from ballpushing_utils.utilities import brain_regions_path
+    region_map_path = brain_regions_path()
     try:
         region_map = pd.read_csv(region_map_path)
         nickname_mapping = dict(zip(region_map["Nickname"], region_map["Simplified Nickname"]))

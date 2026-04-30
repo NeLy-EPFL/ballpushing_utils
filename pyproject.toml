@@ -116,7 +116,17 @@ where = ["src"]
 include = ["ballpushing_utils*"]
 
 [tool.setuptools.package-data]
-ballpushing_utils = ["py.typed", "*.md"]
+ballpushing_utils = [
+    "py.typed",
+    "*.md",
+    # Bundle small data assets so the figure scripts and the
+    # FlyMetadata brain-region lookup work out-of-the-box, without
+    # requiring users to download anything from the lab share or
+    # Dataverse. Keep this list narrow — large assets belong on
+    # Dataverse, not in the wheel.
+    "assets/*.csv",
+    "assets/*.png",
+]
 
 [tool.black]
 line-length = 120

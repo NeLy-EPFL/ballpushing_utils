@@ -108,13 +108,121 @@ class SkeletonMetrics:
 
         return x, y
 
+    def _estimate_raw_to_template_transform(self):
+        """Fit a per-fly raw→template affine transform from shared thorax tracking.
+
+        Background
+        ----------
+        The fly tracker (``*_fly.h5``) and the skeleton tracker
+        (``*_full_body.h5``) label the thorax in two different
+        coordinate spaces:
+
+        - The fly tracker runs on the **raw per-corridor video** —
+          those coords share their frame with ``*_ball.h5``.
+        - The skeleton tracker runs on the **preprocessed video**
+          (resize → arena mask → crop → pad). That is the same space
+          ``SkeletonMetrics`` uses for contact detection.
+
+        Since the same physical thorax appears in both files at every
+        frame, we can fit
+
+        .. math::
+
+            x_\\text{template} = s_x \\, x_\\text{raw} + o_x
+
+            y_\\text{template} = s_y \\, y_\\text{raw} + o_y
+
+        from matched non-NaN frames and apply the same transform to
+        the ball centroid. This bypasses the original
+        ``original_size``-based geometry — no need to know the per-
+        corridor video dimensions, padding, or crop, because the fit
+        absorbs all of them empirically.
+
+        Returns
+        -------
+        tuple | None
+            ``(sx, ox, sy, oy, n_used)`` on success, ``None`` if there
+            aren't enough overlapping non-NaN frames or the skeleton
+            track is missing. Cached on ``self`` so the fit runs once
+            per fly. Callers should fall back to the geometry-based
+            math (``FlyMetadata.original_size``) when ``None``.
+        """
+        if hasattr(self, "_raw_to_template_cache"):
+            return self._raw_to_template_cache
+
+        skeleton = getattr(self.fly.tracking_data, "skeletontrack", None)
+        raw_fly = getattr(self.fly.tracking_data, "raw_flytrack", None)
+        if skeleton is None or raw_fly is None or not skeleton.objects or not raw_fly.objects:
+            self._raw_to_template_cache = None
+            return None
+
+        fly_df = raw_fly.objects[0].dataset
+        skel_df = skeleton.objects[0].dataset
+
+        # The fly tracker uses lowercase ``thorax``; the skeleton uses
+        # capitalised ``Thorax`` (different SLEAP models, same node).
+        if "x_thorax" not in fly_df.columns or "x_Thorax" not in skel_df.columns:
+            self._raw_to_template_cache = None
+            return None
+
+        raw_x = fly_df["x_thorax"].to_numpy(dtype=float)
+        raw_y = fly_df["y_thorax"].to_numpy(dtype=float)
+        tmpl_x = skel_df["x_Thorax"].to_numpy(dtype=float)
+        tmpl_y = skel_df["y_Thorax"].to_numpy(dtype=float)
+
+        # Align by frame index (intersection — track lengths can differ
+        # when one of the SLEAP models was applied to a slightly
+        # shorter video, e.g. after manual trimming).
+        n = min(len(raw_x), len(tmpl_x))
+        raw_x, raw_y = raw_x[:n], raw_y[:n]
+        tmpl_x, tmpl_y = tmpl_x[:n], tmpl_y[:n]
+
+        valid = ~(np.isnan(raw_x) | np.isnan(raw_y) | np.isnan(tmpl_x) | np.isnan(tmpl_y))
+        n_valid = int(valid.sum())
+        if n_valid < 50:
+            # Not enough matched frames to trust the fit. 50 is generous
+            # — even 10 would do for a well-conditioned linear fit, but
+            # we want to leave headroom for outliers / SLEAP misses.
+            self._raw_to_template_cache = None
+            return None
+
+        sx, ox = np.polyfit(raw_x[valid], tmpl_x[valid], 1)
+        sy, oy = np.polyfit(raw_y[valid], tmpl_y[valid], 1)
+
+        if self.fly.config.debugging:
+            print(
+                f"raw→template thorax fit ({n_valid} frames): "
+                f"x = {sx:.4f}·raw + {ox:.2f},  y = {sy:.4f}·raw + {oy:.2f}"
+            )
+
+        self._raw_to_template_cache = (float(sx), float(ox), float(sy), float(oy), n_valid)
+        return self._raw_to_template_cache
+
     def preprocess_ball(self):
         """
         Transform raw ball coordinates to match the skeleton data coordinate space.
 
-        This method specifically uses raw (non-smoothed) ball coordinates to ensure
-        accurate spatial alignment with skeleton tracking data. The coordinates are
-        resized, cropped, and padded to match the preprocessing applied to skeleton data.
+        Primary path: fit a per-fly raw→template affine transform from
+        matched thorax positions in the fly tracker (raw video coords)
+        and the skeleton tracker (preprocessed-video coords) — see
+        :meth:`_estimate_raw_to_template_transform`. This bypasses the
+        need for ``FlyMetadata.original_size`` entirely on TNT /
+        MagnetBlock / Learning paradigms (F1 doesn't have skeleton
+        tracks and so this method isn't called there).
+
+        Fallback path: when the fit can't be computed (no skeleton, too
+        few overlapping non-NaN frames, missing thorax keypoint) we
+        revert to the geometry-based math driven by
+        ``original_size`` / ``template_width`` / ``template_height`` /
+        ``padding`` / ``y_crop`` — this is the original implementation
+        and remains the source of truth when a real video is available
+        (lab share users with intact ``.mp4``).
+
+        Either way the result lands in
+        ``ball_data["x_centre_preprocessed"]`` and
+        ``ball_data["y_centre_preprocessed"]`` and the
+        ``"centre_preprocessed"`` node is registered for contact
+        detection.
         """
 
         ball_data = self.ball.objects[0].dataset
@@ -124,54 +232,54 @@ class SkeletonMetrics:
         if "x_centre_raw" in ball_data.columns and "y_centre_raw" in ball_data.columns:
             if self.fly.config.debugging:
                 print(f"Using raw ball coordinates: x_centre_raw, y_centre_raw")
-            ball_coords = [(x, y) for x, y in zip(ball_data["x_centre_raw"], ball_data["y_centre_raw"])]
+            ball_x_raw = ball_data["x_centre_raw"].to_numpy(dtype=float)
+            ball_y_raw = ball_data["y_centre_raw"].to_numpy(dtype=float)
         elif "x_centre" in ball_data.columns and "y_centre" in ball_data.columns:
             if self.fly.config.debugging:
                 print(f"Using regular ball coordinates: x_centre, y_centre")
-            ball_coords = [(x, y) for x, y in zip(ball_data["x_centre"], ball_data["y_centre"])]
+            ball_x_raw = ball_data["x_centre"].to_numpy(dtype=float)
+            ball_y_raw = ball_data["y_centre"].to_numpy(dtype=float)
         else:
             available_cols = [col for col in ball_data.columns if "centre" in col.lower()]
             raise ValueError(f"No valid ball center coordinates found. Available center columns: {available_cols}")
 
-        # Apply resizing, cropping, and padding to the ball tracking data
-        ball_coords = [
-            self.resize_and_transform_coordinate(
-                x,
-                y,
-                self.fly.metadata.original_size[0],
-                self.fly.metadata.original_size[1],
-                self.fly.config.template_width,
-                self.fly.config.template_height,
-                self.fly.config.padding,
-                self.fly.config.y_crop[0],
-                self.fly.config.y_crop[1],
-            )
-            for x, y in ball_coords
-        ]
-
-        # Convert to numpy arrays and preserve NaN values for missing data points
-        # This maintains the same length as the original data
-        ball_coords_x = []
-        ball_coords_y = []
-        for x, y in ball_coords:
-            if x is not None and y is not None:
-                ball_coords_x.append(x)
-                ball_coords_y.append(y)
-            else:
-                ball_coords_x.append(np.nan)
-                ball_coords_y.append(np.nan)
-
-        ball_data["x_centre_preprocessed"] = ball_coords_x
-        ball_data["y_centre_preprocessed"] = ball_coords_y
+        fit = self._estimate_raw_to_template_transform()
+        if fit is not None:
+            sx, ox, sy, oy, _ = fit
+            ball_x_pre = sx * ball_x_raw + ox
+            ball_y_pre = sy * ball_y_raw + oy
+            ball_data["x_centre_preprocessed"] = ball_x_pre
+            ball_data["y_centre_preprocessed"] = ball_y_pre
+        else:
+            # Geometry-based fallback (legacy path — needs original_size).
+            ball_coords = [
+                self.resize_and_transform_coordinate(
+                    x,
+                    y,
+                    self.fly.metadata.original_size[0],
+                    self.fly.metadata.original_size[1],
+                    self.fly.config.template_width,
+                    self.fly.config.template_height,
+                    self.fly.config.padding,
+                    self.fly.config.y_crop[0],
+                    self.fly.config.y_crop[1],
+                )
+                for x, y in zip(ball_x_raw, ball_y_raw)
+            ]
+            ball_coords_x = []
+            ball_coords_y = []
+            for x, y in ball_coords:
+                if x is not None and y is not None:
+                    ball_coords_x.append(x)
+                    ball_coords_y.append(y)
+                else:
+                    ball_coords_x.append(np.nan)
+                    ball_coords_y.append(np.nan)
+            ball_data["x_centre_preprocessed"] = ball_coords_x
+            ball_data["y_centre_preprocessed"] = ball_coords_y
 
         # Add x_centre_preprocessed and y_centre_preprocessed in the node_names
-
         self.ball.node_names.extend(["centre_preprocessed"])
-
-        # print(self.ball.objects[0].dataset)
-        # print(self.ball.node_names)
-
-        self.ball
 
     def find_contact_events(self, threshold=None, gap_between_events=None, event_min_length=None):
         if threshold is None:

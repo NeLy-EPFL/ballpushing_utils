@@ -4,7 +4,58 @@ from pathlib import Path
 import pickle
 from scipy.signal import find_peaks, savgol_filter
 
-brain_regions_path = "/mnt/upramdya_data/MD/Region_map_250116.csv"
+#: Filename of the bundled brain-regions / split-registry CSV. The file
+#: lives at ``src/ballpushing_utils/assets/`` and ships with the wheel
+#: (see ``[tool.setuptools.package-data]`` in ``pyproject.toml``); it
+#: was small enough (~12 KB) to vendor instead of asking users to
+#: download it separately. Bumping this constant + replacing the file
+#: in ``assets/`` is enough to ship a new region map.
+DEFAULT_BRAIN_REGIONS_FILENAME = "Region_map_250908.csv"
+
+
+def brain_regions_path():
+    """Locate the bundled brain-regions / split-registry CSV.
+
+    Resolved via :mod:`importlib.resources` so the file is found
+    regardless of whether the package was installed editable, as a
+    wheel, or imported from a checkout. Used by
+    :class:`FlyMetadata.load_brain_regions` for genotype → nickname
+    / brain-region lookups, and by the screen heatmap + dendrogram
+    figures for the same registry under a different name (split
+    registry).
+
+    Returns
+    -------
+    pathlib.Path
+        Absolute path to the bundled CSV inside the installed
+        package. Always exists for any standard install — the
+        ``Path.exists()`` guard in
+        :class:`FlyMetadata.load_brain_regions` is now belt-and-braces.
+    """
+    from importlib.resources import files
+
+    # Chained ``.joinpath`` calls (one arg each) so the lookup works
+    # on the multiple ``Traversable`` backends across Python 3.10–3.12.
+    return Path(str(files("ballpushing_utils").joinpath("assets").joinpath(DEFAULT_BRAIN_REGIONS_FILENAME)))
+
+
+def f1_template_path():
+    """Locate the bundled F1 heatmap template image.
+
+    Used by :mod:`figures.Fig2-Affordance.fig2_f1_heatmaps_pretraining`
+    as the background image. Bundled in the wheel for the same reason
+    as :func:`brain_regions_path` — small (~17 KB) and indispensable
+    for that one panel.
+
+    Returns
+    -------
+    pathlib.Path
+        Absolute path to ``assets/F1_New_Template.png`` inside the
+        installed package.
+    """
+    from importlib.resources import files
+
+    return Path(str(files("ballpushing_utils").joinpath("assets").joinpath("F1_New_Template.png")))
 
 
 def save_object(obj, filename):
