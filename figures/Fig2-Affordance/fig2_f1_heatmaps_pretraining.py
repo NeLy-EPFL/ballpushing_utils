@@ -25,10 +25,10 @@ from ballpushing_utils.plotting import set_illustrator_style
 set_illustrator_style()
 
 # --- Paths ---
-TEMPLATE_PATH = dataset("F1_Tracks/F1_New_Template.png")
-DATASET_PATH = dataset(
-    "F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather"
-)
+from ballpushing_utils.utilities import f1_template_path
+
+TEMPLATE_PATH = f1_template_path()
+DATASET_PATH = dataset("F1_Tracks/Datasets/251121_17_summary_F1_New_Data/fly_positions/pooled_fly_positions.feather")
 VIDEOS_BASE = dataset("F1_Tracks/Videos/251008_F1_New_Videos_Checked")
 
 # --- Parameters ---

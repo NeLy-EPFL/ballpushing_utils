@@ -19,6 +19,17 @@ from .behavior_umap import BehaviorUMAP  # noqa: F401 (re-exported helper)
 from .compat import normalize_legacy_columns, read_feather
 from .config import Config
 from .dataset import Dataset
+from .dataverse import (
+    CONDITION_TRANSFORMERS,
+    DEFAULT_CONDITION_FIELD,
+    DEFAULT_VIDEO_SIZE,
+    DataverseFly,
+    default_condition_field,
+    expand_condition,
+    is_dataverse_layout,
+    iter_dataverse_flies,
+    synthesize_experiment_metadata,
+)
 from .experiment import Experiment
 from .f1_metrics import F1Metrics
 from .fly import Fly
@@ -26,14 +37,27 @@ from .fly_metadata import FlyMetadata
 from .fly_trackingdata import FlyTrackingData
 from .interactions_metrics import InteractionsMetrics
 from .learning_metrics import LearningMetrics
-from .paths import data_root, dataset, figure_output_dir, figures_root, load_dotenv
+from .paths import (
+    data_root,
+    dataset,
+    detect_layout,
+    figure_output_dir,
+    figures_root,
+    find_feather,
+    load_dotenv,
+    missing_data_message,
+)
 from .skeleton_metrics import SkeletonMetrics
 
 __all__ = [
     "BallPushingMetrics",
     "BehaviorUMAP",
+    "CONDITION_TRANSFORMERS",
     "Config",
+    "DEFAULT_CONDITION_FIELD",
+    "DEFAULT_VIDEO_SIZE",
     "Dataset",
+    "DataverseFly",
     "Experiment",
     "F1Metrics",
     "Fly",
@@ -45,9 +69,17 @@ __all__ = [
     "__version__",
     "data_root",
     "dataset",
+    "default_condition_field",
+    "detect_layout",
+    "expand_condition",
     "figure_output_dir",
     "figures_root",
+    "find_feather",
+    "is_dataverse_layout",
+    "iter_dataverse_flies",
     "load_dotenv",
+    "missing_data_message",
     "normalize_legacy_columns",
     "read_feather",
+    "synthesize_experiment_metadata",
 ]

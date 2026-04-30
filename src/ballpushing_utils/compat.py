@@ -108,9 +108,27 @@ def read_feather(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> pd.
     column names (either because the feather already had them or
     because they were aliased from the legacy ``velocity*`` columns).
 
-    Use in any script that loads a feather published before the
-    velocity → speed rename — typically anything pulled from the
-    Harvard Dataverse archive.
+    When ``path`` doesn't resolve directly, this falls back to
+    :func:`ballpushing_utils.paths.find_feather`, which searches
+    ``BALLPUSHING_DATA_ROOT`` and any directory in
+    ``BALLPUSHING_FEATHER_SEARCH`` for a matching basename. That makes
+    the figure scripts work for users who downloaded a single feather
+    from the Dataverse and dropped it anywhere on disk — they don't
+    need to recreate the on-server directory hierarchy. If the search
+    still fails (or is ambiguous), raises :class:`FileNotFoundError`
+    with the standard three-option breadcrumb from
+    :func:`ballpushing_utils.paths.missing_data_message`.
     """
-    df = pd.read_feather(path, *args, **kwargs)
+    from pathlib import Path
+
+    actual_path = Path(path)
+    if not actual_path.exists():
+        from .paths import find_feather, missing_data_message
+
+        resolved = find_feather(path)
+        if resolved is None:
+            raise FileNotFoundError(missing_data_message(path, context="feather"))
+        actual_path = resolved
+
+    df = pd.read_feather(actual_path, *args, **kwargs)
     return normalize_legacy_columns(df)

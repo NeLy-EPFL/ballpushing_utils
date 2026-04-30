@@ -36,6 +36,7 @@ class Fly:
         experiment=None,
         as_individual=False,
         custom_config=None,
+        dataverse_condition=None,
     ):
         """
         Initialize a Fly object.
@@ -43,6 +44,9 @@ class Fly:
         Args:
             directory (Path): The path to the fly directory.
             experiment (Experiment, optional): An optional Experiment object. If not provided, an Experiment object will be created based on the parent directory of the given directory.
+            as_individual (bool): If True, build the parent ``Experiment`` in metadata-only mode. Required for any path where ``directory.parent.parent`` is not a full experiment folder (e.g. the Dataverse layout).
+            custom_config: Override Fly's :class:`Config` (see :meth:`_apply_custom_config`).
+            dataverse_condition (dict, optional): Synthetic per-arena metadata for the Dataverse layout (see :mod:`ballpushing_utils.dataverse`). Schema: ``{"field": <metadata_column>, "value": <condition_folder_name>, "extra": {field: value, ...}}``. When supplied, the parent ``Experiment`` is built without reading ``Metadata.json`` — the metadata dict is synthesised from these fields. Implies ``as_individual=True``.
 
         Attributes:
             directory (Path): The path to the fly directory.
@@ -64,6 +68,36 @@ class Fly:
 
         if experiment is not None:
             self.experiment = experiment
+        elif dataverse_condition is not None:
+            # Dataverse layout: <…>/<condition>/<date>/arena/corridor. The
+            # date folder is the synthetic experiment, but it doesn't have
+            # a Metadata.json — synthesise the per-arena metadata here.
+            #
+            # Two acceptable shapes for ``dataverse_condition``:
+            #   {"fields": {col: value, ...}}                     (preferred — fully expanded)
+            #   {"experiment_type": ..., "value": ..., "field": ...?}  (let the package expand it)
+            from ballpushing_utils.dataverse import (
+                expand_condition,
+                synthesize_experiment_metadata,
+            )
+
+            if "fields" in dataverse_condition:
+                fields = dataverse_condition["fields"]
+            else:
+                fields = expand_condition(
+                    dataverse_condition["experiment_type"],
+                    dataverse_condition["value"],
+                    condition_field=dataverse_condition.get("field"),
+                )
+            synthetic_metadata = synthesize_experiment_metadata(
+                arena=self.directory.parent.name,
+                fields=fields,
+            )
+            self.experiment = Experiment(
+                self.directory.parent.parent,
+                metadata_only=True,
+                metadata=synthetic_metadata,
+            )
         elif as_individual:
             self.experiment = Experiment(self.directory.parent.parent, metadata_only=True)
         else:
