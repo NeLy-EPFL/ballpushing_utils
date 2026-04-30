@@ -35,17 +35,16 @@ def run_energy_tests(
 
 
 def plot_umaps(
+    brain_region: str,
     df_events: pl.DataFrame,
     df_genotypes: pl.DataFrame,
     df_test: pl.DataFrame,
-    control_genotypes: pl.DataFrame,
-    split_type: str,
     embedding: np.ndarray,
     bound: float,
     im_regions: np.ndarray,
     xlim,
     ylim,
-    bar_length: float = 3,
+    rename_dict: dict,
     n_cols: int = 10,
     cmap: str = "gray_r",
     panel_width=60.0,
@@ -57,17 +56,15 @@ def plot_umaps(
     n_clusters = int(im_regions.max() + 1)
 
     panel_height = (np.abs(np.diff(ylim) / np.diff(xlim)) * panel_width).item()
-    df_split = (
-        df_genotypes.filter(split=split_type)
-        .join(df_test, on="genotype", how="left")
-        .sort(["p", "E"], descending=[True, False])
-    )
-    n_rows = int(np.ceil(len(df_split) / n_cols))
+    df_region = df_genotypes.filter(brain_region=brain_region).join(df_test, on="genotype", how="left")
+    if brain_region != "Control":
+        df_region = df_region.filter(pl.col("p").lt(0.05)).sort(["p", "E"], descending=[False, True])
+    n_rows = int(np.ceil(len(df_region) / n_cols))
     if n_rows == 1:
-        n_cols = len(df_split)
+        n_cols = len(df_region)
     g = Grid((panel_width, panel_height), (n_rows, n_cols), space=(6, 24), facecolor="w")
     g.set_visible_sides("")
-    for i, row in enumerate(df_split.iter_rows(named=True)):
+    for i, row in enumerate(df_region.iter_rows(named=True)):
         ax = g.axs.ravel()[i]
         im_kde = get_kde(embedding[df_events["genotype"] == row["genotype"]], bound=bound, bw=0.4)[0]
         im_kde /= im_kde.mean()
@@ -94,31 +91,23 @@ def plot_umaps(
 
         text = "\n".join(
             (
-                row["genotype"],
-                "(control)"
-                if row["genotype"] == control_genotypes[split_type]
-                else f"p={row['p']:.4f}, E={row['E']:.3f}",
+                rename_dict.get(row["genotype"], row["genotype"]),
+                "" if brain_region == "Control" else f"p={row['p']:.4f}, E={row['E']:.3f}",
                 f"{row['n_flies']} flies, {row['n_events_mean']}±{row['n_events_std']} events",
             )
         )
+        ax.add_text(
+            0.5,
+            1,
+            text,
+            ha="c",
+            va="b",
+            transform="a",
+            c=BRAIN_REGION_COLORS[row["brain_region"]],
+            size=6,
+            pad=(0, 0),
+        )
 
-        color = BRAIN_REGION_COLORS[row["brain_region"]]
-        ax.add_text(0.5, 1, text, ha="c", va="b", transform="a", c=color, size=6)
-
-    ax = g[0, 0]
-    ax.add_scale_bars(
-        xlim[1] + 0.4,
-        ylim[0] + 0.5,
-        -bar_length if xlim[1] > xlim[0] else bar_length,
-        bar_length if ylim[1] > ylim[0] else -bar_length,
-        xlabel="UMAP 1",
-        ylabel="UMAP 2",
-        fmt="",
-        pad=(2, -4.5),
-        size=3.5,
-    )
-
-    g[0, 0].set_zorder(100)
     g.set_visible_sides("")
     return g
 
@@ -170,17 +159,34 @@ if __name__ == "__main__":
     else:
         df_test = run_energy_tests(umap_data["embedding"], df_events, df_genotypes, control_genotypes)
         df_test.write_parquet(cache_dir / "energy_test.parquet")
-
-    out_dir = figure_output_dir("SuppInfo", __file__)
-
-    for split_type, save_name in {"m": "mutant", "y": "split-gal4", "n": "gal4"}.items():
+    df_genotypes = df_genotypes.filter(~pl.col("genotype").is_in(("TNT×Canton-S", "TNT×PR")))
+    rename_dict = {
+        "Empty-Gal4": "empty-Gal4",
+        "Empty-Split-Gal4": "empty-split-Gal4",
+        "DDC-2": "DDC",
+    }
+    brain_regions = [
+        "Control",
+        "Neuropeptide",
+        "Vision",
+        "CX",
+        "Olfaction",
+        "MB extrinsic neurons",
+        "MB",
+        "LH",
+    ]
+    output_dir = figure_output_dir("EDFigure5", __file__)
+    for brain_region in brain_regions:
         g = plot_umaps(
-            df_events,
-            df_genotypes,
-            df_test,
-            control_genotypes,
-            split_type,
-            **umap_data,
+            brain_region=brain_region,
+            df_events=df_events,
+            df_genotypes=df_genotypes,
+            df_test=df_test,
+            embedding=umap_data["embedding"],
+            bound=umap_data["bound"],
+            im_regions=umap_data["im_regions"],
+            xlim=umap_data["xlim"],
+            ylim=umap_data["ylim"],
+            rename_dict=rename_dict,
         )
-        g.savefig(out_dir / f"genotype_{save_name}.pdf")
-        plt.close(g.fig)
+        g.savefig(output_dir / f"{brain_region}.pdf")
