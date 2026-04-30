@@ -81,6 +81,8 @@ dependencies = [
     "video-reader-rs>=0.4.2",
     "polars>=1.40.1",
     "flyplotlib>=0.5.2",
+    "antspyx>=0.6.3",
+    "tifffile>=2025.5.10",
 ]
 
 [project.optional-dependencies]
