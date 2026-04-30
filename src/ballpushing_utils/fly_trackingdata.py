@@ -225,9 +225,10 @@ class FlyTrackingData:
             expected_corridor_num = None
 
             # Handle arena parsing (should be consistent across experiment types)
-            if expected_arena and isinstance(expected_arena, str) and expected_arena.startswith("arena"):
+            # Use lower() to handle both on-server (arena4) and Dataverse (Arena4) naming.
+            if expected_arena and isinstance(expected_arena, str) and expected_arena.lower().startswith("arena"):
                 try:
-                    expected_arena_num = int(expected_arena.replace("arena", ""))
+                    expected_arena_num = int(expected_arena.lower().replace("arena", ""))
                 except (ValueError, IndexError):
                     expected_arena_num = None
 
@@ -241,10 +242,11 @@ class FlyTrackingData:
                 if is_f1_experiment and expected_corridor.lower() in ["left", "right"]:
                     # For F1 experiments, map Left/Right to corridor numbers for validation
                     expected_corridor_num = 1 if expected_corridor.lower() == "left" else 2
-                elif expected_corridor.startswith("corridor"):
+                elif expected_corridor.lower().startswith("corridor"):
                     # For regular experiments with corridor1, corridor2, etc.
+                    # Use lower() to handle both on-server (corridor1) and Dataverse (Corridor1) naming.
                     try:
-                        expected_corridor_num = int(expected_corridor.replace("corridor", ""))
+                        expected_corridor_num = int(expected_corridor.lower().replace("corridor", ""))
                     except (ValueError, IndexError):
                         expected_corridor_num = None
                 else:

@@ -48,6 +48,12 @@ For each fly directory provided:
    - **Contact-count delta**: number of contact events found by each
      method. Big mismatches indicate one method is dropping or
      fragmenting contacts the other isn't.
+   - **Summary metric delta** (with ``--compare-metrics``): compute all
+     skeleton-dependent summary metrics (``flailing``,
+     ``head_pushing_ratio``, ``fraction_not_facing_ball``) under each
+     method using ``BallPushingMetrics``, then report absolute
+     differences. This is the most direct test of whether the
+     coordinate shift matters for the numbers that go into the paper.
 
 Usage
 -----
@@ -60,9 +66,12 @@ Usage
     # Or via a YAML of flies (same format as dataset_builder --yaml):
     python tools/compare_ball_preprocess.py --yaml flies.yaml --max-flies 10
 
+    # Also compare summary metrics (slower — runs BallPushingMetrics twice per fly):
+    python tools/compare_ball_preprocess.py --yaml flies.yaml --compare-metrics
+
     # Append a CSV summary for later inspection:
     python tools/compare_ball_preprocess.py --yaml flies.yaml \\
-        --out compare_report.csv
+        --compare-metrics --out compare_report.csv
 
 Each fly must have its three SLEAP HDF5 tracks (ball, fly, full_body)
 **and** a ``.mp4`` next to them — the legacy method needs the video to
@@ -70,6 +79,7 @@ read ``original_size``. Use this for validation against the lab share;
 re-running on a Dataverse-only download would force-skip every fly
 through the legacy fallback and defeat the comparison.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -82,8 +92,19 @@ import numpy as np
 import pandas as pd
 import yaml
 
+import ballpushing_utils  # noqa: F401 — ensures env is configured before sub-imports
 from ballpushing_utils import Fly
 from ballpushing_utils.skeleton_metrics import SkeletonMetrics
+
+# Skeleton-dependent summary metrics — the only ones whose values can
+# differ between the affine and legacy preprocessing paths.
+SKELETON_SUMMARY_METRICS = [
+    "flailing",
+    "head_pushing_ratio",
+    "fraction_not_facing_ball",
+    "median_head_ball_distance",
+    "mean_head_ball_distance",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +172,41 @@ def _percentile(values: np.ndarray, q: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Metric-level comparison helpers
+# ---------------------------------------------------------------------------
+
+
+def _compute_summary_metrics(fly: Fly, skeleton_metrics_obj: SkeletonMetrics) -> dict:
+    """Compute skeleton-dependent summary metrics for *fly*, injecting a
+    pre-built *skeleton_metrics_obj* so the caller controls which
+    preprocessing path was used.
+
+    We inject by patching ``fly.ball_pushing_metrics._skeleton_metrics``
+    before calling ``compute_metrics``.  This avoids re-running
+    ``SkeletonMetrics.__init__`` (which would re-run the affine fit) and
+    lets us force either the affine or legacy object.
+    """
+    from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
+
+    bpm = BallPushingMetrics(fly.tracking_data)
+    # Inject the pre-built skeleton metrics so _get_skeleton_metrics()
+    # returns ours without creating a new one.
+    bpm._skeleton_metrics = skeleton_metrics_obj
+
+    bpm.compute_metrics()
+    # bpm.metrics is a dict of {key: metrics_dict}; pick the first entry
+    if not bpm.metrics:
+        return {}
+    row = next(iter(bpm.metrics.values()))
+    return {k: row.get(k, np.nan) for k in SKELETON_SUMMARY_METRICS}
+
+
+# ---------------------------------------------------------------------------
 # Per-fly comparison
 # ---------------------------------------------------------------------------
 
 
-def compare_one_fly(fly_dir: Path) -> dict:
+def compare_one_fly(fly_dir: Path, compare_metrics: bool = False) -> dict:
     """Run both preprocessing methods on ``fly_dir`` and return a row dict."""
     # Fresh Fly for the affine-fit (new) path.
     fly_new = Fly(fly_dir, as_individual=True)
@@ -174,10 +225,14 @@ def compare_one_fly(fly_dir: Path) -> dict:
 
     # Per-frame pixel drift between the two preprocessed ball trajectories.
     n = min(len(ball_new), len(ball_legacy))
-    dx = (ball_new["x_centre_preprocessed"].to_numpy(dtype=float)[:n]
-          - ball_legacy["x_centre_preprocessed"].to_numpy(dtype=float)[:n])
-    dy = (ball_new["y_centre_preprocessed"].to_numpy(dtype=float)[:n]
-          - ball_legacy["y_centre_preprocessed"].to_numpy(dtype=float)[:n])
+    dx = (
+        ball_new["x_centre_preprocessed"].to_numpy(dtype=float)[:n]
+        - ball_legacy["x_centre_preprocessed"].to_numpy(dtype=float)[:n]
+    )
+    dy = (
+        ball_new["y_centre_preprocessed"].to_numpy(dtype=float)[:n]
+        - ball_legacy["y_centre_preprocessed"].to_numpy(dtype=float)[:n]
+    )
     pix_dist = np.sqrt(dx * dx + dy * dy)
     pix_dist = pix_dist[~np.isnan(pix_dist)]
 
@@ -193,7 +248,7 @@ def compare_one_fly(fly_dir: Path) -> dict:
     fit = sm_new._raw_to_template_cache
     sx, ox, sy, oy = (fit[0], fit[1], fit[2], fit[3]) if fit else (np.nan,) * 4
 
-    return {
+    row: dict = {
         "fly": fly_new.metadata.name,
         "n_frames": n,
         "n_contacts_new": len(sm_new.contacts or []),
@@ -209,6 +264,22 @@ def compare_one_fly(fly_dir: Path) -> dict:
         "fit_sy": round(sy, 4),
         "fit_oy": round(oy, 2),
     }
+
+    if compare_metrics:
+        metrics_new = _compute_summary_metrics(fly_new, sm_new)
+        metrics_legacy = _compute_summary_metrics(fly_legacy, sm_legacy)
+        for m in SKELETON_SUMMARY_METRICS:
+            v_new = metrics_new.get(m, np.nan)
+            v_leg = metrics_legacy.get(m, np.nan)
+            row[f"{m}_new"] = round(float(v_new), 6) if not (isinstance(v_new, float) and np.isnan(v_new)) else np.nan
+            row[f"{m}_legacy"] = (
+                round(float(v_leg), 6) if not (isinstance(v_leg, float) and np.isnan(v_leg)) else np.nan
+            )
+            row[f"{m}_delta"] = (
+                round(float(v_new) - float(v_leg), 6) if not np.isnan(v_new) and not np.isnan(v_leg) else np.nan
+            )
+
+    return row
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +305,17 @@ def main(argv=None) -> int:
         help="Cap the comparison at the first N flies (default: 10).",
     )
     p.add_argument(
+        "--compare-metrics",
+        action="store_true",
+        default=False,
+        help=(
+            "Also compute skeleton-dependent summary metrics (flailing, "
+            "head_pushing_ratio, fraction_not_facing_ball, etc.) under "
+            "both preprocessing paths and report absolute deltas. "
+            "Slower — runs BallPushingMetrics twice per fly."
+        ),
+    )
+    p.add_argument(
         "--out",
         type=Path,
         default=None,
@@ -246,13 +328,13 @@ def main(argv=None) -> int:
         print("No fly directories provided. Pass --yaml or positional dirs.", file=sys.stderr)
         return 1
     paths = paths[: args.max_flies]
-    print(f"Comparing {len(paths)} flies\n")
+    print(f"Comparing {len(paths)} flies (--compare-metrics={'on' if args.compare_metrics else 'off'})\n")
 
     rows = []
     for path in paths:
         print(f"--- {path}")
         try:
-            row = compare_one_fly(path)
+            row = compare_one_fly(path, compare_metrics=args.compare_metrics)
         except Exception:
             print(f"  ERROR: {traceback.format_exc()}")
             continue
@@ -273,6 +355,19 @@ def main(argv=None) -> int:
             f"  fit: x = {row['fit_sx']:.4f}·raw + {row['fit_ox']:.2f},"
             f" y = {row['fit_sy']:.4f}·raw + {row['fit_oy']:.2f}"
         )
+        if args.compare_metrics:
+            for m in SKELETON_SUMMARY_METRICS:
+                v_new = row.get(f"{m}_new", np.nan)
+                v_leg = row.get(f"{m}_legacy", np.nan)
+                delta = row.get(f"{m}_delta", np.nan)
+                if (
+                    not np.isnan(float(delta))
+                    if delta is not None and not (isinstance(delta, float) and np.isnan(delta))
+                    else False
+                ):
+                    print(f"  {m}: new={v_new:.4f}  legacy={v_leg:.4f}  delta={delta:+.4f}")
+                else:
+                    print(f"  {m}: new={v_new}  legacy={v_leg}  delta=nan")
 
     df = pd.DataFrame([r for r in rows if "error" not in r])
     if df.empty:
@@ -280,7 +375,7 @@ def main(argv=None) -> int:
         return 1
 
     print()
-    print(df.to_string(index=False))
+    print(df[[c for c in df.columns if "_new" not in c or "n_contacts" in c]].to_string(index=False))
     print()
     print("Aggregate (across flies):")
     print(f"  median contact IoU:        {df['contact_iou'].median():.4f}")
@@ -288,6 +383,19 @@ def main(argv=None) -> int:
     print(f"  mean ball pixel drift:     {df['ball_pix_diff_mean'].mean():.3f}")
     print(f"  worst-case max drift:      {df['ball_pix_diff_max'].max():.3f}")
     print(f"  contacts new vs legacy:    {df['n_contacts_new'].sum()} vs {df['n_contacts_legacy'].sum()}")
+
+    if args.compare_metrics:
+        print("\nSkeleton metric deltas (affine − legacy) across flies:")
+        for m in SKELETON_SUMMARY_METRICS:
+            col = f"{m}_delta"
+            if col in df.columns:
+                vals = df[col].dropna()
+                if len(vals):
+                    print(
+                        f"  {m}: mean delta={vals.mean():+.4f}  "
+                        f"max |delta|={vals.abs().max():.4f}  "
+                        f"(n={len(vals)})"
+                    )
 
     # Quick-pass summary the user can eyeball: contact IoU >= 0.95
     # everywhere is a strong signal that the affine fit is faithful.
@@ -297,8 +405,11 @@ def main(argv=None) -> int:
             f"\n⚠ {len(bad)}/{len(df)} flies have contact IoU < 0.95 — "
             "the affine fit may be missing a non-uniform scaling component."
         )
-        print(bad[["fly", "contact_iou", "n_contacts_new", "n_contacts_legacy",
-                   "ball_pix_diff_mean", "ball_pix_diff_max"]].to_string(index=False))
+        print(
+            bad[
+                ["fly", "contact_iou", "n_contacts_new", "n_contacts_legacy", "ball_pix_diff_mean", "ball_pix_diff_max"]
+            ].to_string(index=False)
+        )
     else:
         print(f"\n✓ All {len(df)} flies have contact IoU ≥ 0.95.")
 

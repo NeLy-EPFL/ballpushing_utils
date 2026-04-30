@@ -125,6 +125,43 @@ EXPERIMENT_TYPE_FROM_PATH = {
     "MultiMazeRecorder": "TNT",  # default catch-all rig output
 }
 
+# Canonical dataset output directory for each experiment type.
+# Used when CONFIG["PATHS"]["dataset_dir"] is still set to the F1 default
+# (i.e. the user hasn't overridden it) so TNT/MagnetBlock/Learning runs
+# don't end up inside F1_Tracks/Datasets.
+DATASET_DIR_FROM_TYPE = {
+    "F1": Path("/mnt/upramdya_data/MD/F1_Tracks/Datasets"),
+    "MagnetBlock": Path("/mnt/upramdya_data/MD/MagnetBlock/Datasets"),
+    "TNT": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Datasets"),
+    "Learning": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Datasets"),
+    "TNT_DDC": Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Datasets"),
+}
+
+# Fallback output root: repo_root/outputs/ — always present, gitignored.
+# Used when neither --output-dir is given nor the NAS is reachable.
+_REPO_OUTPUTS_DIR = Path(__file__).parent.parent / "outputs"
+
+
+def _resolve_dataset_dir(experiment_type: str | None, cli_output_dir: str | None) -> Path:
+    """Return the base directory where output feathers should be written.
+
+    Priority:
+    1. ``--output-dir`` (explicit CLI override)
+    2. ``DATASET_DIR_FROM_TYPE`` — only if the NAS parent is mounted
+    3. ``<repo_root>/outputs/`` — always available, gitignored fallback
+    """
+    if cli_output_dir:
+        return Path(cli_output_dir).expanduser()
+    canonical = DATASET_DIR_FROM_TYPE.get(experiment_type) if experiment_type else None
+    if canonical is not None and canonical.parent.exists():
+        return canonical
+    logging.info(
+        f"NAS not reachable (or experiment type unknown); " f"writing output to repo fallback: {_REPO_OUTPUTS_DIR}"
+    )
+    _REPO_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    return _REPO_OUTPUTS_DIR
+
+
 # Which dataset types each experiment type can produce. Asking for an
 # ineligible dataset → loud error during compatibility filtering, never
 # a silently-empty feather. Adding a new dataset means: extend the
@@ -221,8 +258,7 @@ def filter_datasets_for_type(requested, experiment_type, label=""):
     eligible = ELIGIBLE_DATASETS.get(experiment_type, set())
     if not eligible:
         raise ValueError(
-            f"Unknown experiment type {experiment_type!r}. "
-            f"Valid choices: {sorted(ELIGIBLE_DATASETS)}."
+            f"Unknown experiment type {experiment_type!r}. " f"Valid choices: {sorted(ELIGIBLE_DATASETS)}."
         )
     valid = [d for d in requested if d in eligible]
     skipped = [d for d in requested if d not in eligible]
@@ -234,6 +270,7 @@ def filter_datasets_for_type(requested, experiment_type, label=""):
             f"{sorted(eligible)}."
         )
     return valid
+
 
 # Print the current ball pushing configurations
 current_config = config.Config()
@@ -506,9 +543,7 @@ def process_flies_batch(fly_dirs, metrics, output_data, batch_size=5, experiment
             experiment_type = resolve_experiment_type(fly_dir, override=experiment_type_override)
             fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
             if not fly_metrics:
-                logging.warning(
-                    f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
-                )
+                logging.warning(f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping.")
                 continue
 
             # Check if all datasets already exist
@@ -622,9 +657,7 @@ def process_experiment(folder, metrics, output_data, baseline_memory_mb=None, ex
         logging.info(f"  Resolved experiment type: {experiment_type}")
         exp_metrics = filter_datasets_for_type(metrics, experiment_type, label=folder.name)
         if not exp_metrics:
-            logging.warning(
-                f"No compatible datasets for {folder.name} (type={experiment_type}). Skipping."
-            )
+            logging.warning(f"No compatible datasets for {folder.name} (type={experiment_type}). Skipping.")
             return None
 
         # Check if all datasets already exist
@@ -729,9 +762,7 @@ def process_fly_directory(fly_dir, metrics, output_data, force_cache_clear=False
         experiment_type = resolve_experiment_type(fly_dir, override=experiment_type_override)
         fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
         if not fly_metrics:
-            logging.warning(
-                f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
-            )
+            logging.warning(f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping.")
             return
 
         # Check if all datasets already exist
@@ -826,24 +857,17 @@ def process_dataverse_fly(
         Pass-through to :func:`clear_fly_caches_conditional`.
     """
     fly_dir = dataverse_fly.directory
-    fly_name = (
-        f"{dataverse_fly.date_folder.name}_{dataverse_fly.arena}_{dataverse_fly.corridor}"
-    )
-    logging.info(
-        f"Processing Dataverse fly: condition={dataverse_fly.condition!r} -> {fly_name}"
-    )
+    fly_name = f"{dataverse_fly.date_folder.name}_{dataverse_fly.arena}_{dataverse_fly.corridor}"
+    logging.info(f"Processing Dataverse fly: condition={dataverse_fly.condition!r} -> {fly_name}")
 
     try:
         fly_metrics = filter_datasets_for_type(metrics, experiment_type, label=fly_name)
         if not fly_metrics:
-            logging.warning(
-                f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping."
-            )
+            logging.warning(f"No compatible datasets for {fly_name} (type={experiment_type}). Skipping.")
             return
 
         all_datasets_exist = all(
-            (output_data / metric / f"{fly_name}_{metric}.feather").exists()
-            for metric in fly_metrics
+            (output_data / metric / f"{fly_name}_{metric}.feather").exists() for metric in fly_metrics
         )
         if all_datasets_exist:
             logging.info(f"All datasets for {fly_name} already exist. Skipping.")
@@ -877,10 +901,7 @@ def process_dataverse_fly(
             if dataset.data is not None and not dataset.data.empty:
                 dataset_path.parent.mkdir(parents=True, exist_ok=True)
                 dataset.data.to_feather(dataset_path)
-                logging.info(
-                    f"Saved {metric} dataset for {fly_name} to {dataset_path} "
-                    f"({len(dataset.data)} rows)"
-                )
+                logging.info(f"Saved {metric} dataset for {fly_name} to {dataset_path} " f"({len(dataset.data)} rows)")
             else:
                 logging.warning(f"No data available for {fly_name} with metric {metric}")
 
@@ -1342,6 +1363,43 @@ if __name__ == "__main__":
             "ballpushing_utils.dataverse.DEFAULT_CONDITION_FIELD."
         ),
     )
+    parser.add_argument(
+        "--filter-dates",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="YYMMDD",
+        help=(
+            "Restrict Dataverse processing to these date folders "
+            "(e.g. --filter-dates 251008 251009). Useful for quick tests "
+            "without processing the full archive."
+        ),
+    )
+    parser.add_argument(
+        "--keep-individual",
+        action="store_true",
+        default=False,
+        help=(
+            "Keep the per-fly intermediate feathers after pooling. "
+            "By default they are removed once a pooled_*.feather has "
+            "been successfully written, leaving a single clean output "
+            "file per dataset type. Has no effect when --skip-pooling "
+            "is used for a given metric."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory where output feathers are written. "
+            "Overrides the default location derived from "
+            'CONFIG["PATHS"]["dataset_dir"] / DATASET_DIR_FROM_TYPE. '
+            "Useful for Dataverse users who don't have the lab NAS "
+            "mounted: pass any local path, e.g. ~/Downloads/datasets. "
+            "The directory is created if it does not exist."
+        ),
+    )
     args = parser.parse_args()
 
     # Update CONFIG with command line arguments
@@ -1355,10 +1413,7 @@ if __name__ == "__main__":
     if args.experiment_type:
         logging.info(f"Experiment type: forced to {args.experiment_type!r} (CLI override)")
     else:
-        logging.info(
-            "Experiment type: auto-detect from path "
-            f"({EXPERIMENT_TYPE_FROM_PATH})"
-        )
+        logging.info("Experiment type: auto-detect from path " f"({EXPERIMENT_TYPE_FROM_PATH})")
 
     # Log optimization settings
     logging.info(f"Cache management configuration:")
@@ -1414,17 +1469,21 @@ if __name__ == "__main__":
         from ballpushing_utils.dataverse import (
             CONDITION_TRANSFORMERS,
             DEFAULT_CONDITION_FIELD,
+            detect_dataverse_experiment_type,
             expand_condition,
             iter_dataverse_flies,
         )
 
         if args.experiment_type is None:
-            raise ValueError(
-                "--dataverse-root requires --experiment-type (the synthetic "
-                "metadata needs to know which paradigm-specific code path to "
-                "take, e.g. F1 chamber-exit adjustment vs MagnetBlock 3600s "
-                "cutoff)."
-            )
+            dv_root_for_detect = Path(args.dataverse_root).expanduser()
+            if dv_root_for_detect.is_dir():
+                args.experiment_type = detect_dataverse_experiment_type(dv_root_for_detect)
+                logging.info(f"Experiment type auto-detected from Dataverse layout: " f"{args.experiment_type!r}")
+            else:
+                raise ValueError(
+                    "--dataverse-root requires --experiment-type when the "
+                    "root directory does not yet exist (cannot auto-detect)."
+                )
 
         # Paradigms with a registered transformer (F1) ignore
         # --condition-field; their folder name expands into multiple
@@ -1439,9 +1498,7 @@ if __name__ == "__main__":
                     f"(see dataverse.CONDITION_TRANSFORMERS)."
                 )
         else:
-            condition_field = args.condition_field or DEFAULT_CONDITION_FIELD.get(
-                args.experiment_type
-            )
+            condition_field = args.condition_field or DEFAULT_CONDITION_FIELD.get(args.experiment_type)
             if condition_field is None:
                 raise ValueError(
                     f"No default condition field for experiment type "
@@ -1463,7 +1520,8 @@ if __name__ == "__main__":
         else:
             today_date = datetime.now().strftime("%y%m%d_%H")
             output_dir_name = f"{today_date}_{args.datasets[0]}_dataverse_{dv_root.name}"
-        output_data = CONFIG["PATHS"]["dataset_dir"] / f"{output_dir_name}_Data"
+        _dataset_dir = _resolve_dataset_dir(args.experiment_type, args.output_dir)
+        output_data = _dataset_dir / f"{output_dir_name}_Data"
         output_data.mkdir(parents=True, exist_ok=True)
         for metric in args.datasets:
             (output_data / metric).mkdir(exist_ok=True)
@@ -1492,6 +1550,12 @@ if __name__ == "__main__":
             logging.error(f"Failed to save configuration: {e}")
 
         dataverse_flies = list(iter_dataverse_flies(dv_root))
+        if args.filter_dates:
+            filter_set = set(args.filter_dates)
+            dataverse_flies = [f for f in dataverse_flies if f.date_folder.name in filter_set]
+            logging.info(
+                f"--filter-dates applied: keeping {len(dataverse_flies)} flies " f"from dates {sorted(filter_set)}"
+            )
         if not dataverse_flies:
             from ballpushing_utils.paths import detect_layout, missing_data_message
 
@@ -1516,9 +1580,7 @@ if __name__ == "__main__":
         # Show the user exactly which columns each condition folder will
         # populate, so they can sanity-check before kicking off a long run.
         sample_condition = next(iter(sorted({f.condition for f in dataverse_flies})))
-        sample_fields = expand_condition(
-            args.experiment_type, sample_condition, condition_field=condition_field
-        )
+        sample_fields = expand_condition(args.experiment_type, sample_condition, condition_field=condition_field)
         logging.info(
             f"Condition expansion preview "
             f"(experiment_type={args.experiment_type!r}): "
@@ -1544,6 +1606,12 @@ if __name__ == "__main__":
             files = [f for f in metric_dir.glob("*.feather") if not f.name.startswith("pooled_")]
             if files:
                 create_pooled_dataset(metric_dir, metric, files, force=False)
+                if not args.keep_individual:
+                    pooled_ok = (metric_dir / f"pooled_{metric}.feather").exists()
+                    if pooled_ok:
+                        for f in files:
+                            f.unlink()
+                        logging.info(f"Removed {len(files)} individual feathers for '{metric}' (pooled file kept)")
 
         end_time = time.time()
         runtime = end_time - start_time
@@ -1574,17 +1642,21 @@ if __name__ == "__main__":
                     "Pass one of --yaml (server / on-rig layout), "
                     "--dataverse-root (Dataverse archive layout), or set "
                     "experiment_filter in CONFIG. Processing the entire "
-                    "data root in one shot is not allowed.\n\n"
-                    + missing_data_message(context="data root")
+                    "data root in one shot is not allowed.\n\n" + missing_data_message(context="data root")
                 )
                 sys.exit(2)
 
         # Automatically set output_data_dir based on output_summary_dir
         CONFIG["PATHS"]["output_data_dir"] = f"{CONFIG['PATHS']['output_summary_dir']}_Data"
 
+        # Use the canonical dataset dir for this experiment type so TNT/
+        # MagnetBlock runs don't land inside F1_Tracks/Datasets.
+        # --output-dir overrides; NAS fallback → repo outputs/.
+        _dataset_dir = _resolve_dataset_dir(args.experiment_type, args.output_dir)
+
         # Build derived paths from configuration
-        output_summary = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_summary_dir"]
-        output_data = CONFIG["PATHS"]["dataset_dir"] / CONFIG["PATHS"]["output_data_dir"]
+        output_summary = _dataset_dir / CONFIG["PATHS"]["output_summary_dir"]
+        output_data = _dataset_dir / CONFIG["PATHS"]["output_data_dir"]
         output_summary.mkdir(parents=True, exist_ok=True)
         output_data.mkdir(parents=True, exist_ok=True)
 
@@ -1675,8 +1747,7 @@ if __name__ == "__main__":
 
             logging.error(
                 f"No valid fly directories found in {args.yaml}. None of "
-                f"the entries resolved on disk.\n\n"
-                + missing_data_message(context="fly tracks")
+                f"the entries resolved on disk.\n\n" + missing_data_message(context="fly tracks")
             )
             sys.exit(2)
 
@@ -1866,6 +1937,23 @@ if __name__ == "__main__":
             logging.info(f"Pooled {metric} dataset already exists: {pooled_path.name}")
 
     logging.info("Pooled dataset creation complete!")
+
+    # Remove individual per-fly feathers unless the user asked to keep them.
+    # Only applies to flies mode (in experiment mode the per-experiment files
+    # are meaningful outputs in their own right).
+    if args.mode == "flies" and not args.keep_individual:
+        for metric in args.datasets:
+            if metric in args.skip_pooling:
+                continue
+            metric_dir = output_data / metric
+            pooled_ok = (metric_dir / f"pooled_{metric}.feather").exists()
+            if not pooled_ok:
+                continue
+            individual_files = [f for f in metric_dir.glob("*.feather") if not f.name.startswith("pooled_")]
+            for f in individual_files:
+                f.unlink()
+            if individual_files:
+                logging.info(f"Removed {len(individual_files)} individual feathers for '{metric}' (pooled file kept)")
 
     end_time = time.time()
     runtime = end_time - start_time

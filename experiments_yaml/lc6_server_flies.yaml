@@ -1,0 +1,35 @@
+# Server-side fly directories matching the LC6 Dataverse download.
+#
+# 231115_TNT_Fine_1 / Arena4 (Genotype: TNTxG56 = LC6)
+#   -> all 6 corridors
+# 231121_TNT_Fine_2 / Arena7 (Genotype: TNTxG56 = LC6)
+#   -> all 6 corridors
+# 231121_TNT_Fine_3 / Arena8 (Genotype: TNTxG56 = LC6)
+#   -> all 6 corridors
+#
+# Used by: python src/dataset_builder.py --mode flies
+#          --yaml experiments_yaml/lc6_server_flies.yaml
+#          --datasets summary --experiment-type TNT
+
+directories:
+  # 231115 / Arena4
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor1
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor2
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor3
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor4
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor5
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231115_TNT_Fine_1_Videos_Tracked/arena4/corridor6
+  # 231121 / Arena7 (TNT_Fine_2)
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor1
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor2
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor3
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor4
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor5
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_2_Videos_Tracked/arena7/corridor6
+  # 231121 / Arena8 (TNT_Fine_3)
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor1
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor2
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor3
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor4
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor5
+  - /mnt/upramdya_data/MD/MultiMazeRecorder/Videos/231121_TNT_Fine_3_Videos_Tracked/arena8/corridor6

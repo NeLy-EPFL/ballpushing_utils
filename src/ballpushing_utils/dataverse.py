@@ -43,6 +43,7 @@ __all__ = [
     "DEFAULT_VIDEO_SIZE",
     "DataverseFly",
     "default_condition_field",
+    "detect_dataverse_experiment_type",
     "expand_condition",
     "iter_dataverse_flies",
     "is_dataverse_layout",
@@ -82,6 +83,29 @@ def _expand_f1_condition(condition_value: str) -> dict[str, str]:
     return {"Pretraining": pretraining, "F1_condition": f1_condition}
 
 
+#: Map from Dataverse MagnetBlock condition folder names to the on-server
+#: ``Magnet`` column value.  The Dataverse uses human-readable labels
+#: (``Blocked`` / ``Unblocked``) while the server metadata uses ``y``/``n``.
+_MAGNETBLOCK_CONDITION_MAP: dict[str, str] = {
+    "blocked": "y",
+    "unblocked": "n",
+}
+
+
+def _expand_magnetblock_condition(condition_value: str) -> dict[str, str]:
+    """Map a MagnetBlock Dataverse folder name to ``{"Magnet": "y"|"n"}``.
+
+    The Dataverse archive uses ``Blocked`` / ``Unblocked`` (or
+    ``Blocked_<variant>`` / ``Unblocked_<variant>``) while the on-server
+    metadata column is ``Magnet`` with values ``"y"`` / ``"n"``.  Any
+    unrecognised prefix is passed through verbatim so novel variants don't
+    silently drop data.
+    """
+    key = condition_value.lower().split("_")[0]
+    magnet = _MAGNETBLOCK_CONDITION_MAP.get(key, condition_value)
+    return {"Magnet": magnet}
+
+
 #: Per-experiment-type hooks that take a single condition folder name and
 #: expand it into multiple ``{field: value}`` metadata pairs. Use this when
 #: one archive folder needs to populate more than one feather column —
@@ -90,6 +114,7 @@ def _expand_f1_condition(condition_value: str) -> dict[str, str]:
 #: default in :data:`DEFAULT_CONDITION_FIELD`.
 CONDITION_TRANSFORMERS: dict[str, Callable[[str], dict[str, str]]] = {
     "F1": _expand_f1_condition,
+    "MagnetBlock": _expand_magnetblock_condition,
 }
 
 
@@ -173,25 +198,66 @@ def is_dataverse_layout(path: Path) -> bool:
     return bool(_DATE_FOLDER_RE.match(grandparent.name))
 
 
-def iter_dataverse_flies(root: Path) -> Iterator[DataverseFly]:
-    """Walk a Dataverse subtree and yield one :class:`DataverseFly` per corridor.
+def _is_flat_layout(root: Path) -> bool:
+    """Return True if ``root``'s immediate subdirectories look like date folders.
 
-    ``root`` must point at a directory whose immediate children are
-    *condition* folders (e.g. ``…/Affordance``, ``…/Screen``). The walker
-    descends ``<root>/<condition>/<date>/arena*/corridor*`` and skips any
-    corridor without at least one ``*ball*.h5`` track. Date folders whose
-    name doesn't match ``YYMMDD[-N]`` are silently skipped — that prevents
-    accidental descent into auxiliary archive folders (``README``,
-    ``checksums``, …) that Dataverse sometimes ships next to the data.
+    A *flat* layout has the shape ``<root>/<date>/arena*/fly_dir/`` — the root
+    itself acts as the condition folder (e.g.
+    ``Generalisation-Wild-type-pretrained/251008/Arena4/Left/``).  Contrast
+    with the standard *multi-condition* layout where an extra condition layer
+    sits between root and the date folders.
+    """
+    return any(d.is_dir() and _DATE_FOLDER_RE.match(d.name) for d in root.iterdir())
+
+
+def _condition_from_folder_name(name: str) -> str:
+    """Extract the condition token from a folder name.
+
+    The naming convention for Dataverse condition folders is
+    ``<ExperimentLabel>-<Subtype>-<condition>`` where the condition is the
+    last hyphen-delimited token.  Examples::
+
+        Generalisation-Wild-type-pretrained   → pretrained
+        Generalisation-Wild-type-naive        → naive
+        Screen-MB247xTNT                      → MB247xTNT
+    """
+    return name.rsplit("-", 1)[-1]
+
+
+def iter_dataverse_flies(root: Path) -> Iterator[DataverseFly]:
+    """Walk a Dataverse subtree and yield one :class:`DataverseFly` per fly directory.
+
+    Two layouts are supported:
+
+    * **Multi-condition** (standard): ``<root>/<condition>/<date>/arena*/fly_dir/``
+      where ``root``'s immediate children are condition folders.  The condition
+      folder name is stored verbatim on :attr:`DataverseFly.condition`.
+    * **Flat** (single-condition): ``<root>/<date>/arena*/fly_dir/`` where
+      ``root`` is already the condition folder (e.g.
+      ``Generalisation-Wild-type-pretrained``).  The condition is extracted
+      from the last hyphen-delimited token of ``root.name``.
+
+    In both cases the walker skips any fly directory without a ``*ball*.h5``
+    track, and date folders whose name doesn't match ``YYMMDD[-N]``.
     """
     root = Path(root)
     if not root.is_dir():
         raise NotADirectoryError(f"Dataverse root is not a directory: {root}")
 
-    for condition_dir in sorted(root.iterdir()):
-        if not condition_dir.is_dir() or condition_dir.name.startswith("."):
-            continue
-        for date_dir in sorted(condition_dir.iterdir()):
+    if _is_flat_layout(root):
+        # Root IS the condition folder; extract condition from its name.
+        condition_value = _condition_from_folder_name(root.name)
+        date_parents: list[tuple[Path, str]] = [(root, condition_value)]
+    else:
+        # Standard multi-condition: <root>/<condition>/<date>/...
+        date_parents = [
+            (condition_dir, condition_dir.name)
+            for condition_dir in sorted(root.iterdir())
+            if condition_dir.is_dir() and not condition_dir.name.startswith(".")
+        ]
+
+    for condition_parent, condition_value in date_parents:
+        for date_dir in sorted(condition_parent.iterdir()):
             if not date_dir.is_dir() or not _DATE_FOLDER_RE.match(date_dir.name):
                 continue
             for arena_dir in sorted(date_dir.iterdir()):
@@ -202,10 +268,89 @@ def iter_dataverse_flies(root: Path) -> Iterator[DataverseFly]:
                         continue
                     if not any(corridor_dir.glob("*ball*.h5")):
                         continue
-                    yield DataverseFly(corridor_dir, condition_dir.name)
+                    yield DataverseFly(corridor_dir, condition_value)
 
 
-def expand_condition(experiment_type: str, condition_value: str, *, condition_field: Optional[str] = None) -> dict[str, str]:
+def detect_dataverse_experiment_type(root: Path) -> str:
+    """Infer the experiment type from the structure of a Dataverse root.
+
+    Heuristics (applied in order):
+
+    1. **MagnetBlock** — ``"magnet"`` (case-insensitive) appears anywhere in
+       ``root``'s path, **or** any immediate child directory is named ``"y"``
+       or ``"n"`` (the two MagnetBlock conditions).
+    2. **F1** — under any arena directory the child folders are named
+       ``"Left"`` or ``"Right"`` (not ``"corridor*"``).  A *ball*.h5 must be
+       present so we don't trigger on empty arena stubs.
+    3. **TNT** — default fallback.
+
+    Parameters
+    ----------
+    root:
+        Path to the Dataverse root whose immediate children are condition
+        folders (the same path passed to ``--dataverse-root``).
+
+    Returns
+    -------
+    str
+        One of ``"MagnetBlock"``, ``"F1"``, ``"TNT"``.
+    """
+    root = Path(root)
+
+    # 1. MagnetBlock: keyword anywhere in the path.
+    if "magnet" in str(root).lower():
+        return "MagnetBlock"
+
+    all_dirs = [d for d in root.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    f1_names = {"left", "right"}
+    magnet_condition_names = {"y", "n", "y_unrestrained", "n_unrestrained"}
+
+    if _is_flat_layout(root):
+        # Root IS the condition folder; inspect the condition name token.
+        last_token = _condition_from_folder_name(root.name).lower()
+        if last_token in magnet_condition_names:
+            return "MagnetBlock"
+        # F1: look for Left/Right under <root>/<date>/arena*/
+        for date_dir in all_dirs:
+            if not _DATE_FOLDER_RE.match(date_dir.name):
+                continue
+            for arena_dir in date_dir.iterdir():
+                if not arena_dir.is_dir() or not arena_dir.name.lower().startswith("arena"):
+                    continue
+                for fly_dir in arena_dir.iterdir():
+                    if not fly_dir.is_dir():
+                        continue
+                    if fly_dir.name.lower() in f1_names and any(fly_dir.glob("*ball*.h5")):
+                        return "F1"
+        return "TNT"
+
+    # Standard multi-condition layout.
+    condition_dirs = all_dirs
+    # 2. MagnetBlock: all condition folders named y/n.
+    if condition_dirs and all(d.name.lower() in magnet_condition_names for d in condition_dirs):
+        return "MagnetBlock"
+
+    # 3. F1: fly-level dirs inside arenas are Left/Right.
+    for condition_dir in condition_dirs:
+        for date_dir in condition_dir.iterdir():
+            if not date_dir.is_dir() or not _DATE_FOLDER_RE.match(date_dir.name):
+                continue
+            for arena_dir in date_dir.iterdir():
+                if not arena_dir.is_dir() or not arena_dir.name.lower().startswith("arena"):
+                    continue
+                for fly_dir in arena_dir.iterdir():
+                    if not fly_dir.is_dir():
+                        continue
+                    if fly_dir.name.lower() in f1_names and any(fly_dir.glob("*ball*.h5")):
+                        return "F1"
+
+    # 4. Default.
+    return "TNT"
+
+
+def expand_condition(
+    experiment_type: str, condition_value: str, *, condition_field: Optional[str] = None
+) -> dict[str, str]:
     """Map a Dataverse condition folder name to one or more metadata columns.
 
     Most paradigms produce a single ``{<default_field>: condition_value}``
@@ -242,8 +387,7 @@ def expand_condition(experiment_type: str, condition_value: str, *, condition_fi
     field = condition_field or DEFAULT_CONDITION_FIELD.get(experiment_type)
     if field is None:
         raise ValueError(
-            f"No default condition field for experiment_type {experiment_type!r}. "
-            f"Pass condition_field explicitly."
+            f"No default condition field for experiment_type {experiment_type!r}. " f"Pass condition_field explicitly."
         )
     return {field: condition_value}
 
