@@ -20,14 +20,17 @@ from .compat import normalize_legacy_columns, read_feather
 from .config import Config
 from .dataset import Dataset
 from .dataverse import (
+    ARCHIVE_PREFIX_RECIPES,
     CONDITION_TRANSFORMERS,
     DEFAULT_CONDITION_FIELD,
     DEFAULT_VIDEO_SIZE,
     DataverseFly,
     default_condition_field,
+    detect_dataverse_experiment_type,
     expand_condition,
     is_dataverse_layout,
     iter_dataverse_flies,
+    parse_archive_name,
     synthesize_experiment_metadata,
 )
 from .experiment import Experiment
@@ -50,6 +53,7 @@ from .paths import (
 from .skeleton_metrics import SkeletonMetrics
 
 __all__ = [
+    "ARCHIVE_PREFIX_RECIPES",
     "BallPushingMetrics",
     "BehaviorUMAP",
     "CONDITION_TRANSFORMERS",
@@ -70,6 +74,7 @@ __all__ = [
     "data_root",
     "dataset",
     "default_condition_field",
+    "detect_dataverse_experiment_type",
     "detect_layout",
     "expand_condition",
     "figure_output_dir",
@@ -80,6 +85,7 @@ __all__ = [
     "load_dotenv",
     "missing_data_message",
     "normalize_legacy_columns",
+    "parse_archive_name",
     "read_feather",
     "synthesize_experiment_metadata",
 ]
