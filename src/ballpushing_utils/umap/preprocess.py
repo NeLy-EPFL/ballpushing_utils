@@ -1,18 +1,34 @@
-from tqdm import tqdm
-import numpy as np
+"""Pre-aggregation pipeline feeding the UMAP feature matrix.
+
+Reads per-fly ``standardized_contacts`` feathers (one per experiment),
+keeps only contact events of the canonical length, normalises the
+keypoint column names, fills NaNs by interpolation + opposite-leg
+fallback, and writes pooled ``contacts.parquet`` / ``flies.parquet``
+into the project cache directory (``ballpushing_utils.paths.get_cache_dir()``).
+
+The reusable pieces (``interp``, ``interp_column``, ``preprocess_data``)
+are importable; the driver code lives behind ``if __name__ == "__main__"``
+so importing this module never touches the lab share or writes to disk.
+
+TODO(durrieu, coauthor): the input dataset is not yet on Dataverse —
+see ``preprocess_screen_data.py`` for the same TODO marker.
+"""
+
+from __future__ import annotations
+
 from pathlib import Path
-import polars as pl
+
+import numpy as np
 import pandas as pd
+import polars as pl
+from tqdm import tqdm
 
-root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
-dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
-data_dir = root_dir / dataset_name / "standardized_contacts"
-data_paths = sorted(data_dir.glob("2*.feather"))
-save_dir = Path(".cache")
-save_dir.mkdir(exist_ok=True, parents=True)
-
-index_cols = ["fly", "event_id", "frame"]
-keypoints = {
+# Column-name conventions for the on-server standardized_contacts feathers.
+# ``keypoints`` maps the SLEAP node-name suffix used in those feathers
+# (``x_centre_preprocessed``, ``x_Thorax``, …) to the short snake-case
+# names the UMAP analysis uses (``ball``, ``thorax``, …).
+INDEX_COLS = ["fly", "event_id", "frame"]
+KEYPOINTS = {
     "centre_preprocessed": "ball",
     "Thorax": "thorax",
     "Head": "head",
@@ -24,9 +40,9 @@ keypoints = {
     "Rmid": "rm",
     "Rhind": "rh",
 }
-data_cols = [f"{coord}_{name}" for name in keypoints for coord in "xy"]
-new_data_cols = [f"{name}_{coord}" for name in keypoints.values() for coord in "xy"]
-info_cols = [
+DATA_COLS = [f"{coord}_{name}" for name in KEYPOINTS for coord in "xy"]
+NEW_DATA_COLS = [f"{name}_{coord}" for name in KEYPOINTS.values() for coord in "xy"]
+INFO_COLS = [
     "flypath",
     "Genotype",
     "Nickname",
@@ -35,7 +51,7 @@ info_cols = [
     "Split",
     "event_type",
 ]
-new_info_cols = [
+NEW_INFO_COLS = [
     "path",
     "genotype",
     "nickname",
@@ -65,22 +81,22 @@ def preprocess_data(
         pl.read_ipc(
             data_path,
             memory_map=False,
-            columns=index_cols + info_cols + data_cols,
+            columns=INDEX_COLS + INFO_COLS + DATA_COLS,
         )
-        .rename(dict(zip(info_cols + data_cols, new_info_cols + new_data_cols)))
+        .rename(dict(zip(INFO_COLS + DATA_COLS, NEW_INFO_COLS + NEW_DATA_COLS)))
         .filter(
             pl.col("event_type").eq("contact")
             & pl.len().over(["fly", "event_id"]).eq(frames_per_event)
         )
-        .sort(index_cols)
+        .sort(INDEX_COLS)
     )
 
     df_fly = df.select(
-        pl.col(col).cast(pl.String) for col in ["fly", *new_info_cols[:-1]]
+        pl.col(col).cast(pl.String) for col in ["fly", *NEW_INFO_COLS[:-1]]
     ).unique()
 
     df = df.select(
-        *index_cols, *(pl.col(col).cast(pl.Float64) for col in new_data_cols)
+        *INDEX_COLS, *(pl.col(col).cast(pl.Float64) for col in NEW_DATA_COLS)
     )
 
     strict_interp_kwargs = {
@@ -102,7 +118,7 @@ def preprocess_data(
     diff_y_ball = np.abs(y_ball_end - y_ball_mid)
     df = df.filter(np.repeat(diff_y_ball > ball_y_threshold, frames_per_event))
 
-    for col in new_data_cols:
+    for col in NEW_DATA_COLS:
         df = interp_column(df, col, frames_per_event, **strict_interp_kwargs)
 
     legs = ["lf", "lm", "lh", "rf", "rm", "rh"]
@@ -117,7 +133,7 @@ def preprocess_data(
         "method": "linear",
         "limit": 10,
     }
-    for col in new_data_cols:
+    for col in NEW_DATA_COLS:
         df = interp_column(df, col, frames_per_event, **relaxed_interp_kwargs)
 
     df = df.drop_nans().filter(pl.len().over(["fly", "event_id"]).eq(frames_per_event))
@@ -125,6 +141,23 @@ def preprocess_data(
     return df, df_fly
 
 
-df, df_fly = zip(*(preprocess_data(path) for path in tqdm(data_paths)))
-pl.concat(df).write_parquet(save_dir / "contacts.parquet")
-pl.concat(df_fly).write_parquet(save_dir / "flies.parquet")
+def main() -> None:
+    """Build the pooled ``contacts.parquet`` + ``flies.parquet`` cache."""
+    from ballpushing_utils.paths import get_cache_dir
+
+    # TODO(durrieu, coauthor): switch to ballpushing_utils.dataset(...) once
+    # the input is on Dataverse — see preprocess_screen_data.py.
+    root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
+    dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
+    data_dir = root_dir / dataset_name / "standardized_contacts"
+    data_paths = sorted(data_dir.glob("2*.feather"))
+
+    save_dir = get_cache_dir()  # <repo>/.cache/
+
+    df, df_fly = zip(*(preprocess_data(path) for path in tqdm(data_paths)))
+    pl.concat(df).write_parquet(save_dir / "contacts.parquet")
+    pl.concat(df_fly).write_parquet(save_dir / "flies.parquet")
+
+
+if __name__ == "__main__":
+    main()
