@@ -70,6 +70,19 @@ dependencies = [
     # published via GitHub rather than PyPI — declare the VCS URL directly
     # so `pip install -e .` works out of the box without a private index.
     "utils_behavior @ git+https://github.com/NeLy-EPFL/utils_behavior.git",
+    "colorcet>=3.1.0",
+    "imageio[ffmpeg]>=2.37.3",
+    "ipykernel>=7.2.0",
+    "kdepy>=1.1.12",
+    "mplex>=0.0.7",
+    "natsort>=8.4.0",
+    "opencv-python>=4.11.0.86",
+    "python-tsp>=0.2.0",
+    "video-reader-rs>=0.4.2",
+    "polars>=1.40.1",
+    "flyplotlib>=0.5.2",
+    "antspyx>=0.6.3",
+    "tifffile>=2025.5.10",
 ]
 
 [project.optional-dependencies]
@@ -161,3 +174,6 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",
 ]
+
+[tool.uv.sources]
+utils-behavior = { git = "https://github.com/NeLy-EPFL/utils_behavior.git" }

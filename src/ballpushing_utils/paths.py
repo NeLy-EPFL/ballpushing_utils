@@ -41,6 +41,7 @@ __all__ = [
     "dataset",
     "detect_layout",
     "figure_output_dir",
+    "get_cache_dir",
     "find_feather",
     "load_dotenv",
     "missing_data_message",
@@ -118,6 +119,17 @@ def figure_output_dir(
     if create:
         base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def get_cache_dir() -> Path:
+    """Return the project-level cache directory.
+
+    The cache lives at ``<repo_root>/.cache`` so scripts run from any working
+    directory share the same cached artifacts.
+    """
+    cache_dir = Path(__file__).resolve().parents[2] / ".cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
 
 
 def find_feather(relative_or_absolute: str | os.PathLike[str]) -> Path | None:
