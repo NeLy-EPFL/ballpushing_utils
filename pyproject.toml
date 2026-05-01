@@ -80,6 +80,7 @@ dependencies = [
     "python-tsp>=0.2.0",
     "video-reader-rs>=0.4.2",
     "polars>=1.40.1",
+    "plotnine>=0.13",
     "flyplotlib>=0.5.2",
     "antspyx>=0.6.3",
     "tifffile>=2025.5.10",
@@ -126,7 +127,7 @@ Issues = "https://github.com/NeLy-EPFL/ballpushing_utils/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["ballpushing_utils*"]
+include = ["ballpushing_utils*", "ball_pushing_high_res*"]
 
 [tool.setuptools.package-data]
 ballpushing_utils = [

@@ -1,6 +1,8 @@
 from pathlib import Path
 from tqdm import tqdm
 
+from ballpushing_utils.paths import require_path
+
 serial_number_to_camera = {
     "17475185": "bottom",
     "17475187": "top",
@@ -9,7 +11,14 @@ corridor_height = 320
 n_corridors = 6
 y0 = 64
 y1 = y0 + n_corridors * corridor_height
-video_paths = sorted(Path('/mnt/upramdya/data/TL/ball_pushing/').glob("*/2025*-*-1747518*.mp4"))
+# Co-author 2's ball-tracking videos. Override on machines with a
+# different mount layout via BALLPUSHING_TL_BALL_PUSHING_DIR.
+ball_pushing_dir = require_path(
+    "/mnt/upramdya/data/TL/ball_pushing/",
+    description="ball-tracking raw videos (notebooks/ball_tracking)",
+    env_var="BALLPUSHING_TL_BALL_PUSHING_DIR",
+)
+video_paths = sorted(ball_pushing_dir.glob("*/2025*-*-1747518*.mp4"))
 
 def track_balls(video_path):
     import cv2

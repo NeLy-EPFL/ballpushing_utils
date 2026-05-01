@@ -32,7 +32,15 @@ import pandas as pd
 
 # TODO(durrieu, coauthor): switch to ballpushing_utils.dataset(...) once the
 # input is on Dataverse — see module docstring above.
-root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
+# Canonical lab-share mount is /mnt/upramdya_data/. Override on machines
+# with a different mount layout via BALLPUSHING_SCREEN_DATASETS_DIR.
+from ballpushing_utils.paths import require_path
+
+root_dir = require_path(
+    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/",
+    description="silencing-screen Datasets root",
+    env_var="BALLPUSHING_SCREEN_DATASETS_DIR",
+)
 dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
 data_dir = root_dir / dataset_name / "standardized_contacts"
 data_paths = sorted(data_dir.glob("2*.feather"))

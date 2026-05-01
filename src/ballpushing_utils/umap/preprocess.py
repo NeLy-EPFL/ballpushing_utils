@@ -143,14 +143,26 @@ def preprocess_data(
 
 def main() -> None:
     """Build the pooled ``contacts.parquet`` + ``flies.parquet`` cache."""
-    from ballpushing_utils.paths import get_cache_dir
+    from ballpushing_utils.paths import get_cache_dir, require_path
 
     # TODO(durrieu, coauthor): switch to ballpushing_utils.dataset(...) once
     # the input is on Dataverse — see preprocess_screen_data.py.
-    root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
-    dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
-    data_dir = root_dir / dataset_name / "standardized_contacts"
+    data_dir = require_path(
+        "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/"
+        "250809_02_standardized_contacts_TNT_screen_Data/standardized_contacts",
+        description="screen standardized_contacts feathers",
+        env_var="BALLPUSHING_SCREEN_CONTACTS_DIR",
+    )
     data_paths = sorted(data_dir.glob("2*.feather"))
+
+    if not data_paths:
+        raise FileNotFoundError(
+            f"No standardized_contacts feathers found under {data_dir}. "
+            f"Expected files matching '2*.feather' (per-experiment standardized "
+            f"contacts feathers built by dataset_builder.py). "
+            f"Build them first via "
+            f"`python src/dataset_builder.py --datasets standardized_contacts ...`."
+        )
 
     save_dir = get_cache_dir()  # <repo>/.cache/
 

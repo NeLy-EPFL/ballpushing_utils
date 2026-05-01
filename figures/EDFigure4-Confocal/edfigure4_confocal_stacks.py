@@ -6,11 +6,18 @@ import yaml
 import tifffile
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from ballpushing_utils.paths import get_cache_dir
+from ballpushing_utils.paths import get_cache_dir, require_path
 
 regions = ["brain", "vnc"]
 
-raw_dir = Path("/mnt/upramdya/data/TL/affordance_confocal_stacks")
+# Co-author 2's lab-share path. Set BALLPUSHING_TL_CONFOCAL_DIR to override
+# on machines with a different mount layout (lab members commonly mount
+# the same NFS export at different prefixes — see paths.require_path).
+raw_dir = require_path(
+    "/mnt/upramdya/data/TL/affordance_confocal_stacks",
+    description="confocal stack directory (ED Fig. 4)",
+    env_var="BALLPUSHING_TL_CONFOCAL_DIR",
+)
 stack_infos_path = raw_dir / "stack_infos.yaml"
 with open(stack_infos_path) as f:
     stack_infos = yaml.safe_load(f)

@@ -142,6 +142,8 @@ dmypy.json
 
 # Ignore all files in the outputs directory
 outputs/
+# Co-author 2 (high-res analysis) writes precomputed CSVs here.
+outputs-saved/
 tests/integration/outputs/transformed_dataset_columns.csv
 tests/integration/outputs/transposed_dataset_columns.csv
 tests/integration/outputs/.~lock.transposed_dataset_columns.csv#

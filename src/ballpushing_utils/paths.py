@@ -45,6 +45,7 @@ __all__ = [
     "find_feather",
     "load_dotenv",
     "missing_data_message",
+    "require_path",
     "DEFAULT_DATA_ROOT",
     "DEFAULT_FIGURES_ROOT_NAME",
     "SAMPLE_DATA_RELATIVE",
@@ -341,6 +342,91 @@ def missing_data_message(
         f"notebooks/\n"
         f"     (especially ballpushing_utils_walkthrough.ipynb) are wired up "
         f"against it."
+    )
+
+
+def require_path(
+    path: str | os.PathLike[str],
+    *,
+    description: str | None = None,
+    env_var: str | None = None,
+) -> Path:
+    """Resolve a hardcoded lab-share path, raising a friendly error if absent.
+
+    Use at the top of any script (typically in the silencing-screen,
+    UMAP, or co-author-contributed analysis pipelines) that reads from
+    a fixed absolute path on the EPFL NFS share. When the path
+    doesn't resolve — either because the share isn't mounted, the
+    path uses a different mount prefix (``/mnt/upramdya_data/`` vs
+    ``/mnt/upramdya/data/``), or the dataset hasn't been built yet —
+    raise ``FileNotFoundError`` with a structured message that points
+    the user at how to fix it (mount the share, symlink, or override
+    the env var).
+
+    Different lab members tend to mount the same NFS export at
+    different mount points (``/mnt/upramdya_data/``, ``/mnt/labshare/``,
+    ``/Volumes/upramdya/`` on macOS, …); this helper keeps the failure
+    mode consistent across scripts and makes the override path
+    obvious.
+
+    Parameters
+    ----------
+    path:
+        The hardcoded lab-share path to check. Returned verbatim as a
+        :class:`~pathlib.Path` if it exists.
+    description:
+        Optional one-line label describing what the path holds (e.g.
+        ``"confocal stack directory"``). Surfaced in the error message
+        so the user can reason about what's missing without reading
+        the source.
+    env_var:
+        Optional environment variable name the user can set to
+        override the hardcoded path (e.g. ``"BALLPUSHING_TL_DATA_ROOT"``).
+        When provided AND set, takes precedence over ``path``.
+
+    Returns
+    -------
+    pathlib.Path
+        The resolved path (existence verified).
+
+    Raises
+    ------
+    FileNotFoundError
+        Multi-line message listing the three mount-mismatch fixes
+        (mount the share / symlink / edit the script's hardcoded path
+        or set ``env_var``).
+    """
+    if env_var:
+        override = os.environ.get(env_var)
+        if override:
+            override_p = Path(override).expanduser()
+            if override_p.exists():
+                return override_p
+            # Fall through to error with the override mentioned.
+
+    p = Path(path).expanduser()
+    if p.exists():
+        return p
+
+    label = f" ({description})" if description else ""
+    override_hint = (
+        f"\n  - Override via env var: ``export {env_var}=/your/mount/path``"
+        if env_var
+        else ""
+    )
+    raise FileNotFoundError(
+        f"Required path not found{label}: {p}\n\n"
+        f"This script expects a fixed lab-share path that may not "
+        f"resolve on machines with a different mount layout (lab\n"
+        f"members commonly mount the same NFS export at different "
+        f"prefixes: ``/mnt/upramdya_data/``, ``/mnt/upramdya/data/``,\n"
+        f"``/mnt/labshare/``, ``/Volumes/upramdya/`` on macOS, …).\n\n"
+        f"To fix:\n"
+        f"  - Mount the lab NFS share at the expected prefix, OR\n"
+        f"  - Symlink your local mount: "
+        f"``ln -s <your-mount> {p.parent}``, OR\n"
+        f"  - Edit the script's hardcoded path to match your setup."
+        f"{override_hint}"
     )
 
 

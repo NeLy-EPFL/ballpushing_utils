@@ -49,6 +49,7 @@ from .paths import (
     find_feather,
     load_dotenv,
     missing_data_message,
+    require_path,
 )
 from .skeleton_metrics import SkeletonMetrics
 
@@ -87,5 +88,6 @@ __all__ = [
     "normalize_legacy_columns",
     "parse_archive_name",
     "read_feather",
+    "require_path",
     "synthesize_experiment_metadata",
 ]
