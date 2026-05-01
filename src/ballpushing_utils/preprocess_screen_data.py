@@ -1,9 +1,37 @@
+"""Pre-aggregation helpers for the TNT silencing-screen UMAP pipeline.
+
+This module reads the per-fly ``standardized_contacts`` feathers
+produced by ``dataset_builder.py``, reshapes the per-keypoint columns,
+and writes pooled parquets that the UMAP feature-matrix builder
+consumes.
+
+TODO(durrieu, coauthor):
+    The input dataset (``Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/``)
+    is **not yet on Dataverse**. Until it's published, this script
+    requires direct lab-share access (``$BALLPUSHING_DATA_ROOT`` pointing
+    at ``/mnt/upramdya_data/MD/`` or equivalent). When the dataset is
+    uploaded:
+      1. Document its archive name in ``DATAVERSE.md`` under the
+         silencing-screen section (alongside ``Magnetblock-Blocked``,
+         ``LC6.tar``, etc.).
+      2. Replace the hardcoded ``root_dir`` below with
+         ``ballpushing_utils.dataset(<relative_path>)`` so the script
+         resolves against ``$BALLPUSHING_DATA_ROOT``.
+      3. Add a Dataverse rebuild recipe (similar to the existing
+         silencing-screen tarballs) once the upload is confirmed.
+
+Until then a non-lab user running this will hit a
+``FileNotFoundError`` on ``data_dir``; that's expected.
+"""
+
 from tqdm import tqdm
 import numpy as np
 from pathlib import Path
 import polars as pl
 import pandas as pd
 
+# TODO(durrieu, coauthor): switch to ballpushing_utils.dataset(...) once the
+# input is on Dataverse — see module docstring above.
 root_dir = Path("/mnt/upramdya/data/MD/Ballpushing_TNTScreen/Datasets/")
 dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
 data_dir = root_dir / dataset_name / "standardized_contacts"

@@ -139,6 +139,9 @@ ballpushing_utils = [
     # Dataverse, not in the wheel.
     "assets/*.csv",
     "assets/*.png",
+    # UMAP analysis subpackage ships its genotype-renames CSV next to
+    # the helpers that consume it (``ballpushing_utils.umap.analysis``).
+    "umap/data/*.csv",
 ]
 
 [tool.black]

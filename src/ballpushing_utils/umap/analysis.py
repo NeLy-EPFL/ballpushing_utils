@@ -4,7 +4,7 @@ import polars as pl
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
-from utils import (
+from .utils import (
     get_kde,
     rotate_embedding,
     cluster_points,
@@ -26,7 +26,11 @@ fps = 29
 t = (np.arange(frames_per_event) - frames_per_event // 2) / fps
 df = pl.read_parquet(cache_dir / "contacts.parquet")
 df_fly = pl.read_parquet(cache_dir / "flies.parquet")
-genotype_names = dict(zip(*pl.read_csv("data/genotype_names.csv").to_dict().values()))
+# Resolve the bundled CSV relative to this file so the script works
+# regardless of cwd, and also so the data file ships with the wheel
+# (see ``pyproject.toml`` ``[tool.setuptools.package-data]``).
+_DATA_DIR = Path(__file__).resolve().parent / "data"
+genotype_names = dict(zip(*pl.read_csv(_DATA_DIR / "genotype_names.csv").to_dict().values()))
 df_fly = df_fly.with_columns(pl.col("genotype").replace(genotype_names))
 excluded_genotypes = ["Wild-type(PR)", "Wild-type(Canton-S)", "TH", "TH-2"]
 df_fly = df_fly.filter(~pl.col("genotype").is_in(excluded_genotypes))
