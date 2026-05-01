@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 __all__ = [
+    "ARCHIVE_PREFIX_RECIPES",
     "CONDITION_TRANSFORMERS",
     "DEFAULT_CONDITION_FIELD",
     "DEFAULT_VIDEO_SIZE",
@@ -47,6 +48,7 @@ __all__ = [
     "expand_condition",
     "iter_dataverse_flies",
     "is_dataverse_layout",
+    "parse_archive_name",
     "synthesize_experiment_metadata",
 ]
 
@@ -390,6 +392,113 @@ def expand_condition(
             f"No default condition field for experiment_type {experiment_type!r}. " f"Pass condition_field explicitly."
         )
     return {field: condition_value}
+
+
+#: Recipe table for paradigms whose archive folder name encodes a single
+#: ``<prefix>-<value>`` pair. Each entry maps ``"Prefix-"`` →
+#: ``(experiment_type, condition_column)``. The condition value is whatever
+#: comes after the prefix (verbatim, hyphens preserved). Add an entry here
+#: when you publish a new paradigm-specific Dataverse archive — no other
+#: code change is required for the simple-prefix case.
+#:
+#: Multi-field paradigms (MagnetBlock, F1/Generalisation, the
+#: ``Wild-type_Lights-..._...`` feeding-state archives, and the
+#: ``<genotype>-Light-{on,off}`` olfaction-dark archives) are NOT here;
+#: they live in :func:`parse_archive_name` because one folder name
+#: populates more than one column.
+ARCHIVE_PREFIX_RECIPES: dict[str, tuple[str, str]] = {
+    "Ballscents-": ("TNT", "BallScent"),
+    "Balltype-": ("TNT", "BallType"),
+    "Multi-trials-": ("Learning", "Trial_duration"),
+}
+
+
+def parse_archive_name(name: str) -> tuple[str, dict[str, str]]:
+    """Decode a Dataverse archive folder name into ``(experiment_type, fields)``.
+
+    The Dataverse archives are named after the experiment paradigm and the
+    condition they pack:
+
+    - ``Magnetblock-Blocked`` / ``Magnetblock-Control`` → MagnetBlock with
+      ``Magnet=y`` / ``Magnet=n``.
+    - ``Generalisation-<genotype>-<f1_condition>`` → F1 with
+      ``Genotype``, ``F1_condition`` and derived ``Pretraining``.  The
+      genotype slot may itself contain hyphens (``TNTxLC10-2``,
+      ``Wild-type``); split from the right so the last hyphen-segment is
+      the F1 condition.
+    - ``Ballscents-<v>``, ``Balltypes-<v>``, ``Feedingstate-<v>``,
+      ``Light-<v>``, ``Trial_duration-<v>`` → TNT (or Learning) with the
+      paradigm-specific column populated. See
+      :data:`ARCHIVE_PREFIX_RECIPES`.
+    - ``TNT-olfaction-dark-<genotype>-<Light>`` → TNT with both
+      ``Genotype`` and ``Light`` populated.
+    - Anything else → silencing screen, treated as ``("TNT", {"Genotype":
+      name})`` so single-token archive names like ``LC6`` work
+      out-of-the-box.
+
+    Returns
+    -------
+    (str, dict)
+        Experiment type (``"TNT"`` / ``"MagnetBlock"`` / ``"F1"`` /
+        ``"Learning"``) and a flat ``{column: value}`` dict ready to feed
+        into :func:`synthesize_experiment_metadata`.
+    """
+    # MagnetBlock — exact match, case-insensitive (the published archives
+    # use ``MagnetBlock-`` with a capital B; older drafts used the all
+    # lowercase ``Magnetblock-`` form).
+    if name.lower() == "magnetblock-blocked":
+        return "MagnetBlock", {"Magnet": "y"}
+    if name.lower() == "magnetblock-control":
+        return "MagnetBlock", {"Magnet": "n"}
+
+    # F1 (Generalisation alias). Genotype may contain hyphens — split
+    # from the right so the last token is the F1 condition.
+    if name.startswith("Generalisation-"):
+        rest = name[len("Generalisation-") :]
+        head, sep, f1_cond = rest.rpartition("-")
+        if not sep:
+            f1_cond, head = rest, ""
+        pretraining = "n" if f1_cond.lower() == "control" else "y"
+        fields: dict[str, str] = {"Pretraining": pretraining, "F1_condition": f1_cond}
+        if head:
+            fields["Genotype"] = head
+        return "F1", fields
+
+    # Feeding-state archives: ``<Genotype>_Lights-<on|off>_<FeedingState>[-<replicate>]``
+    # Examples: Wild-type_Lights-off_Fed-1, Wild-type_Lights-on_Starved,
+    # Wild-type_Lights-off_Starved-without-water-2.
+    # Distinguished from ``Wild-type_PR`` / ``Wild-type_CS`` (silencing
+    # screen, two underscore tokens) by requiring three+ underscore
+    # tokens AND a ``Lights-`` prefix on the second one.
+    underscore_parts = name.split("_")
+    if len(underscore_parts) >= 3 and underscore_parts[1].startswith("Lights-"):
+        genotype = underscore_parts[0]
+        light = underscore_parts[1][len("Lights-") :]  # "on" or "off"
+        feeding_state = "_".join(underscore_parts[2:])
+        # Strip a trailing ``-<digit>`` replicate suffix so two replicates
+        # of the same condition collapse onto one feather column value.
+        m = re.match(r"^(.*?)-(\d+)$", feeding_state)
+        if m:
+            feeding_state = m.group(1)
+        return "TNT", {
+            "Genotype": genotype,
+            "Light": light,
+            "FeedingState": feeding_state,
+        }
+
+    # Olfaction-dark dual-field: ``<Genotype>-Light-{on,off}``.
+    # Examples: TNTxEmptyGal4-Light-off, TNTxIR8a-Light-on.
+    olf_match = re.match(r"^(.+)-Light-(on|off)$", name)
+    if olf_match:
+        return "TNT", {"Genotype": olf_match.group(1), "Light": olf_match.group(2)}
+
+    # Single-prefix supplementary archives — see ARCHIVE_PREFIX_RECIPES.
+    for prefix, (etype, column) in ARCHIVE_PREFIX_RECIPES.items():
+        if name.startswith(prefix):
+            return etype, {column: name[len(prefix) :]}
+
+    # Default: silencing-screen archives are named after the genotype.
+    return "TNT", {"Genotype": name}
 
 
 def synthesize_experiment_metadata(arena: str, fields: dict[str, str]) -> dict:

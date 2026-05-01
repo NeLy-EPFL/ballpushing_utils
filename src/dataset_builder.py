@@ -825,21 +825,23 @@ def process_dataverse_fly(
     metrics,
     output_data,
     experiment_type,
-    condition_field,
+    fields,
     force_cache_clear=False,
 ):
     """Build per-fly feathers from one Dataverse-layout corridor folder.
 
     Mirrors :func:`process_fly_directory` but for the Dataverse archive,
     where there is no parent ``Metadata.json``: per-arena metadata is
-    synthesised from the condition folder name via
-    ``Fly(..., dataverse_condition={...})``.
+    synthesised from a pre-parsed ``(experiment_type, fields)`` recipe
+    (typically the output of
+    :func:`ballpushing_utils.dataverse.parse_archive_name` applied to
+    the archive folder name).
 
     Parameters
     ----------
     dataverse_fly : ballpushing_utils.DataverseFly
         Record describing one corridor under
-        ``<root>/<condition>/<date>/arenaN/corridorM``.
+        ``<root>/<archive>/<date>/arenaN/corridorM``.
     metrics : list[str]
         Requested dataset types (filtered against the experiment type's
         eligibility table before any work happens).
@@ -849,10 +851,11 @@ def process_dataverse_fly(
         Resolved experiment type — drives metric eligibility and the
         paradigm-specific branches inside the package (e.g. F1 exit-time
         adjustment, MagnetBlock 3600 s cutoff).
-    condition_field : str
-        Arena-metadata column the condition folder maps to (e.g.
-        ``Genotype`` for the screen, ``Magnet`` for MagnetBlock,
-        ``Pretraining`` for F1). Becomes a feather column.
+    fields : dict
+        Flat ``{column: value}`` mapping baked into the synthetic
+        ``arena_metadata``. Multi-column paradigms (F1 → Genotype +
+        Pretraining + F1_condition; TNT-olfaction-dark → Genotype +
+        Light) use a multi-key dict; single-column paradigms use one.
     force_cache_clear : bool
         Pass-through to :func:`clear_fly_caches_conditional`.
     """
@@ -873,17 +876,6 @@ def process_dataverse_fly(
             logging.info(f"All datasets for {fly_name} already exist. Skipping.")
             return
 
-        # Expand the condition folder name into one or more metadata
-        # columns (F1 emits Pretraining + F1_condition; everything else
-        # emits a single column). ``condition_field`` only kicks in for
-        # paradigms without a registered transformer.
-        from ballpushing_utils.dataverse import expand_condition
-
-        fields = expand_condition(
-            experiment_type,
-            dataverse_fly.condition,
-            condition_field=condition_field,
-        )
         fly = ballpushing_utils.Fly(
             fly_dir,
             as_individual=True,
@@ -1472,38 +1464,8 @@ if __name__ == "__main__":
             detect_dataverse_experiment_type,
             expand_condition,
             iter_dataverse_flies,
+            parse_archive_name,
         )
-
-        if args.experiment_type is None:
-            dv_root_for_detect = Path(args.dataverse_root).expanduser()
-            if dv_root_for_detect.is_dir():
-                args.experiment_type = detect_dataverse_experiment_type(dv_root_for_detect)
-                logging.info(f"Experiment type auto-detected from Dataverse layout: " f"{args.experiment_type!r}")
-            else:
-                raise ValueError(
-                    "--dataverse-root requires --experiment-type when the "
-                    "root directory does not yet exist (cannot auto-detect)."
-                )
-
-        # Paradigms with a registered transformer (F1) ignore
-        # --condition-field; their folder name expands into multiple
-        # columns deterministically. Everything else uses
-        # --condition-field, falling back to the per-paradigm default.
-        if args.experiment_type in CONDITION_TRANSFORMERS:
-            condition_field = None
-            if args.condition_field is not None:
-                logging.warning(
-                    f"--condition-field={args.condition_field!r} ignored: "
-                    f"{args.experiment_type} uses a registered transformer "
-                    f"(see dataverse.CONDITION_TRANSFORMERS)."
-                )
-        else:
-            condition_field = args.condition_field or DEFAULT_CONDITION_FIELD.get(args.experiment_type)
-            if condition_field is None:
-                raise ValueError(
-                    f"No default condition field for experiment type "
-                    f"{args.experiment_type!r}. Pass --condition-field explicitly."
-                )
 
         dv_root = Path(args.dataverse_root).expanduser()
         if not dv_root.is_dir():
@@ -1577,23 +1539,48 @@ if __name__ == "__main__":
             f"Found {len(dataverse_flies)} flies across "
             f"{len(set(f.condition for f in dataverse_flies))} conditions in {dv_root}"
         )
-        # Show the user exactly which columns each condition folder will
-        # populate, so they can sanity-check before kicking off a long run.
-        sample_condition = next(iter(sorted({f.condition for f in dataverse_flies})))
-        sample_fields = expand_condition(args.experiment_type, sample_condition, condition_field=condition_field)
-        logging.info(
-            f"Condition expansion preview "
-            f"(experiment_type={args.experiment_type!r}): "
-            f"{sample_condition!r} -> {sample_fields}"
-        )
+
+        # Per-archive recipe lookup: parse_archive_name decodes the
+        # archive folder name into (experiment_type, fields). CLI flags
+        # override on a global basis (--experiment-type forces all
+        # archives to a paradigm; --condition-field overrides the
+        # column for paradigms without a registered transformer).
+        unique_conditions = sorted({f.condition for f in dataverse_flies})
+        archive_recipes: dict[str, tuple[str, dict]] = {}
+        for cond in unique_conditions:
+            parsed_etype, parsed_fields = parse_archive_name(cond)
+            etype = args.experiment_type or parsed_etype
+            if args.experiment_type and parsed_etype != args.experiment_type:
+                logging.warning(
+                    f"Archive {cond!r} parses as {parsed_etype} but "
+                    f"--experiment-type={args.experiment_type} forces an override."
+                )
+            # Apply --condition-field override only if the paradigm has
+            # no registered multi-column transformer (otherwise the
+            # parser already produced the correct multi-key fields).
+            fields = dict(parsed_fields)
+            if args.condition_field and etype not in CONDITION_TRANSFORMERS:
+                # User wants a different column for the primary value.
+                # Find the single value in parsed_fields and rebind it.
+                if len(parsed_fields) == 1:
+                    [(_, v)] = parsed_fields.items()
+                    fields = {args.condition_field: v}
+            archive_recipes[cond] = (etype, fields)
+
+        # Show the recipe table up front so the user can sanity-check
+        # before kicking off a long run.
+        logging.info("Archive → recipe map:")
+        for cond, (etype, fields) in archive_recipes.items():
+            logging.info(f"  {cond!r:55s} → ({etype}, {fields})")
 
         for dv_fly in tqdm(dataverse_flies, desc="Dataverse flies"):
+            etype, fields = archive_recipes[dv_fly.condition]
             process_dataverse_fly(
                 dv_fly,
                 args.datasets,
                 output_data,
-                experiment_type=args.experiment_type,
-                condition_field=condition_field,
+                experiment_type=etype,
+                fields=fields,
                 force_cache_clear=args.force_cache_clear,
             )
 

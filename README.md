@@ -185,11 +185,15 @@ yourself: it returns `"server"`, `"dataverse"`, or `None`.
 
 ## Dataverse archive
 
-Three Dataverse datasets accompany the paper. Each ships the raw SLEAP
-tracks for every fly that contributed to a panel, the pooled feathers
-the figure scripts read, and the `config.json` produced by
-`dataset_builder.py` when the feathers were built (so you can audit or
-reproduce the metric thresholds, time-range cutoffs, etc.).
+> **See [`DATAVERSE.md`](DATAVERSE.md) for the full per-archive
+> reference**: every archive name → which feather column(s) it
+> populates, the rebuild-from-h5 invocation per paradigm, and the
+> mapping cheat-sheet. The section below is the at-a-glance summary;
+> `DATAVERSE.md` is the lookup you'll want open while doing a rerun.
+
+Three Dataverse datasets accompany the paper. Each ships per-condition
+`.tar` archives of SLEAP HDF5 tracks, plus pre-computed feathers and
+the `Config.json` snapshot used to build them.
 
 | Dataset | Paradigm coverage | Conditions sorted by | Top-level folders |
 |---------|-------------------|----------------------|-------------------|
