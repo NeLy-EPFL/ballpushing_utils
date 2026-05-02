@@ -122,3 +122,85 @@ def test_each_documented_rename(modern, legacy):
     df = pd.DataFrame({legacy: [1.0, 2.0]})
     normalize_legacy_columns(df)
     assert modern in df.columns
+
+
+# ---------------------------------------------------------------------------
+# read_feather — file-not-found behaviour + basename fallback search.
+# These exercise the path that turns "data not on this machine" from a bare
+# Arrow IO error into the structured three-source breadcrumb.
+# ---------------------------------------------------------------------------
+
+
+def test_read_feather_missing_file_raises_breadcrumb(tmp_path, monkeypatch):
+    """When the feather doesn't resolve anywhere, raise FileNotFoundError
+    with the standard 'three sources' breadcrumb that names DATA_ROOT,
+    Dataverse, and sample_data.
+    """
+    from ballpushing_utils import read_feather
+
+    monkeypatch.setenv("BALLPUSHING_DATA_ROOT", str(tmp_path))
+    monkeypatch.delenv("BALLPUSHING_FEATHER_SEARCH", raising=False)
+
+    with pytest.raises(FileNotFoundError) as excinfo:
+        read_feather("nope/nothing-here.feather")
+    msg = str(excinfo.value)
+    assert "BALLPUSHING_DATA_ROOT" in msg
+    assert "Dataverse" in msg
+    assert "sample" in msg.lower()
+
+
+def test_read_feather_basename_fallback_under_data_root(tmp_path, monkeypatch):
+    """If the literal path doesn't resolve, read_feather walks
+    BALLPUSHING_DATA_ROOT recursively for the basename and uses the
+    single match it finds.
+    """
+    from ballpushing_utils import read_feather
+
+    # Build a real (but tiny) feather under DATA_ROOT at a different path
+    # than what the script will ask for.
+    monkeypatch.setenv("BALLPUSHING_DATA_ROOT", str(tmp_path))
+    real = tmp_path / "deep" / "nested" / "pooled_summary.feather"
+    real.parent.mkdir(parents=True)
+    pd.DataFrame({"a": [1, 2, 3]}).to_feather(real)
+
+    df = read_feather("any/script/relative/path/pooled_summary.feather")
+    assert list(df["a"]) == [1, 2, 3]
+
+
+def test_read_feather_basename_fallback_under_search_env(tmp_path, monkeypatch):
+    """The same fallback works via BALLPUSHING_FEATHER_SEARCH for users who
+    keep their feathers outside the data root.
+    """
+    from ballpushing_utils import read_feather
+
+    # Empty data root so rule-2 / rule-4 produce nothing.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    monkeypatch.setenv("BALLPUSHING_DATA_ROOT", str(empty))
+
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    pd.DataFrame({"speed_trend": [0.5]}).to_feather(downloads / "pooled_summary.feather")
+    monkeypatch.setenv("BALLPUSHING_FEATHER_SEARCH", str(downloads))
+
+    df = read_feather("Some/Other/Path/pooled_summary.feather")
+    assert "speed_trend" in df.columns
+
+
+def test_read_feather_ambiguous_basename_raises_breadcrumb(tmp_path, monkeypatch):
+    """Multiple basename matches under DATA_ROOT → the search punts and the
+    breadcrumb fires (so the user can disambiguate via FEATHER_SEARCH).
+    """
+    from ballpushing_utils import read_feather
+
+    monkeypatch.setenv("BALLPUSHING_DATA_ROOT", str(tmp_path))
+    monkeypatch.delenv("BALLPUSHING_FEATHER_SEARCH", raising=False)
+
+    a = tmp_path / "a" / "pooled.feather"
+    b = tmp_path / "b" / "pooled.feather"
+    for p in (a, b):
+        p.parent.mkdir(parents=True)
+        pd.DataFrame({"x": [0]}).to_feather(p)
+
+    with pytest.raises(FileNotFoundError):
+        read_feather("anywhere/pooled.feather")
