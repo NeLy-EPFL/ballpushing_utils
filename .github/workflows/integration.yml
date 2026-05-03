@@ -52,8 +52,13 @@ jobs:
       - name: Sanity-check that LFS payloads actually downloaded
         run: |
           # If `git lfs pull` was silently skipped, the files would still
-          # be pointer-stubs (under ~200 bytes). Fail loudly here rather
-          # than inside each data-gated test.
+          # be pointer-stubs. Detect by content signature rather than size:
+          # every Git-LFS pointer starts with the literal line
+          # ``version https://git-lfs.github.com/spec/v1`` (per
+          # https://github.com/git-lfs/git-lfs/blob/main/docs/spec.md).
+          # The size heuristic is unreliable here because some legitimate
+          # payloads are themselves small (e.g. ``fps.npy`` is a single-
+          # scalar numpy file, ~136 bytes — same size as a pointer stub).
           python - <<'PY'
           from pathlib import Path
           import sys
@@ -61,15 +66,23 @@ jobs:
           if not root.exists():
               print(f"{root} missing; nothing to test against.", file=sys.stderr)
               sys.exit(1)
-          big = [p for p in root.rglob("*") if p.is_file() and p.suffix in {".mp4", ".h5", ".npy"}]
-          pointers = [p for p in big if p.stat().st_size < 1024]
+          tracked = [
+              p for p in root.rglob("*")
+              if p.is_file() and p.suffix in {".mp4", ".h5", ".npy"}
+          ]
+          # Read at most the first 64 bytes — pointer files are tiny and
+          # the signature is right at the top.
+          LFS_MAGIC = b"version https://git-lfs.github.com/spec/v1"
+          pointers = [p for p in tracked if p.read_bytes()[:len(LFS_MAGIC)] == LFS_MAGIC]
           if pointers:
               print("LFS payloads look like pointer stubs, not real data:", file=sys.stderr)
               for p in pointers[:5]:
                   print(f"  {p} ({p.stat().st_size} B)", file=sys.stderr)
+              print("Hint: run `git lfs install && git lfs pull` and retry.", file=sys.stderr)
               sys.exit(1)
-          print(f"{len(big)} LFS payload(s) resolved, smallest = "
-                f"{min(p.stat().st_size for p in big) / 1024:.1f} KB.")
+          print(
+              f"{len(tracked)} LFS-tracked payload(s) resolved (no pointer stubs)."
+          )
           PY
 
       - name: Run integration tests
