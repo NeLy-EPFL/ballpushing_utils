@@ -632,6 +632,49 @@ through `ballpushing_utils.paths.dataset(...)` and
 
 ---
 
+## Contributors
+
+The package and the paper figures it generates were authored by
+**Matthias Durrieu** (lead, Ramdya Lab @ EPFL) with the following
+contributions from collaborators inside the lab:
+
+- **Tommy Lam** ([@tkclam](https://github.com/tkclam)) — UMAP analysis
+  pipeline of contact-event kinematics and the figures that build on
+  it. Specifically:
+  - `src/ballpushing_utils/umap/` — `preprocess.py`, `analysis.py`,
+    `utils.py` (feature matrix, UMAP fit + custom flip-aware metric,
+    cluster maps, KDE overlays, energy-test pipeline, grid-video
+    helper).
+  - `src/ballpushing_utils/stats/{energy_test,kde}.py` — energy
+    statistic for two-sample comparisons in embedding space and
+    KDE helpers used by the UMAP figures.
+  - `figures/Fig3-Screen/{fig3_umap,fig3_contact_image,fig3_kinematic_features}.py`
+    + `figures/EDFigure5-UMAP/edfigure5_umap.py` +
+    `figures/SuppInfo/File2_umaps.py` +
+    `figures/SuppVideo/Video8_9.py`.
+  - `figures/EDFigure4-Confocal/edfigure4_confocal_stacks.py` —
+    confocal stack registration / quantification for ED Fig. 4.
+  - `notebooks/ball_tracking/` — companion ball-tracking pipeline
+    (template matching + homography) used during method development.
+  - `src/ballpushing_utils/preprocess_screen_data.py` — pre-aggregation
+    feeding into the UMAP feature matrix.
+- **Dominic Dall'Osto**
+  ([@Dominic-DallOsto](https://github.com/Dominic-DallOsto)) —
+  high-resolution ball-pushing analysis used for ED Fig. 1.
+  Specifically:
+  - `src/ball_pushing_high_res/` — sibling package (`config.py`,
+    `df_utils.py`, `plot_utils.py`, `stat_utils.py`) holding the
+    polars-/plotnine-based dataframe helpers, fly-pose plotting, and
+    permutation-test helpers used to classify early contact events.
+  - `figures/EDFigure1-HighRes/edfigure1_early_contact_classification.ipynb`
+    — the notebook that produces the panel.
+
+If you reuse a specific figure or pipeline component, please include
+the relevant contributor in your acknowledgements alongside the paper
+citation.
+
+---
+
 ## License & citation
 
 Source code: MIT. © 2024–2026 Neuroengineering Laboratory @EPFL — Ramdya

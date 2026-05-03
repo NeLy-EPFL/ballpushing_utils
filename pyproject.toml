@@ -11,6 +11,14 @@ license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
     { name = "Matthias Durrieu", email = "matthias.durrieu@epfl.ch" },
+    # Co-author: UMAP analysis subpackage + the Fig 3 / ED Fig 4 / ED
+    # Fig 5 / Supp Info / Supp Video panels and the ball-tracking
+    # notebooks. See the Contributors section in the README for the
+    # exact file list.
+    { name = "Tommy Lam", email = "thomas.lam@epfl.ch" },
+    # Co-author: high-resolution ball-pushing analysis
+    # (src/ball_pushing_high_res/) used for ED Fig 1.
+    { name = "Dominic Dall'Osto", email = "dominic.dallosto@epfl.ch" },
 ]
 maintainers = [
     { name = "Matthias Durrieu", email = "matthias.durrieu@epfl.ch" },

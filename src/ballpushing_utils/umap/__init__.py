@@ -1,5 +1,10 @@
 """UMAP analysis subpackage.
 
+Original author: Tommy Lam (@tkclam). UMAP-based analysis of
+contact-event kinematics for the silencing screen — feature-matrix
+construction, embedding fit + clustering, KDE overlays, and the
+energy-test pipeline that drives Fig. 3 and ED Fig. 5.
+
 Originally lived at the repo root as ``umap/`` (sibling of ``src/``);
 relocated here so the helpers + bundled ``data/genotype_names.csv``
 ship with the wheel and are importable as

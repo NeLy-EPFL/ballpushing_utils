@@ -1,3 +1,10 @@
+"""Energy two-sample statistic for fly-grouped UMAP embeddings.
+
+Original author: Tommy Lam (@tkclam). Used by
+``ballpushing_utils.umap.analysis`` to compare a genotype's embedding
+distribution against its split-specific control.
+"""
+
 import numpy as np
 
 

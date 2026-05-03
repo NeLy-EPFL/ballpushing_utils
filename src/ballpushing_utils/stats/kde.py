@@ -1,3 +1,10 @@
+"""FFT-based kernel density estimation for UMAP embedding maps.
+
+Original author: Tommy Lam (@tkclam). Used by
+``ballpushing_utils.umap.analysis`` to render per-genotype density
+overlays on the cluster map.
+"""
+
 import numpy as np
 
 
