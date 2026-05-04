@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import time
 from ballpushing_utils import Fly, Experiment, BallPushingMetrics
-from utils_behavior import Utils
+from utils_behavior import utils as Utils
 import inspect
 import warnings
 

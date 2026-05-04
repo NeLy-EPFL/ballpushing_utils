@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from utils_behavior import Utils
+from utils_behavior import utils as Utils
 from typing import Optional
 
 # Pixel size: 30 mm = 500 pixels, 4 mm = 70 pixels, 1.5 mm = 25 pixels

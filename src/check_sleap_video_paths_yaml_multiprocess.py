@@ -24,7 +24,7 @@ import time
 
 # Import the SLEAP utilities
 try:
-    from utils_behavior import Sleap_utils
+    from utils_behavior import sleap as Sleap_utils
 except ImportError as e:
     print(f"❌ Error importing utils_behavior: {e}")
     print("Make sure utils_behavior package is installed and accessible.")

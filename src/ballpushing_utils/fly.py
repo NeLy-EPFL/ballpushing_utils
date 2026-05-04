@@ -13,7 +13,7 @@ from functools import lru_cache
 # inside the method, keeping the rest of this module importable on a
 # minimal install (e.g. CI running ``pytest tests/unit``).
 
-from utils_behavior import Utils
+from utils_behavior import utils as Utils
 
 from ballpushing_utils.config import Config
 from ballpushing_utils.fly_trackingdata import FlyTrackingData

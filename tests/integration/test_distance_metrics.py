@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from ballpushing_utils.fly import Fly
 from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
-from utils_behavior import Processing
+from utils_behavior import processing as Processing
 
 
 def analyze_distance_metrics(fly_path, output_dir="outputs/distance_metrics"):

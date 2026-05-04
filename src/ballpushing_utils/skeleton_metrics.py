@@ -2,7 +2,7 @@ import pandas as pd
 from ballpushing_utils import utilities
 import numpy as np
 import math
-from utils_behavior import Sleap_utils
+from utils_behavior import sleap as Sleap_utils
 from matplotlib import pyplot as plt
 
 # NOTE: ``moviepy`` is only needed by the ``generate_*_video`` methods

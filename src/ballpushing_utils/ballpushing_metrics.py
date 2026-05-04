@@ -3,7 +3,7 @@ import pandas as pd
 from typing import Any
 from sklearn.linear_model import LinearRegression
 from scipy.optimize import curve_fit
-from utils_behavior import Processing
+from utils_behavior import processing as Processing
 from functools import lru_cache
 
 

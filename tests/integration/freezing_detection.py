@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 from ballpushing_utils import Fly, Experiment, Dataset, BallPushingMetrics
-from utils_behavior import Utils
+from utils_behavior import utils as Utils
 
 ExampleFly_path = (
     Utils.get_data_server() / "MD/MultiMazeRecorder/Videos/231130_TNT_Fine_2_Videos_Tracked/arena2/corridor5"

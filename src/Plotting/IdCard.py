@@ -4,7 +4,8 @@ import Config
 import os
 import numpy as np
 import re
-from utils_behavior import Processing, Utils
+from utils_behavior import processing as Processing
+from utils_behavior import utils as Utils
 import argparse
 import yaml
 import matplotlib.pyplot as plt
@@ -181,7 +182,7 @@ if __name__ == "__main__":
 
             # --- SUMMARY METRICS PANEL: JITTERBOXPLOTS FOR SIGNIFICANT METRICS ---
             import re
-            from utils_behavior import Processing
+            from utils_behavior import processing as Processing
 
             # Load summary metrics dataset (as in summary_notebooks.py)
             summary_data = read_feather(

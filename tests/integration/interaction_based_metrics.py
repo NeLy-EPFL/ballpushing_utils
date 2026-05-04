@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 from ballpushing_utils import Fly, Experiment, Dataset
-from utils_behavior import Utils
+from utils_behavior import utils as Utils
 import cProfile
 import pstats
 import json

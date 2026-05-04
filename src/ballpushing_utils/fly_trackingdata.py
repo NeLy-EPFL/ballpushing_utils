@@ -1,7 +1,7 @@
 from functools import lru_cache
-from utils_behavior import Sleap_utils
+from utils_behavior import sleap as Sleap_utils
 from ballpushing_utils import utilities
-from utils_behavior import Processing
+from utils_behavior import processing as Processing
 from ballpushing_utils.ballpushing_metrics import BallPushingMetrics
 import numpy as np
 import warnings

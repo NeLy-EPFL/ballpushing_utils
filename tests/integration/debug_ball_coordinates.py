@@ -177,7 +177,7 @@ def plot_frames_with_annotations(fly, ball_data, skeleton_data, frames_to_plot=[
     print(f"\n=== Plotting frames {frames_to_plot} with video annotations ===")
 
     try:
-        from utils_behavior import Sleap_utils
+        from utils_behavior import sleap as Sleap_utils
         import cv2
 
         # Get the sleap tracks objects

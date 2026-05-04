@@ -1,4 +1,4 @@
-from utils_behavior import HoloviewsTemplates, Processing
+from utils_behavior import processing as Processing
 import pandas as pd
 import holoviews as hv
 import panel as pn

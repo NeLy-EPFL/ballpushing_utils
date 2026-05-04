@@ -24,10 +24,8 @@ from holoviews import opts
 
 hv.extension("bokeh")
 
-from utils_behavior import (
-    Utils,
-    Processing,
-)
+from utils_behavior import utils as Utils
+from utils_behavior import processing as Processing
 
 import importlib
 from statsmodels.stats.multitest import multipletests
