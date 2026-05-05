@@ -1,6 +1,7 @@
 from __future__ import annotations
 from ballpushing_utils.config import Config
 from ballpushing_utils.behavior_umap import BehaviorUMAP
+from ballpushing_utils.utilities import brain_regions_path as _default_brain_regions_path
 
 import os
 import pandas as pd
@@ -11,7 +12,6 @@ from matplotlib import pyplot as plt
 import cv2
 from scipy.fft import fft
 import re
-
 
 # NOTE: ``moviepy`` is only needed for :meth:`Dataset.concatenate_clips`
 # (stitching per-fly event clips into a grid). It's an optional extra
@@ -24,7 +24,7 @@ class Dataset:
     def __init__(
         self,
         source,
-        brain_regions_path="/mnt/upramdya_data/MD/Region_map_240312.csv",
+        brain_regions_path=None,
         dataset_type="coordinates",
     ):
         """
@@ -79,7 +79,7 @@ class Dataset:
 
         self.flies = [fly for fly in self.flies if fly.tracking_data is not None and fly.tracking_data.valid_data]
 
-        self.brain_regions_path = brain_regions_path
+        self.brain_regions_path = brain_regions_path or _default_brain_regions_path()
         self.regions_map = pd.read_csv(self.brain_regions_path)
 
         self.metadata = []

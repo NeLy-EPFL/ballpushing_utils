@@ -23,8 +23,8 @@ def create_mock_f1_tracking_data():
         def __init__(self):
             self.experiment_type = "F1"
             self.debugging = True
-            self.final_event_threshold = 300
-            self.final_event_F1_threshold = 150
+            self.final_event_threshold = 80
+            self.final_event_F1_threshold = 40
             self.major_event_threshold = 30
             self.max_event_threshold = 10
             self.significant_threshold = 5
@@ -167,13 +167,11 @@ def test_f1_adjusted_times():
     adjusted_training = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 0)
     adjusted_test = metrics._adjust_time_for_f1_test_ball(raw_time, 0, 1)
 
-    assert adjusted_training == raw_time, (
-        f"training-ball time should pass through unchanged, got {adjusted_training}s"
-    )
+    assert adjusted_training == raw_time, f"training-ball time should pass through unchanged, got {adjusted_training}s"
     expected_test = raw_time - tracking_data.f1_exit_time  # 45 - 30 == 15
-    assert abs(adjusted_test - expected_test) < 0.1, (
-        f"test-ball time should be raw - f1_exit_time = {expected_test}s, got {adjusted_test}s"
-    )
+    assert (
+        abs(adjusted_test - expected_test) < 0.1
+    ), f"test-ball time should be raw - f1_exit_time = {expected_test}s, got {adjusted_test}s"
 
     # Smoke-check the time-based metric helpers still execute end-to-end
     # with both ball identities — regressions here are usually a KeyError or
