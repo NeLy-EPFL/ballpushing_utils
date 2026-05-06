@@ -252,7 +252,7 @@ def main() -> None:
     parser.add_argument(
         "--split-registry",
         type=str,
-        default="/mnt/upramdya_data/MD/Region_map_250908.csv",
+        default="/mnt/upramdya_data/MD/Region_map_260506.csv",
         help="Split registry CSV for nickname/genotype/control mapping",
     )
     parser.add_argument("--control-nickname", type=str, default=None, help="Optional control nickname override")

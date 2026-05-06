@@ -10,7 +10,7 @@ from scipy.signal import find_peaks, savgol_filter
 #: was small enough (~12 KB) to vendor instead of asking users to
 #: download it separately. Bumping this constant + replacing the file
 #: in ``assets/`` is enough to ship a new region map.
-DEFAULT_BRAIN_REGIONS_FILENAME = "Region_map_250908.csv"
+DEFAULT_BRAIN_REGIONS_FILENAME = "Region_map_260506.csv"
 
 
 def brain_regions_path():

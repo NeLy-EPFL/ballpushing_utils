@@ -553,7 +553,7 @@ def load_metrics_list():
 
 def load_nickname_mapping():
     """Load the simplified nickname mapping for visualization"""
-    region_map_path = "/mnt/upramdya_data/MD/Region_map_250908.csv"
+    region_map_path = "/mnt/upramdya_data/MD/Region_map_260506.csv"
     print(f"📋 Loading nickname mapping from {region_map_path}")
 
     try:

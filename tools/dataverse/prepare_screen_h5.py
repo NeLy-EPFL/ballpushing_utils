@@ -42,7 +42,7 @@ from ballpushing_utils.archive_split import archive_directory_with_split
 # ---------------------------------------------------------------------------
 
 YAML_PATH = Path(__file__).resolve().parents[2] / "experiments_yaml/TNT_screen.yaml"
-MAPPING_CSV_PATH = dataset("Region_map_250908.csv")
+MAPPING_CSV_PATH = dataset("Region_map_260506.csv")
 OUTPUT_ROOT = dataset("Affordance_article_dataverse/silencing_screen/raw_h5")
 # Patterns of H5 files to copy (matched against filename, not full path)
 H5_PATTERNS = [

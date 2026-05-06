@@ -30,7 +30,7 @@ matplotlib.rcParams["font.family"] = "sans-serif"
 matplotlib.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans"]
 
 DEFAULT_YAML_PATH = "/home/matthias/ballpushing_utils/experiments_yaml/TNT_screen.yaml"
-DEFAULT_SPLIT_REGISTRY = "/mnt/upramdya_data/MD/Region_map_250908.csv"
+DEFAULT_SPLIT_REGISTRY = "/mnt/upramdya_data/MD/Region_map_260506.csv"
 DEFAULT_OUTPUT_ROOT = "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Plots/Significant_push_rate"
 
 

@@ -18,7 +18,7 @@ Full run:
 Full run with custom YAML:
     python build_region_trajectories.py \
         --yaml experiments_yaml/TNT_screen.yaml \
-        --split-registry /mnt/upramdya_data/MD/Region_map_250908.csv \
+        --split-registry /mnt/upramdya_data/MD/Region_map_260506.csv \
         --output-dir /mnt/upramdya_data/MD/MultiMazeRecorder/Datasets/region_trajectories \
         --dry-run
 """
@@ -41,7 +41,7 @@ import ballpushing_utils
 # Default paths – override with CLI flags
 # ---------------------------------------------------------------------------
 DEFAULT_YAML = Path(__file__).parent.parent / "experiments_yaml" / "TNT_screen.yaml"
-DEFAULT_SPLIT_REGISTRY = Path("/mnt/upramdya_data/MD/Region_map_250908.csv")
+DEFAULT_SPLIT_REGISTRY = Path("/mnt/upramdya_data/MD/Region_map_260506.csv")
 DEFAULT_OUTPUT_DIR = Path("/mnt/upramdya_data/MD/MultiMazeRecorder/Datasets/region_trajectories")
 DATASET_TYPE = "coordinates"
 

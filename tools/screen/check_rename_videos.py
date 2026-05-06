@@ -22,7 +22,7 @@ CONFIG = {
         "Ballpushing_TNTScreen/Datasets/250414_summary_TNT_screen_Data/summary/pooled_summary.feather"
     ),
     "output_dir": dataset("TNT_Screen_RawGrids"),
-    "mapping_csv": dataset("Region_map_250908.csv"),
+    "mapping_csv": dataset("Region_map_260506.csv"),
     "video_suffix": "_grid.mp4",
     "backup_dir": None,  # Set to a path if you want to backup original files
 }
