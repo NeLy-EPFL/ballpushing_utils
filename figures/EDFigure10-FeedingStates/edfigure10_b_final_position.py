@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.stats import gaussian_kde
-from ballpushing_utils import dataset, figure_output_dir, read_feather
+from ballpushing_utils import dataset, figure_output_dir, iter_coordinate_feathers
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -61,21 +61,26 @@ DEFAULT_COORDINATES_DIR = dataset("Ballpushing_Exploration/Datasets/260220_10_su
 def load_final_positions(coordinates_dir: Path) -> pd.DataFrame:
     """Load all coordinate feather files and compute per-fly final ball position.
 
-    Skips files with 'dark' in the filename and rows where Light != 'on'.
+    Skips files / experiments with 'dark' in the label and rows where
+    Light != 'on'. Iterates the on-server per-experiment files when
+    available; falls back to slicing the per-condition Dataverse
+    feathers via :func:`iter_coordinate_feathers`.
 
     Returns a DataFrame with columns: fly, FeedingState, final_position_mm
     """
-    feather_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
-    if not feather_files:
-        raise FileNotFoundError(f"No feather files found in {coordinates_dir}")
+    sources = list(iter_coordinate_feathers(coordinates_dir))
+    if not sources:
+        raise FileNotFoundError(f"No coordinate feathers resolved from {coordinates_dir}")
 
-    non_dark = [f for f in feather_files if "dark" not in f.name.lower()]
-    print(f"Files found: {len(feather_files)}  |  Dark excluded: {len(feather_files) - len(non_dark)}")
+    non_dark_sources = [(label, df) for label, df in sources if "dark" not in label.lower()]
+    print(
+        f"Sources resolved: {len(sources)}  |  Dark excluded: "
+        f"{len(sources) - len(non_dark_sources)}"
+    )
 
     chunks = []
-    for i, fp in enumerate(non_dark, 1):
-        print(f"  [{i}/{len(non_dark)}] {fp.name}")
-        df = read_feather(fp)
+    for i, (label, df) in enumerate(non_dark_sources, 1):
+        print(f"  [{i}/{len(non_dark_sources)}] {label}")
 
         # Keep Light=on only
         if "Light" in df.columns:
@@ -112,8 +117,9 @@ def load_final_positions(coordinates_dir: Path) -> pd.DataFrame:
                 "final_position_mm": (last_dist.values - first_dist.values) / PX_PER_MM,
             }
         )
-        # Prefix fly IDs with file stem to avoid collisions
-        fly_df["fly"] = fp.stem + "::" + fly_df["fly"].astype(str)
+        # Prefix fly IDs with the source label to avoid collisions across
+        # experiments (on-server: file stem; Dataverse: experiment name).
+        fly_df["fly"] = label + "::" + fly_df["fly"].astype(str)
         chunks.append(fly_df)
 
     if not chunks:

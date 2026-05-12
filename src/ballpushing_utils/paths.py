@@ -56,9 +56,15 @@ __all__ = [
 #: download still have an offline path to try.
 SAMPLE_DATA_RELATIVE = "tests/fixtures/sample_data"
 
-#: Default root if ``BALLPUSHING_DATA_ROOT`` is unset. This matches the path
-#: used during paper development and keeps existing scripts working.
+#: Default root if ``BALLPUSHING_DATA_ROOT`` is unset, when the EPFL lab
+#: share is mounted. Existing lab users keep their behaviour transparently.
 DEFAULT_DATA_ROOT = Path("/mnt/upramdya_data/MD")
+
+#: Repo-relative fallback when neither the env var nor the lab share is
+#: available — the bundled ``Datasets/`` folder is the default destination
+#: for ``ballpushing-fetch`` and other Dataverse downloads, so a fresh
+#: clone can resolve feathers out of the box. Lazily resolved.
+REPO_DATASETS_DIR = Path(__file__).resolve().parents[2] / "Datasets"
 
 #: Default subdirectory name under :func:`data_root` for generated figures
 #: when ``BALLPUSHING_FIGURES_ROOT`` is unset.
@@ -76,11 +82,27 @@ def _env_path(name: str) -> Path | None:
 def data_root() -> Path:
     """Return the root directory for datasets.
 
-    Resolved from ``BALLPUSHING_DATA_ROOT`` if set, otherwise falls back to
-    :data:`DEFAULT_DATA_ROOT`. The directory is **not** created automatically —
-    scripts reading data should either find it there or fail loudly.
+    Resolution order:
+
+    1. ``BALLPUSHING_DATA_ROOT`` env var if set.
+    2. :data:`DEFAULT_DATA_ROOT` (the EPFL NeLy lab share) if it
+       exists on this machine.
+    3. :data:`REPO_DATASETS_DIR` (the repo's bundled ``Datasets/``
+       folder) — the default destination for ``ballpushing-fetch``.
+
+    The fallback to ``Datasets/`` means a fresh clone resolves feathers
+    out of the box after running ``ballpushing-fetch`` (or extracting
+    the Dataverse archives there manually). The directory is **not**
+    created automatically — scripts reading data should either find it
+    there or fail with the structured breadcrumb produced by
+    :func:`missing_data_message`.
     """
-    return _env_path("BALLPUSHING_DATA_ROOT") or DEFAULT_DATA_ROOT
+    env = _env_path("BALLPUSHING_DATA_ROOT")
+    if env is not None:
+        return env
+    if DEFAULT_DATA_ROOT.exists():
+        return DEFAULT_DATA_ROOT
+    return REPO_DATASETS_DIR
 
 
 def figures_root() -> Path:
@@ -133,7 +155,9 @@ def get_cache_dir() -> Path:
     return cache_dir
 
 
-def find_feather(relative_or_absolute: str | os.PathLike[str]) -> Path | None:
+def find_feather(
+    relative_or_absolute: str | os.PathLike[str],
+) -> Path | list[Path] | None:
     """Locate a feather (or any data file) the figure scripts ask for.
 
     Resolution order:
@@ -141,29 +165,35 @@ def find_feather(relative_or_absolute: str | os.PathLike[str]) -> Path | None:
     1. ``relative_or_absolute`` taken at face value (absolute path or
        relative to the cwd) — the historical behaviour. If it resolves
        to an existing file, return it.
-    2. ``BALLPUSHING_DATA_ROOT / relative_or_absolute`` — the Dataverse
-       archive's canonical location. If a user extracted the whole
-       archive, this is what figures already use today.
+    2. ``BALLPUSHING_DATA_ROOT / relative_or_absolute`` — the canonical
+       location when the on-server tree has been replicated locally.
     3. Each path in the colon-separated ``BALLPUSHING_FEATHER_SEARCH``
        env var, joined with the *basename* of the requested feather.
-       Use this when you've downloaded a single feather from the
-       Dataverse and dropped it in a flat directory: set
-       ``BALLPUSHING_FEATHER_SEARCH=/path/to/downloads`` and figure
-       scripts find the file by name.
+       Use this when you've dropped feathers in a flat directory.
     4. Recursive ``rglob`` over ``BALLPUSHING_DATA_ROOT`` for the
        basename. A *single* match is returned; multiple matches return
-       ``None`` (callers will produce the breadcrumb error so the user
-       can disambiguate by setting ``BALLPUSHING_FEATHER_SEARCH`` more
+       ``None`` (callers produce the breadcrumb error so the user can
+       disambiguate by setting ``BALLPUSHING_FEATHER_SEARCH`` more
        narrowly).
+    5. **Dataverse alias.** If the requested path matches a pattern in
+       :data:`ballpushing_utils.dataverse_naming.SERVER_TO_DATAVERSE`,
+       try each candidate basename — first as a single file, then as
+       split parts (``<stem>-1.feather``, ``<stem>-2.feather``, …) —
+       in the data root, the search dirs, and finally via rglob. This
+       is the path that makes external users running off
+       ``ballpushing-fetch``'s flat ``Datasets/`` folder work without
+       any further configuration.
 
     Returns
     -------
-    Path | None
-        Resolved path on success; ``None`` if no candidate was found
-        or the search was ambiguous. Callers (see
-        :func:`ballpushing_utils.compat.read_feather`) raise the
-        breadcrumb error in the ``None`` case so users get a clear
-        next-step message.
+    Path | list[Path] | None
+        - ``Path`` for a single-file hit (steps 1–4 or step 5 single).
+        - ``list[Path]`` (length ≥ 2) when the Dataverse archive
+          publishes the feather as numerically-suffixed split parts.
+          :func:`ballpushing_utils.compat.read_feather` concatenates
+          them transparently.
+        - ``None`` when nothing was found or the basename search was
+          ambiguous. Callers raise the breadcrumb error in that case.
     """
     rel = Path(relative_or_absolute)
 
@@ -194,8 +224,6 @@ def find_feather(relative_or_absolute: str | os.PathLike[str]) -> Path | None:
         matches = list(root.rglob(basename))
         if len(matches) == 1:
             return matches[0].resolve()
-        # Ambiguous or empty — fall through to None so the caller can
-        # surface a breadcrumb (or the basename-collision warning).
         if len(matches) > 1:
             import logging
 
@@ -204,6 +232,74 @@ def find_feather(relative_or_absolute: str | os.PathLike[str]) -> Path | None:
                 f"files matched basename {basename!r} under {root}. "
                 f"Set BALLPUSHING_FEATHER_SEARCH to a more specific dir, "
                 f"or place the feather at {primary} to disambiguate."
+            )
+            # Fall through to step 5 — Dataverse-aliased names are
+            # often paradigm-specific and disambiguate the otherwise
+            # generic ``pooled_summary.feather`` basename collision.
+
+    # Step 5: Dataverse alias.
+    from .dataverse_naming import dataverse_candidates, expand_split_parts
+
+    candidates = dataverse_candidates(rel)
+    if not candidates:
+        return None
+
+    search_roots: list[Path] = [data_root()]
+    for raw_dir in search_env.split(os.pathsep):
+        raw_dir = raw_dir.strip()
+        if raw_dir:
+            search_roots.append(Path(raw_dir).expanduser())
+
+    for candidate_basename in candidates:
+        # First pass: try each search root directly (cheap).
+        for search_root in search_roots:
+            if not search_root.is_dir():
+                continue
+            hits = expand_split_parts(candidate_basename, search_root)
+            if hits:
+                return hits if len(hits) > 1 else hits[0]
+
+        # Second pass: recursive search under data_root for the
+        # canonical (single-file) basename or for split parts.
+        if not root.is_dir():
+            continue
+        stem = Path(candidate_basename).stem
+        suffix = Path(candidate_basename).suffix
+
+        rglob_direct = list(root.rglob(candidate_basename))
+        if len(rglob_direct) == 1:
+            return rglob_direct[0].resolve()
+        if len(rglob_direct) > 1:
+            import logging
+
+            logging.warning(
+                f"find_feather({relative_or_absolute!r}): {len(rglob_direct)} "
+                f"files matched Dataverse basename {candidate_basename!r} "
+                f"under {root}. Set BALLPUSHING_FEATHER_SEARCH to a more "
+                f"specific dir to disambiguate."
+            )
+            continue
+
+        rglob_parts: list[tuple[int, Path]] = []
+        for p in root.rglob(f"{stem}-*{suffix}"):
+            tail = p.stem[len(stem) + 1 :]
+            if tail.isdigit():
+                rglob_parts.append((int(tail), p.resolve()))
+        if rglob_parts:
+            # If they all live in the same directory, accept the
+            # grouping; otherwise warn and skip to avoid mixing
+            # unrelated splits.
+            unique_dirs = {p.parent for _, p in rglob_parts}
+            if len(unique_dirs) == 1:
+                rglob_parts.sort(key=lambda pair: pair[0])
+                return [p for _, p in rglob_parts]
+            import logging
+
+            logging.warning(
+                f"find_feather({relative_or_absolute!r}): split parts for "
+                f"{candidate_basename!r} found in multiple directories "
+                f"under {root}: {sorted(str(d) for d in unique_dirs)}. "
+                f"Set BALLPUSHING_FEATHER_SEARCH to disambiguate."
             )
 
     return None
@@ -317,24 +413,26 @@ def missing_data_message(
         f"{header}\n\n"
         f"ballpushing_utils looks for one of three sources (in order of "
         f"preference):\n\n"
-        f"  1. Lab share / your own server. Set BALLPUSHING_DATA_ROOT "
+        f"  1. Published Dataverse archive (Affordance / Screen / "
+        f"Exploration). Run:\n"
+        f"       ballpushing-fetch              # downloads everything the "
+        f"figures need\n"
+        f"       ballpushing-fetch --dry-run    # see what would be fetched\n"
+        f"     Files land in <repo>/Datasets/ by default (or "
+        f"$BALLPUSHING_DATA_ROOT if set).\n"
+        f"     After the fetch completes, ``python run_all_figures.py`` "
+        f"reproduces every panel.\n\n"
+        f"  2. Lab share / your own server. Set BALLPUSHING_DATA_ROOT "
         f"to a directory containing\n"
         f"     <experiment>/Metadata.json folders. Currently:\n"
         f"       BALLPUSHING_DATA_ROOT = {root}\n"
         f"     For the pipeline rerun, pass --yaml <yaml> describing the\n"
-        f"     experiment / fly directories.\n\n"
-        f"  2. Published Dataverse archive (Affordance / Screen / "
-        f"Exploration). Download the\n"
-        f"     archive that covers the figure you want, extract it under "
-        f"$BALLPUSHING_DATA_ROOT,\n"
-        f"     and the figure scripts pick up the bundled feathers verbatim. "
-        f"To regenerate\n"
-        f"     feathers from the raw HDF5 tracks, call:\n"
+        f"     experiment / fly directories. To regenerate feathers from "
+        f"raw HDF5 tracks:\n"
         f"       python src/dataset_builder.py --dataverse-root "
         f"$BALLPUSHING_DATA_ROOT/<archive>/Videos \\\n"
         f"           --experiment-type <TNT|MagnetBlock|F1|Learning> "
-        f"--datasets summary\n"
-        f"     See README \"Rerunning the pipeline from raw HDF5 tracks\".\n\n"
+        f"--datasets summary\n\n"
         f"  3. Bundled sample data. The repo ships one F1 + one TNT + one "
         f"MagnetBlock fly under\n"
         f"       {SAMPLE_DATA_RELATIVE}/\n"

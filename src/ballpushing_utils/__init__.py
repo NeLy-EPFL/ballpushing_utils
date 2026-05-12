@@ -16,7 +16,12 @@ __version__ = "0.1.0"
 
 from .ballpushing_metrics import BallPushingMetrics
 from .behavior_umap import BehaviorUMAP  # noqa: F401 (re-exported helper)
-from .compat import normalize_legacy_columns, read_feather
+from .compat import (
+    iter_coordinate_feathers,
+    load_wildtype_experiment,
+    normalize_legacy_columns,
+    read_feather,
+)
 from .config import Config
 from .dataset import Dataset
 from .dataverse import (
@@ -32,6 +37,16 @@ from .dataverse import (
     iter_dataverse_flies,
     parse_archive_name,
     synthesize_experiment_metadata,
+)
+from .dataverse_naming import (
+    BASENAME_TO_ARCHIVE,
+    DATAVERSE_DOIS,
+    SERVER_DIRECTORY_TO_DATAVERSE,
+    SERVER_TO_DATAVERSE,
+    WILDTYPE_TRAJECTORY_FEATHERS,
+    dataverse_candidates,
+    dataverse_directory_candidates,
+    expand_split_parts,
 )
 from .experiment import Experiment
 from .f1_metrics import F1Metrics
@@ -55,14 +70,19 @@ from .skeleton_metrics import SkeletonMetrics
 
 __all__ = [
     "ARCHIVE_PREFIX_RECIPES",
+    "BASENAME_TO_ARCHIVE",
     "BallPushingMetrics",
     "BehaviorUMAP",
     "CONDITION_TRANSFORMERS",
     "Config",
+    "DATAVERSE_DOIS",
     "DEFAULT_CONDITION_FIELD",
     "DEFAULT_VIDEO_SIZE",
     "Dataset",
     "DataverseFly",
+    "SERVER_DIRECTORY_TO_DATAVERSE",
+    "SERVER_TO_DATAVERSE",
+    "WILDTYPE_TRAJECTORY_FEATHERS",
     "Experiment",
     "F1Metrics",
     "Fly",
@@ -74,16 +94,21 @@ __all__ = [
     "__version__",
     "data_root",
     "dataset",
+    "dataverse_candidates",
+    "dataverse_directory_candidates",
     "default_condition_field",
     "detect_dataverse_experiment_type",
     "detect_layout",
     "expand_condition",
+    "expand_split_parts",
     "figure_output_dir",
     "figures_root",
     "find_feather",
     "is_dataverse_layout",
+    "iter_coordinate_feathers",
     "iter_dataverse_flies",
     "load_dotenv",
+    "load_wildtype_experiment",
     "missing_data_message",
     "normalize_legacy_columns",
     "parse_archive_name",

@@ -119,6 +119,52 @@ def test_find_feather_no_match_returns_none(isolate_env):
 
 
 # ---------------------------------------------------------------------------
+# find_feather — Rule 5: Dataverse alias resolution.
+# ---------------------------------------------------------------------------
+
+
+def test_find_feather_rule5_dataverse_alias_single_file(isolate_env):
+    """A server path that maps to a Dataverse basename resolves to the
+    basename when the file is present at the data root."""
+    target = isolate_env / "Magnetblock_ballpushing_metrics.feather"
+    target.write_bytes(b"")
+    rel = "MagnetBlock/Datasets/foo_Data/summary/pooled_summary.feather"
+    assert find_feather(rel) == target.resolve()
+
+
+def test_find_feather_rule5_dataverse_alias_split_parts(isolate_env):
+    """A Dataverse-aliased path with split parts returns a sorted list."""
+    for i in (1, 2, 3):
+        (isolate_env / f"Generalisation-TNT_trajectories-{i}.feather").write_bytes(b"")
+    rel = "F1_Tracks/Datasets/260123_16_F1_coordinates_F1_TNT_Full_Data/coordinates/pooled_coordinates.feather"
+    result = find_feather(rel)
+    assert isinstance(result, list)
+    assert [p.name for p in result] == [
+        "Generalisation-TNT_trajectories-1.feather",
+        "Generalisation-TNT_trajectories-2.feather",
+        "Generalisation-TNT_trajectories-3.feather",
+    ]
+
+
+def test_find_feather_rule5_dataverse_alias_uses_feather_search_dir(
+    monkeypatch, tmp_path, isolate_env
+):
+    """A Dataverse alias hits a basename inside BALLPUSHING_FEATHER_SEARCH."""
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    (downloads / "Magnetblock_ballpushing_metrics.feather").write_bytes(b"")
+    monkeypatch.setenv("BALLPUSHING_FEATHER_SEARCH", str(downloads))
+    rel = "MagnetBlock/Datasets/foo_Data/summary/pooled_summary.feather"
+    result = find_feather(rel)
+    assert result == (downloads / "Magnetblock_ballpushing_metrics.feather").resolve()
+
+
+def test_find_feather_rule5_unmapped_path_returns_none(isolate_env):
+    """A path not in SERVER_TO_DATAVERSE still returns None when missing."""
+    assert find_feather("DoesNot/Exist/in/mapping.feather") is None
+
+
+# ---------------------------------------------------------------------------
 # detect_layout — server / dataverse / None.
 # ---------------------------------------------------------------------------
 

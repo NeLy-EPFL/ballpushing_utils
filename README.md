@@ -150,14 +150,18 @@ from ballpushing_utils import load_dotenv
 load_dotenv()  # reads ./.env
 ```
 
-If unset, `BALLPUSHING_DATA_ROOT` defaults to the EPFL lab share
-(`/mnt/upramdya_data/MD`) and `BALLPUSHING_FIGURES_ROOT` defaults to
-`<data root>/Affordance_Figures`.
+If unset, `BALLPUSHING_DATA_ROOT` resolves in this order: EPFL lab
+share (`/mnt/upramdya_data/MD`) if mounted → `<repo>/Datasets/` (the
+default destination for `ballpushing-fetch`). `BALLPUSHING_FIGURES_ROOT`
+defaults to `<data root>/Affordance_Figures`.
 
-When you point `BALLPUSHING_DATA_ROOT` at the unpacked Dataverse bundles
-(see next section), every figure script runs unmodified — paths under
-the data root are resolved through `ballpushing_utils.dataset(…)` and
-mirror the layout the scripts expect.
+`ballpushing-fetch` populates `<repo>/Datasets/` with the published
+Dataverse feathers (see [Reproducing figures from
+Dataverse](#reproducing-figures-from-the-dataverse)). After it runs,
+every figure script reproduces unmodified — `ballpushing_utils.dataset(…)`
+maps the on-server paths the scripts ask for to the Dataverse-published
+basenames via
+[`src/ballpushing_utils/dataverse_naming.py`](src/ballpushing_utils/dataverse_naming.py).
 
 ---
 
@@ -166,15 +170,18 @@ mirror the layout the scripts expect.
 Scripts in this repo look for experiment data in three places, in
 order of preference:
 
-1. **Lab share / your own server** (the on-rig layout, with
+1. **Published Dataverse archive** (everything you need to reproduce
+   the paper without lab access — see the next section). Fetch with
+   `ballpushing-fetch`; the feathers land in `<repo>/Datasets/` by
+   default (or `$BALLPUSHING_DATA_ROOT` if set). The figure scripts
+   run unchanged via the Dataverse-alias resolver.
+2. **Lab share / your own server** (the on-rig layout, with
    `Metadata.json` next to per-arena/corridor SLEAP tracks). Set
    `BALLPUSHING_DATA_ROOT` to the share, point `dataset_builder.py` at
    it via `--yaml`, and figure scripts read the bundled feathers via
-   `dataset(...)`. This is what was used to build the paper.
-2. **Published Dataverse archive** (everything you need to reproduce
-   the paper without lab access — see the next section). Extract under
-   `BALLPUSHING_DATA_ROOT`. The figure scripts run unchanged; the
-   pipeline rerun uses `--dataverse-root` instead of `--yaml`.
+   `dataset(...)`. This is what was used to build the paper. The
+   pipeline rerun from raw HDF5 tracks uses `--dataverse-root` instead
+   of `--yaml`.
 3. **Bundled sample data** at `tests/fixtures/sample_data/` (one F1 +
    one TNT + one MagnetBlock fly via Git LFS). The walkthrough
    notebooks under `notebooks/` are wired up against it. Use this to
@@ -207,54 +214,61 @@ the `Config.json` snapshot used to build them.
 
 ### Layout inside each Dataverse dataset
 
-Two parallel trees live side by side:
+Each archive is **flat** — every feather lives at the dataset root,
+named after the paradigm it covers:
 
 ```
 <dataverse-dataset>/
-├── Datasets/                       # Pooled feathers (drop-in for figures)
-│   └── <YYMMDD_HH>_<metric>_<source>_Data/
-│       ├── config.json             # CONFIG dict + ballpushing Config snapshot
-│       ├── summary/pooled_summary.feather
-│       ├── coordinates/pooled_coordinates.feather
-│       └── …                       # one subfolder per dataset_type built
-└── Videos/                         # Raw SLEAP tracks, sorted by condition
-    └── <Condition>/                #   e.g. MB247xTNT/, Magnet_y/, Trained/
-        └── <YYMMDD>[-N]/           #   acquisition date; -2/-3 if the same
-            └── arenaN/             #   day produced multiple experiments
-                └── corridorM/
-                    ├── *_ball*.h5    # SLEAP ball track
-                    ├── *_fly*.h5     # SLEAP fly track
-                    └── *_full_body*.h5  # SLEAP skeleton track
+├── <Paradigm>_ballpushing_metrics.feather   # Per-fly metrics (one row per fly).
+├── <Paradigm>_trajectories.feather          # Pooled trajectories (one row per frame).
+│   # Files >2.5 GiB are split into <Paradigm>_trajectories-1.feather,
+│   # <Paradigm>_trajectories-2.feather, … (each part holds whole flies).
+├── <Paradigm>_config.json                   # `Config` snapshot used to build the feathers.
+└── <Condition>.tar                          # Per-condition SLEAP tracks (only
+                                             #   needed for the rerun-from-raw path).
 ```
 
-The `Videos/` tree is what the package calls the "Dataverse layout":
-files are organised **by condition**, not by experiment. There is no
-`Metadata.json` — the only per-fly metadata is the condition folder
-name. The `ballpushing_utils.dataverse` module knows how to walk this
-tree and synthesise the per-arena metadata `Fly()` would normally read
-from `Metadata.json` (see
-[Rerunning the pipeline from raw HDF5 tracks](#rerunning-the-pipeline-from-raw-hdf5-tracks)).
+`<Paradigm>` is e.g. `Magnetblock`, `Generalisation-Wild-type`,
+`Ballscents`, `Wild-Type`. Inside each tar, files are organised **by
+condition**: `<Condition>/<YYMMDD>[-N]/arenaN/<corridorM|Left|Right>/`
+with the SLEAP `*ball*.h5`, `*fly*.h5`, and (where present)
+`*full_body*.h5` tracks. The `ballpushing_utils.dataverse` module knows
+how to walk this tree and synthesise the per-arena metadata `Fly()`
+would normally read from `Metadata.json` — see
+[Rerunning the pipeline from raw HDF5 tracks](#rerunning-the-pipeline-from-raw-hdf5-tracks).
 
 ### Reproducing figures from the Dataverse
 
-This is the lowest-friction path. Download the archives, extract them
-under a single `BALLPUSHING_DATA_ROOT`, and the figure scripts will pick
-up the bundled feathers verbatim:
+Three commands from a fresh clone:
 
 ```bash
-mkdir -p $BALLPUSHING_DATA_ROOT
-# Extract each archive in place — they share top-level folders
-# (MagnetBlock/, F1_Tracks/, Ballpushing_TNTScreen/, Ballpushing_Exploration/, …)
-unzip Affordance_Dataverse.zip   -d $BALLPUSHING_DATA_ROOT
-unzip Screen_Dataverse.zip       -d $BALLPUSHING_DATA_ROOT
-unzip Exploration_Dataverse.zip  -d $BALLPUSHING_DATA_ROOT
-
-python run_all_figures.py
-# -> writes every panel under $BALLPUSHING_FIGURES_ROOT
+pip install -e .
+ballpushing-fetch                  # downloads ~9 GB of feathers into ./Datasets/
+python run_all_figures.py          # writes every panel under $BALLPUSHING_FIGURES_ROOT
 ```
 
-The exact feather each panel consumes is listed in the
-[Figure ↔ feather mapping](#figure--feather-mapping) table below.
+`ballpushing-fetch` reads the file list from `figures/**/*.py`, queries
+the three published Dataverse archives (Affordance, Screen, Exploration
+— see DOIs at the top of the README), and downloads only the feathers
+the figures actually need. Subsequent calls are idempotent (skip files
+already on disk with matching size). Useful options:
+
+```bash
+ballpushing-fetch --dry-run                    # show what would be fetched, exit
+ballpushing-fetch --archive affordance         # restrict to one archive (repeatable)
+ballpushing-fetch --dest /path/to/feathers     # override the destination
+ballpushing-fetch --include-raw                # also fetch the raw HDF5 track tars +
+                                               #   grid videos (~tens of GB)
+ballpushing-fetch --verify-md5                 # checksum each downloaded file
+```
+
+Files land in `./Datasets/` by default. Set `BALLPUSHING_DATA_ROOT` to
+download somewhere else; the figure scripts honour the same variable
+and fall back to `./Datasets/` when it's unset. The handle for the
+filename translation is
+[`src/ballpushing_utils/dataverse_naming.py`](src/ballpushing_utils/dataverse_naming.py)
+— add an entry there if you publish a new feather. See the figure ↔
+feather mapping below for the exact per-panel correspondence.
 
 ### Rerunning the pipeline from raw HDF5 tracks
 
@@ -367,9 +381,6 @@ missing:
   `Brain region` columns. If absent, `load_brain_regions` skips
   silently with default values (`Nickname="PR"`, `Brain region="Control"`)
   — non-screen paradigms work fine without it.
-- **`F1_New_Template.png` (F1 heatmap only).** Background image for
-  `figures/Fig2-Affordance/fig2_f1_heatmaps_pretraining.py`. Ships in
-  the Affordance archive at `F1_Tracks/F1_New_Template.png`.
 
 If your goal is figure reproduction, prefer the bundled feathers. If
 your goal is downstream custom analysis on individual flies, the
@@ -407,8 +418,8 @@ hierarchy. `read_feather` falls back to a basename search via
 ### Reproduce a single paper panel from the dataverse feathers
 
 ```bash
-# Once (after editing .env)
-export $(grep -v '^#' .env | xargs)
+# Once: fetch the Dataverse feathers (skips files already on disk).
+ballpushing-fetch
 
 python figures/Fig2-Affordance/fig2_magnetblock_first_major_push_time.py
 # -> writes  $BALLPUSHING_FIGURES_ROOT/Figure2/<script-stem>/*.pdf
@@ -525,26 +536,70 @@ The hermetic invariants of these builders are locked down in
 ## Figure ↔ feather mapping
 
 Each figure script resolves its dataset path through
-`ballpushing_utils.dataset(...)`, so paths in the table below are
-relative to `$BALLPUSHING_DATA_ROOT`. The "Dataverse archive" column
-points at the archive that ships each feather.
+`ballpushing_utils.dataset(...)`. The "Server path" column lists the
+literal each script asks for (paths are relative to
+`$BALLPUSHING_DATA_ROOT`); the "Dataverse filename" column lists the
+basename `ballpushing-fetch` downloads to satisfy that request. The
+translation table lives in
+[`src/ballpushing_utils/dataverse_naming.py`](src/ballpushing_utils/dataverse_naming.py)
+— add an entry there if you publish a new feather.
 
-| Paper figure | Script(s) | Reads | Dataverse archive |
-|---|---|---|---|
-| **Fig. 1** — setup & wild-type baseline | `figures/Fig1-setup/plot_wildtype_trajectories.py`<br>`figures/Fig1-setup/plot_simulation_trajectories.py`<br>`figures/Fig1-setup/learning_trials_duration.py`<br>`figures/Fig1-setup/compute_distribution_stats.py` | wild-type trajectory + summary feathers under `Ballpushing_Exploration/Datasets/` | Exploration |
-| **Fig. 2** — affordance (MagnetBlock + F1) | `figures/Fig2-Affordance/fig2_magnetblock_first_major_push_time.py`<br>`figures/Fig2-Affordance/fig2_magnetblock_first_major_push_index.py` | `MagnetBlock/Datasets/.../summary/pooled_summary.feather` | Affordance |
-|  | `figures/Fig2-Affordance/plot_magnetblock_trajectories.py` | `MagnetBlock/Datasets/.../coordinates/pooled_coordinates.feather` | Affordance |
-|  | `figures/Fig2-Affordance/fig2_f1_control_conditions.py` | `F1_Tracks/Datasets/.../summary/pooled_summary.feather` | Affordance |
-|  | `figures/Fig2-Affordance/fig2_f1_heatmaps_pretraining.py` | `F1_Tracks/Datasets/.../fly_positions/pooled_fly_positions.feather` + `F1_Tracks/F1_New_Template.png` | Affordance |
-| **Fig. 3** — neural silencing screen | `figures/Fig3-Screen/fig3_screen_heatmap.py` | `Ballpushing_TNTScreen/Datasets/.../summary/pooled_summary.feather` + `Region_map_*.csv` | Screen |
-|  | `figures/Fig3-Screen/fig3_f1_tnt.py` | `F1_Tracks/Datasets/260123_*_F1_TNT_Full_Data/summary/pooled_summary.feather` | Screen |
-| **ED Fig. 2** — MagnetBlock speeds | `figures/EDFigure2-Magnetblock_speeds/edfigure2_abc_speeds.py` | MagnetBlock coordinates feather | Affordance |
-| **ED Fig. 3** — wild-type × light state | `figures/EDFigure3-Wild-type_Light/*.py` | `Ballpushing_Exploration/Datasets/.../summary/pooled_summary.feather` | Exploration |
-| **ED Fig. 6** — behavioural dendrogram | `figures/EDFigure6-Dendrogram/edfigure6_dendrogram.py` | wild-type metric matrix from screen pooled summary | Screen |
-| **ED Fig. 7** — ball types | `figures/EDFigure7-Balltypes/*.py` | `Ballpushing_Balltypes/Datasets/.../coordinates/pooled_coordinates.feather` | Exploration |
-| **ED Fig. 8** — ball scents | `figures/EDFigure8-Ballscents/*.py` | `Ballpushing_Ballscents/Datasets/.../*.feather` | Exploration |
-| **ED Fig. 9** — IR8a × light | `figures/EDFigure9-Ir8a_Light/*.py` | `Ballpushing_Exploration/Datasets/.../*.feather` | Exploration |
-| **ED Fig. 10** — feeding state | `figures/EDFigure10-FeedingStates/*.py` | `Ballpushing_Exploration/Datasets/.../summary/pooled_summary.feather` | Exploration |
+| Paper figure | Script(s) | Server path | Dataverse filename | Archive |
+|---|---|---|---|---|
+| **Fig. 1** — setup & wild-type baseline | `figures/Fig1-setup/learning_trials_duration.py` | `BallPushing_Learning/.../250320_Annotated_data.feather` | `Multi-trials_trajectories.feather` (split) | Exploration |
+|  | `figures/Fig1-setup/plot_wildtype_trajectories.py`<br>`figures/Fig1-setup/compute_distribution_stats.py` | per-fly coordinates (see *Dual-workflow scripts*) | `Wild-type_Lights-*_*_trajectories.feather` (sliced by experiment) | Exploration |
+|  | `figures/Fig1-setup/plot_simulation_trajectories.py` | (synthetic; reads no Dataverse feather) | — | — |
+| **Fig. 2** — affordance (MagnetBlock + F1) | `figures/Fig2-Affordance/fig2_magnetblock_first_major_push_time.py`<br>`figures/Fig2-Affordance/fig2_magnetblock_first_major_push_index.py` | `MagnetBlock/.../summary/pooled_summary.feather` | `Magnetblock_ballpushing_metrics.feather` | Affordance |
+|  | `figures/Fig2-Affordance/plot_magnetblock_trajectories.py` | `MagnetBlock/.../coordinates/pooled_coordinates.feather` | `Magnetblock_trajectories.feather` | Affordance |
+|  | `figures/Fig2-Affordance/fig2_f1_control_conditions.py` | `F1_Tracks/.../F1_New_Data/summary/pooled_summary.feather` | `Generalisation-Wild-type_ballpushing_metrics.feather` | Affordance |
+| **Fig. 3** — neural silencing screen | `figures/Fig3-Screen/fig3_screen_heatmap.py` | `Ballpushing_TNTScreen/.../summary/pooled_summary.feather` + `Region_map_*.csv` | `ballpushing_metrics_silencing_screen.feather` | Screen |
+|  | `figures/Fig3-Screen/fig3_f1_tnt.py` | `F1_Tracks/.../F1_TNT_Full_Data/summary/pooled_summary.feather` | `Generalisation-TNT_ballpushing_metrics.feather` | Affordance |
+| **ED Fig. 2** — MagnetBlock speeds | `figures/EDFigure2-Magnetblock_speeds/edfigure2_abc_speeds.py` | `MagnetBlock/.../{summary,coordinates}` | `Magnetblock_ballpushing_metrics.feather` + `Magnetblock_trajectories.feather` | Affordance |
+| **ED Fig. 3** — wild-type × light state | `figures/EDFigure3-Wild-type_Light/edfigure3_b_summary_metrics.py` | `Ballpushing_Exploration/.../summary/pooled_summary.feather` | `Wild-Type_ballpushing_metrics.feather` | Exploration |
+|  | `figures/EDFigure3-Wild-type_Light/edfigure3_a_trajectories.py` | coordinates directory (see *Dual-workflow scripts*) | `Wild-type_Lights-{on,off}_{Fed,Starved,Starved-without-water}_trajectories.feather` | Exploration |
+| **ED Fig. 6** — behavioural dendrogram | `figures/EDFigure6-Dendrogram/edfigure6_dendrogram.py` | `Ballpushing_TNTScreen/.../summary/pooled_summary.feather` | `ballpushing_metrics_silencing_screen.feather` | Screen |
+| **ED Fig. 7** — ball types | `figures/EDFigure7-Balltypes/edfigure7_b_first_push_time.py` | `Ballpushing_Balltypes/.../summary/pooled_summary.feather` | `Balltypes_ballpushing_metrics.feather` | Exploration |
+|  | `figures/EDFigure7-Balltypes/edfigure7_c_trajectories.py` | `Ballpushing_Balltypes/.../coordinates/pooled_coordinates.feather` | `Balltypes_trajectories.feather` | Exploration |
+| **ED Fig. 8** — ball scents | `figures/EDFigure8-Ballscents/edfigure8_abc_metrics.py` | `Ball_scents/.../summary/pooled_summary.feather` + slice of pooled wild-type | `Ballscents_ballpushing_metrics.feather` + `Wild-Type_ballpushing_metrics.feather` | Exploration |
+|  | `figures/EDFigure8-Ballscents/edfigure8_def_trajectories.py` | `Ball_scents/.../coordinates/pooled_coordinates.feather` | `Ballscents_trajectories.feather` | Exploration |
+| **ED Fig. 9** — IR8a × light | `figures/EDFigure9-Ir8a_Light/edfigure9_b_pulling_ratio.py` | `TNT_Olfaction_Dark/.../summary/pooled_summary.feather` | `TNTxIR8a-dark_ballpushing_metrics.feather` | Exploration |
+|  | `figures/EDFigure9-Ir8a_Light/edfigure9_a_trajectories.py` | `TNT_Olfaction_Dark/.../coordinates/pooled_coordinates.feather` | `TNTxIR8a-dark_trajectories.feather` | Exploration |
+| **ED Fig. 10** — feeding state | `figures/EDFigure10-FeedingStates/edfigure10_c_metrics_significant.py`<br>`figures/EDFigure10-FeedingStates/edfigure10_d_metrics_nonsignificant.py` | `Ballpushing_Exploration/.../summary/pooled_summary.feather` | `Wild-Type_ballpushing_metrics.feather` | Exploration |
+|  | `figures/EDFigure10-FeedingStates/edfigure10_a_trajectories.py`<br>`figures/EDFigure10-FeedingStates/edfigure10_b_final_position.py` | coordinates directory (see *Dual-workflow scripts*) | `Wild-type_Lights-{on,off}_{Fed,Starved,Starved-without-water}_trajectories.feather` | Exploration |
+
+### Dual-workflow scripts (per-fly coordinate iteration)
+
+Five figure scripts originally iterated per-experiment
+`*_coordinates.feather` files inside `Ballpushing_Exploration/.../coordinates/`.
+The Dataverse archive publishes the same data pooled by condition
+(`Wild-type_Lights-{on,off}_{Fed,Starved,Starved-without-water}_trajectories.feather`),
+so these scripts now route through
+[`ballpushing_utils.iter_coordinate_feathers`](src/ballpushing_utils/compat.py)
+which transparently picks the right layout:
+
+- **On-server**: yields one `(file_stem, df)` per `*_coordinates.feather`
+  in the directory.
+- **Dataverse**: opens each per-condition pool, splits it by the
+  `experiment` column, and yields one `(experiment_name, df)` per
+  experiment.
+
+The downstream filter / downsample / fly-namespacing logic in each
+script is identical for both layouts. The scripts:
+
+- `figures/Fig1-setup/plot_wildtype_trajectories.py` (Fig 1e wild-type
+  trajectories — default mode reads a specific FeedingState cohort via
+  `load_wildtype_experiment(...)` when the per-fly file is missing).
+- `figures/Fig1-setup/compute_distribution_stats.py` (Fig 1 stats on
+  the same cohort, same fallback).
+- `figures/EDFigure3-Wild-type_Light/edfigure3_a_trajectories.py`,
+  `figures/EDFigure10-FeedingStates/edfigure10_a_trajectories.py`, and
+  `figures/EDFigure10-FeedingStates/edfigure10_b_final_position.py`
+  (directory iteration).
+
+The pattern lookup table is in
+[`src/ballpushing_utils/dataverse_naming.py`](src/ballpushing_utils/dataverse_naming.py)
+under `SERVER_DIRECTORY_TO_DATAVERSE`; add an entry there if a new
+script needs to iterate a different on-server coordinates directory.
 
 Supplementary panels (feeding-state, ball scents, ball types, dark
 olfaction, learning mutants, broad TNT screen, etc.) live under

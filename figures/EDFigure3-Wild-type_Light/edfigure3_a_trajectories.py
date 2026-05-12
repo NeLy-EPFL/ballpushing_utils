@@ -72,45 +72,49 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
     """
     Load coordinate datasets one by one, downsample, and combine.
 
+    Works against either the on-server layout (one
+    ``*_coordinates.feather`` per experiment under ``coordinates_dir``)
+    or the flat Dataverse layout (per-condition
+    ``Wild-type_Lights-*_*_trajectories.feather`` pools) via
+    :func:`iter_coordinate_feathers`.
+
     Parameters:
     -----------
     coordinates_dir : str or Path
-        Directory containing coordinate feather files
+        Directory of per-experiment coordinate feathers (on-server) or
+        a server-style relative path that the resolver maps to the
+        Dataverse pools.
     test_mode : bool
-        If True, only load first 2 datasets and limit flies
+        If True, only load first 2 sources and limit flies
 
     Returns:
     --------
     pd.DataFrame
         Combined and downsampled coordinates dataset
     """
+    from ballpushing_utils import iter_coordinate_feathers
+
     coordinates_dir = Path(coordinates_dir)
 
-    if not coordinates_dir.exists():
-        raise FileNotFoundError(f"Coordinates directory not found: {coordinates_dir}")
-
-    # Find all feather files
-    feather_files = sorted(list(coordinates_dir.glob("*_coordinates.feather")))
-
-    if len(feather_files) == 0:
-        raise FileNotFoundError(f"No coordinate feather files found in {coordinates_dir}")
+    sources = list(iter_coordinate_feathers(coordinates_dir))
+    if not sources:
+        raise FileNotFoundError(f"No coordinate feathers resolved from {coordinates_dir}")
 
     print(f"\n{'='*60}")
     print(f"LOADING COORDINATES DATASETS")
     print(f"{'='*60}")
-    print(f"Found {len(feather_files)} coordinate files in {coordinates_dir}")
+    print(f"Resolved {len(sources)} source(s) from {coordinates_dir}")
 
     if test_mode:
-        feather_files = feather_files[:2]
-        print(f"⚠️  TEST MODE: Only loading first {len(feather_files)} files")
+        sources = sources[:2]
+        print(f"⚠️  TEST MODE: Only loading first {len(sources)} source(s)")
 
     all_downsampled = []
 
-    for i, file_path in enumerate(feather_files, 1):
-        print(f"\n[{i}/{len(feather_files)}] Loading: {file_path.name}")
+    for i, (label, df) in enumerate(sources, 1):
+        print(f"\n[{i}/{len(sources)}] Loading: {label}")
 
         try:
-            df = read_feather(file_path)
             print(f"   Shape: {df.shape}")
 
             # Check required columns
@@ -175,7 +179,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
             all_downsampled.append(downsampled)
 
         except Exception as e:
-            print(f"   ⚠️  Error loading {file_path.name}: {e}")
+            print(f"   ⚠️  Error loading {label}: {e}")
             continue
 
     if len(all_downsampled) == 0:

@@ -87,10 +87,20 @@ PANEL_METRICS = [
 SUMMARY_PATH = (
     dataset("Ball_scents/Datasets/251103_10_summary_ballscents_Data/summary/pooled_summary.feather")
 )
-CTRL_SUMMARY_PATHS = [
-    dataset("Ballpushing_Exploration/Datasets/250815_18_summary_control_folders_Data/summary/230704_FeedingState_1_AM_Videos_Tracked_summary.feather"),
-    dataset("Ballpushing_Exploration/Datasets/250815_18_summary_control_folders_Data/summary/230705_FeedingState_2_AM_Videos_Tracked_summary.feather"),
-]
+
+# The historical Ctrl cohorts (two acquisition runs of wild-type, starved
+# without water) live as rows inside the pooled wild-type summary feather
+# rather than as their own files on Dataverse. We filter the pooled
+# feather by the ``experiment`` column to recover the same two cohorts.
+# The pooled feather is mapped to ``Wild-Type_ballpushing_metrics.feather``
+# in :mod:`ballpushing_utils.dataverse_naming`.
+CTRL_SUMMARY_PATH = dataset(
+    "Ballpushing_Exploration/Datasets/250815_18_summary_control_folders_Data/summary/pooled_summary.feather"
+)
+CTRL_EXPERIMENTS = (
+    "230704_FeedingState_1_AM_Videos_Tracked",
+    "230705_FeedingState_2_AM_Videos_Tracked",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -223,20 +233,27 @@ def load_dataset(test_mode=False):
         if col in dataset.columns:
             dataset = dataset.drop(columns=[col])
 
-    # Append historical Ctrl cohorts
+    # Append historical Ctrl cohorts. The two CTRL_EXPERIMENTS slices
+    # live inside the pooled wild-type feather rather than as standalone
+    # per-fly files on the Dataverse — filter the pooled summary by the
+    # ``experiment`` column to recover them.
     ctrl_dfs = []
-    for path in CTRL_SUMMARY_PATHS:
-        try:
-            ctrl_df = read_feather(path)
+    try:
+        ctrl_pool = read_feather(CTRL_SUMMARY_PATH)
+        if "experiment" not in ctrl_pool.columns:
+            raise KeyError("ctrl summary feather is missing the 'experiment' column")
+        for exp_name in CTRL_EXPERIMENTS:
+            ctrl_df = ctrl_pool[ctrl_pool["experiment"] == exp_name].copy()
             if "FeedingState" in ctrl_df.columns:
                 ctrl_df = ctrl_df[ctrl_df["FeedingState"] == "starved_noWater"].copy()
-                if len(ctrl_df) == 0:
-                    continue
+            if len(ctrl_df) == 0:
+                print(f"  ⚠️  Ctrl cohort '{exp_name}' returned 0 rows after filtering")
+                continue
             ctrl_df["BallScent"] = "Ctrl"
             ctrl_dfs.append(ctrl_df)
-            print(f"  Loaded Ctrl cohort: {ctrl_df.shape}")
-        except FileNotFoundError:
-            print(f"  ⚠️  Not found: {Path(path).name}")
+            print(f"  Loaded Ctrl cohort '{exp_name}': {ctrl_df.shape}")
+    except FileNotFoundError:
+        print(f"  ⚠️  Not found: {Path(CTRL_SUMMARY_PATH).name}")
 
     if ctrl_dfs:
         dataset = pd.concat([dataset] + ctrl_dfs, ignore_index=True, sort=False)

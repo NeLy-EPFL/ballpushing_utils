@@ -33,7 +33,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from ballpushing_utils import dataset, figure_output_dir, read_feather
+from ballpushing_utils import (
+    dataset,
+    figure_output_dir,
+    iter_coordinate_feathers,
+    load_wildtype_experiment,
+    read_feather,
+)
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -52,6 +58,7 @@ DEFAULT_FEATHER = dataset(
     "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data"
     "/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
 )
+DEFAULT_EXPERIMENT_NAME = "230704_FeedingState_1_AM_Videos_Tracked"
 DEFAULT_COORDINATES_DIR = dataset(
     "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates"
 )
@@ -59,8 +66,24 @@ DEFAULT_OUTPUT_DIR = figure_output_dir("Figure1", __file__, create=False)
 
 
 def load_dataset(feather_path: Path) -> pd.DataFrame:
-    """Load a coordinates feather file and add derived distance columns."""
-    data = read_feather(feather_path)
+    """Load a coordinates feather file and add derived distance columns.
+
+    Tries the literal on-server file first; on FileNotFoundError, falls
+    back to slicing :data:`DEFAULT_EXPERIMENT_NAME` out of the published
+    Dataverse wild-type pools — only valid when ``feather_path`` is the
+    default ``230704_FeedingState_1_AM_Videos_Tracked`` cohort.
+    """
+    try:
+        data = read_feather(feather_path)
+    except FileNotFoundError:
+        if Path(feather_path).stem == f"{DEFAULT_EXPERIMENT_NAME}_coordinates":
+            print(
+                f"Falling back to Dataverse pools for "
+                f"experiment={DEFAULT_EXPERIMENT_NAME!r}..."
+            )
+            data = load_wildtype_experiment(DEFAULT_EXPERIMENT_NAME)
+        else:
+            raise
 
     if data.empty:
         raise ValueError(f"Dataset is empty: {feather_path}")
@@ -80,12 +103,18 @@ def load_sampled_dataset(
     n_flies: int,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """Load feather files from a directory, filter by column values, sample N flies.
+    """Load coordinate feathers, filter by column values, sample N flies.
+
+    Works against the on-server directory of per-experiment files and
+    against the flat Dataverse layout (per-condition pools) via
+    :func:`iter_coordinate_feathers`.
 
     Parameters
     ----------
     coordinates_dir:
-        Directory containing ``*_coordinates.feather`` files.
+        Directory of per-experiment ``*_coordinates.feather`` files
+        (on-server) or a server-style relative path the resolver maps to
+        the Dataverse pools.
     filters:
         Mapping of column name → expected value, e.g.
         ``{"FeedingState": "starved_noWater", "Light": "on"}``.
@@ -95,28 +124,24 @@ def load_sampled_dataset(
     seed:
         Random seed for reproducibility.
     """
-    feather_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
-    if not feather_files:
-        raise FileNotFoundError(f"No feather files found in {coordinates_dir}")
-
-    print(f"Found {len(feather_files)} feather file(s) in {coordinates_dir}")
-
     chunks = []
-    for fp in feather_files:
-        df = read_feather(fp)
-        # Apply each filter; cast both sides to str to handle categorical columns
+    n_sources = 0
+    for label, df in iter_coordinate_feathers(coordinates_dir):
+        n_sources += 1
         mask = pd.Series(True, index=df.index)
         for col, val in filters.items():
             if col not in df.columns:
-                print(f"  Warning: column '{col}' missing in {fp.name}, skipping filter")
+                print(f"  Warning: column '{col}' missing in {label}, skipping filter")
                 continue
             mask &= df[col].astype(str) == str(val)
         matching = df[mask]
         if not matching.empty:
             chunks.append(matching)
 
+    print(f"Iterated {n_sources} source(s) from {coordinates_dir}")
+
     if not chunks:
-        raise ValueError(f"No rows matched filters {filters} across all feather files.")
+        raise ValueError(f"No rows matched filters {filters} across {n_sources} source(s).")
 
     combined = pd.concat(chunks, ignore_index=True)
 

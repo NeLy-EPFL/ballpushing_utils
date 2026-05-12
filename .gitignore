@@ -995,3 +995,11 @@ src/Supplementary_exps/dark_olfaction_coordinates_trimmed_time_genotype.png
 src/Screen_analysis/pca_analysis_results_emptysplit_20251219_163755
 src/Screen_analysis/pca_analysis_results_tailored_20251219_163028
 src/Screen_analysis/pca_analysis_results_tnt_pr_20251231_143159
+# Local downloads from the Harvard Dataverse (see
+# src/ballpushing_utils/dataverse_download.py). Empty by default;
+# populated by ``ballpushing-fetch``. Only the placeholder + README
+# are tracked so a fresh clone has the directory pre-created.
+/Datasets/*
+!/Datasets/.gitkeep
+!/Datasets/README.md
+docs/HANDOFF_dataverse_workflow.md

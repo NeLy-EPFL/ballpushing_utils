@@ -30,7 +30,13 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
-from ballpushing_utils import dataset, figure_output_dir, read_feather
+from ballpushing_utils import (
+    dataset,
+    figure_output_dir,
+    iter_coordinate_feathers,
+    load_wildtype_experiment,
+    read_feather,
+)
 
 # ---- defaults matching the two sibling scripts ---------------------------
 # All paths route through ``dataset()`` / ``figure_output_dir()`` so the
@@ -41,6 +47,7 @@ DEFAULT_FEATHER = dataset(
     "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data"
     "/coordinates/230704_FeedingState_1_AM_Videos_Tracked_coordinates.feather"
 )
+DEFAULT_EXPERIMENT_NAME = "230704_FeedingState_1_AM_Videos_Tracked"
 DEFAULT_COORDINATES_DIR = dataset(
     "Ballpushing_Exploration/Datasets/260220_10_summary_control_folders_Data/coordinates"
 )
@@ -89,14 +96,29 @@ def simulate_final_positions(num_simulations: int, steps: int, seed: int, delta:
 
 
 def load_wildtype_final_positions(feather_path: Path | None, coordinates_dir: Path | None) -> np.ndarray:
-    """Return array of per-fly final aligned ball positions (mm)."""
+    """Return array of per-fly final aligned ball positions (mm).
+
+    Tries the on-server layout first; falls back to the Dataverse pools
+    (single experiment slice when ``feather_path`` is the default
+    ``230704_FeedingState_1_AM_Videos_Tracked`` cohort, or directory
+    iteration when ``coordinates_dir`` is given).
+    """
     if feather_path is not None:
-        frames = [read_feather(feather_path)]
+        try:
+            frames = [read_feather(feather_path)]
+        except FileNotFoundError:
+            if Path(feather_path).stem == f"{DEFAULT_EXPERIMENT_NAME}_coordinates":
+                print(
+                    f"Falling back to Dataverse pools for "
+                    f"experiment={DEFAULT_EXPERIMENT_NAME!r}..."
+                )
+                frames = [load_wildtype_experiment(DEFAULT_EXPERIMENT_NAME)]
+            else:
+                raise
     else:
-        feather_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
-        if not feather_files:
-            raise FileNotFoundError(f"No feather files in {coordinates_dir}")
-        frames = [read_feather(fp) for fp in feather_files]
+        frames = [df for _, df in iter_coordinate_feathers(coordinates_dir)]
+        if not frames:
+            raise FileNotFoundError(f"No coordinate feathers resolved from {coordinates_dir}")
 
     combined = pd.concat(frames, ignore_index=True)
 

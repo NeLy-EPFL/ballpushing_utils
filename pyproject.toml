@@ -133,6 +133,10 @@ Homepage = "https://github.com/NeLy-EPFL/ballpushing_utils"
 Repository = "https://github.com/NeLy-EPFL/ballpushing_utils"
 Issues = "https://github.com/NeLy-EPFL/ballpushing_utils/issues"
 
+[project.scripts]
+# Download Dataverse feathers required by the paper figures.
+ballpushing-fetch = "ballpushing_utils.dataverse_download:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["ballpushing_utils*", "ball_pushing_high_res*"]

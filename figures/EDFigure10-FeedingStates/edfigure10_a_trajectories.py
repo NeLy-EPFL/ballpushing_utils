@@ -33,7 +33,7 @@ from itertools import combinations
 from pathlib import Path
 
 
-from ballpushing_utils import dataset, figure_output_dir, read_feather
+from ballpushing_utils import dataset, figure_output_dir, iter_coordinate_feathers
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -89,35 +89,37 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
     """
     Load coordinate feather files, skipping any Dark/dark experiments.
     Filters for Light=on, normalises FeedingState, and downsamples to 1 Hz.
+
+    Works with both the on-server layout (one ``*_coordinates.feather``
+    per experiment inside ``coordinates_dir``) and the flat Dataverse
+    layout (per-condition ``Wild-type_Lights-*_*_trajectories.feather``
+    pools) via :func:`iter_coordinate_feathers`.
     """
     coordinates_dir = Path(coordinates_dir)
-    if not coordinates_dir.exists():
-        raise FileNotFoundError(f"Coordinates directory not found: {coordinates_dir}")
 
-    all_files = sorted(coordinates_dir.glob("*_coordinates.feather"))
-    if not all_files:
-        raise FileNotFoundError(f"No coordinate feather files found in {coordinates_dir}")
+    all_sources = list(iter_coordinate_feathers(coordinates_dir))
+    if not all_sources:
+        raise FileNotFoundError(f"No coordinate feathers resolved from {coordinates_dir}")
 
-    non_dark_files = [f for f in all_files if "dark" not in f.name.lower()]
-    excluded = len(all_files) - len(non_dark_files)
+    non_dark_sources = [(label, df) for label, df in all_sources if "dark" not in label.lower()]
+    excluded = len(all_sources) - len(non_dark_sources)
 
     print(f"\n{'='*60}")
     print("LOADING COORDINATE DATASETS")
     print(f"{'='*60}")
-    print(f"Total files found:   {len(all_files)}")
-    print(f"Dark files excluded: {excluded}")
-    print(f"Files to load:       {len(non_dark_files)}")
+    print(f"Total sources found: {len(all_sources)}")
+    print(f"Dark sources excluded: {excluded}")
+    print(f"Sources to load:     {len(non_dark_sources)}")
 
     if test_mode:
-        non_dark_files = non_dark_files[:2]
-        print(f"TEST MODE: loading only first {len(non_dark_files)} file(s)")
+        non_dark_sources = non_dark_sources[:2]
+        print(f"TEST MODE: loading only first {len(non_dark_sources)} source(s)")
 
     all_downsampled = []
 
-    for i, file_path in enumerate(non_dark_files, 1):
-        print(f"\n[{i}/{len(non_dark_files)}] {file_path.name}")
+    for i, (label, df) in enumerate(non_dark_sources, 1):
+        print(f"\n[{i}/{len(non_dark_sources)}] {label}")
         try:
-            df = read_feather(file_path)
             print(f"  Shape: {df.shape}")
 
             required_cols = ["time", "distance_ball_0", "fly"]
@@ -182,8 +184,9 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
                 .agg(agg_cols)
                 .rename(columns={"time_rounded": "time"})
             )
-            # Make fly IDs unique across files
-            downsampled["fly"] = file_path.stem + "::" + downsampled["fly"].astype(str)
+            # Namespace fly IDs by source so they remain unique across
+            # experiments (on-server: file stem; Dataverse: experiment name).
+            downsampled["fly"] = label + "::" + downsampled["fly"].astype(str)
             print(f"  Downsampled shape: {downsampled.shape}")
 
             # Test mode: limit to 10 flies per FeedingState
@@ -198,7 +201,7 @@ def load_coordinates_incrementally(coordinates_dir, test_mode=False):
             all_downsampled.append(downsampled)
 
         except Exception as e:
-            print(f"  Error loading {file_path.name}: {e}")
+            print(f"  Error loading {label}: {e}")
             continue
 
     if not all_downsampled:
