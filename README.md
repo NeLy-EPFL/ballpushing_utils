@@ -75,6 +75,8 @@ visibility, etc.) lives in
 
 Requires **Python ≥ 3.10**.
 
+Installation should take between 30 seconds and 5 minutes depending on your package manager, computer, and internet speed.
+
 ```bash
 # Sample videos + SLEAP tracks under tests/fixtures/ are stored via Git LFS.
 # Install it once (https://git-lfs.com), otherwise `git clone` will download
@@ -588,6 +590,8 @@ You only need this path if you have your own recordings:
 ---
 
 ## Tests
+
+Each test suite should take ~5-30 seconds to run.
 
 ```bash
 pip install -e ".[dev]"
