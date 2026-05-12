@@ -77,6 +77,10 @@ Requires **Python ≥ 3.10**.
 
 Installation should take between 30 seconds and 5 minutes depending on your package manager, computer, and internet speed.
 
+All python dependencies are specified in the [`pyproject.toml`](pyproject.toml) file and will be automatically installed when following the instructions below.
+
+This has been tested on Ubuntu 24.04 with Python 3.10, and 3.12, but should be compatible with other operating systems and Python versions.
+
 ```bash
 # Sample videos + SLEAP tracks under tests/fixtures/ are stored via Git LFS.
 # Install it once (https://git-lfs.com), otherwise `git clone` will download
