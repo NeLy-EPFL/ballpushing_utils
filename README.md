@@ -9,10 +9,10 @@ generate every panel in the paper companion of this repository.
 > **Paper citation:** *[Durrieu et al., 2026, "Object manipulation and affordance learning in Drosophila"](https://doi.org/10.64898/2026.04.28.721021).*
 >
 > **Dataset:** Three companion Dataverse archives host the data:
-> *Affordance* (F1 + MagnetBlock, *TODO DOI*), *Screen* (TNT silencing
-> screen, *TODO DOI*), and *Exploration* (every other paradigm —
+> *Affordance* (F1 + MagnetBlock, https://doi.org/10.7910/DVN/91R87T), *Screen* (TNT silencing
+> screen, https://doi.org/10.7910/DVN/SPBKKJ), and *Exploration* (every other paradigm —
 > wild-type baselines, ball types, ball scents, feeding state, dark
-> olfaction, learning mutants, *TODO DOI*). Each archive bundles the
+> olfaction, learning mutants, https://doi.org/10.7910/DVN/VB4UI5). Each archive bundles the
 > **per-fly SLEAP HDF5 tracks** (sorted by condition), the **pooled
 > feathers** the figure scripts read, and the `config.json` that was
 > used to build the feathers. You can reproduce every paper figure from
