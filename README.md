@@ -81,7 +81,7 @@ Requires **Python ≥ 3.10**.
 # LFS-pointer stubs and the data-gated tests + notebooks will stay skipped.
 git lfs install
 
-git clone https://github.com/<TODO-org>/ballpushing_utils.git
+git clone https://github.com/Nely-EPFL/ballpushing_utils.git
 cd ballpushing_utils
 
 # Create an environment (conda or venv — either is fine).
