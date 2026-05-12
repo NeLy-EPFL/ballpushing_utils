@@ -6,9 +6,7 @@ at EPFL. It computes behavioural metrics from SLEAP-tracked recordings of
 flies interacting with a ball in a corridor, and contains the scripts that
 generate every panel in the paper companion of this repository.
 
-> **Paper citation:** *TODO — paste BioRxiv / journal DOI when available
-> (Durrieu et al., 2026, "Object manipulation and affordance learning in
-> Drosophila").*
+> **Paper citation:** *[Durrieu et al., 2026, "Object manipulation and affordance learning in Drosophila"](https://doi.org/10.64898/2026.04.28.721021).*
 >
 > **Dataset:** Three companion Dataverse archives host the data:
 > *Affordance* (F1 + MagnetBlock, *TODO DOI*), *Screen* (TNT silencing
@@ -680,5 +678,5 @@ citation.
 Source code: MIT. © 2024–2026 Neuroengineering Laboratory @EPFL — Ramdya
 Lab. See [`LICENSE`](LICENSE).
 
-Please cite the paper above when using the library, the metrics, or the
+Please cite [the paper above]([https://doi.org/10.64898/2026.04.28.721021]) when using the library, the metrics, or the
 dataset in your work.
