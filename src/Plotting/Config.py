@@ -180,8 +180,17 @@ def get_subset_data(df, col="Nickname", value="random", force_control=None):
         associated_control = force_control
         print(f"Using forced control: {associated_control}")
     else:
+        # Need to do some remapping because names in df don't perfectly match those in split register
+        nickname_for_split_register = re.sub(r"[G|g][A|a][L|l]4", "gal4", nickname)
+        if nickname_for_split_register in {"72D07-gal4", "44H11-GAL4", "20G07-GAL4"}:
+            nickname_for_split_register = "R" + nickname_for_split_register
+        if nickname == "LC10-2":
+            nickname_for_split_register = "LC10bc"
+        if nickname == "51983 (Mip-GAL4 1M)":
+            nickname_for_split_register = "Mip-gal4 1M"
+
         # Get the associated control via the split registry
-        split_value = SplitRegistry[SplitRegistry["Nickname"] == nickname]["Split"].iloc[0]
+        split_value = SplitRegistry.loc[SplitRegistry["Nickname"] == nickname_for_split_register, "Split"].iloc[0]
         associated_control = control_nicknames_dict.get(split_value)
 
         if not associated_control:
