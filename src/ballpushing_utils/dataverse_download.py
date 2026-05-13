@@ -38,6 +38,7 @@ import argparse
 import ast
 import hashlib
 import io
+import itertools
 import os
 import shutil
 import sys
@@ -53,8 +54,10 @@ from .dataverse_naming import (
     BASENAME_TO_ARCHIVE,
     DATAVERSE_DOIS,
     SCREEN_STANDARDIZED_CONTACTS_FEATHERS,
+    SERVER_DIRECTORY_TO_DATAVERSE,
     SERVER_TO_DATAVERSE,
     dataverse_candidates,
+    dataverse_directory_candidates,
 )
 
 __all__ = [
@@ -134,7 +137,7 @@ def _dataset_literals_in(py_path: Path) -> list[str]:
     return out
 
 
-def collect_required_basenames() -> dict[str, list[str]]:
+def collect_required_basenames(include_supplementary: bool) -> dict[str, list[str]]:
     """Walk ``figures/**/*.py`` and group the required basenames by archive.
 
     Returns ``{archive_label: sorted([basenames])}``. Skips scripts under
@@ -145,11 +148,19 @@ def collect_required_basenames() -> dict[str, list[str]]:
     """
     figures = _figures_dir()
     required: dict[str, set[str]] = {}
-    for py in sorted(figures.rglob("*.py")):
+
+    if not include_supplementary:
+        figure_scripts = sorted(figures.rglob("Fig*/*.py"))
+    else:
+        figure_scripts = sorted(figures.rglob("*.py"))
+
+    for py in sorted(figure_scripts):
         if "/old/" in str(py) or py.name == "run_all_panels.py":
             continue
         for literal in _dataset_literals_in(py):
             candidates = dataverse_candidates(literal)
+            if candidates is None:
+                candidates = dataverse_directory_candidates(literal)
             if not candidates:
                 continue
             for basename in candidates:
@@ -327,6 +338,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Re-download files even when a same-sized local copy exists.",
     )
     parser.add_argument(
+        "--include-supplementary",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to also download files for generating supplementary figures.",
+    )
+    parser.add_argument(
         "--include-raw",
         action="store_true",
         help=(
@@ -388,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
             archive: sorted(remote_by_archive[archive].keys()) for archive in selected_archives
         }
     else:
-        required = collect_required_basenames()
+        required = collect_required_basenames(args.include_supplementary)
         wanted_by_archive = {}
         for archive in selected_archives:
             basenames = required.get(archive, [])
@@ -496,7 +512,7 @@ def _verify_resolves(dest: Path, selected_archives: list[str]) -> None:
     print("Verifying every figure-required feather resolves...")
     bad: list[tuple[str, str]] = []
     server_paths_by_archive: dict[str, list[str]] = {a: [] for a in selected_archives}
-    for server_path, basenames in SERVER_TO_DATAVERSE.items():
+    for server_path, basenames in itertools.chain(SERVER_TO_DATAVERSE.items(), SERVER_DIRECTORY_TO_DATAVERSE.items()):
         archives_for_pattern = {BASENAME_TO_ARCHIVE.get(b) for b in basenames}
         if not archives_for_pattern & set(selected_archives):
             continue
@@ -511,7 +527,7 @@ def _verify_resolves(dest: Path, selected_archives: list[str]) -> None:
             if server_path in seen:
                 continue
             seen.add(server_path)
-            basenames = SERVER_TO_DATAVERSE[server_path]
+            basenames = SERVER_TO_DATAVERSE.get(server_path) or SERVER_DIRECTORY_TO_DATAVERSE[server_path]
             resolved_any = False
             for basename in basenames:
                 hits = expand_split_parts(basename, dest)
