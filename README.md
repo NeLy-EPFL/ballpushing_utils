@@ -248,8 +248,15 @@ Three commands from a fresh clone:
 
 ```bash
 pip install -e .
-ballpushing-fetch                  # downloads ~9 GB of feathers into ./Datasets/
-python run_all_figures.py          # writes every panel under $BALLPUSHING_FIGURES_ROOT
+ballpushing-fetch                  # downloads ~50 GB of feathers into ./Datasets/
+python run_all_figures.py          # create figure panels under $BALLPUSHING_FIGURES_ROOT
+```
+
+To also reproduce all the supplementary figures, run:
+
+```bash
+ballpushing-fetch --include-supplementary
+python run_all_figures.py --include-supplementary
 ```
 
 `ballpushing-fetch` reads the file list from `figures/**/*.py`, queries
@@ -262,8 +269,9 @@ already on disk with matching size). Useful options:
 ballpushing-fetch --dry-run                    # show what would be fetched, exit
 ballpushing-fetch --archive affordance         # restrict to one archive (repeatable)
 ballpushing-fetch --dest /path/to/feathers     # override the destination
+ballpushing-fetch --include-supplementary      # also fetch files for supplementary figures (~55 GB)
 ballpushing-fetch --include-raw                # also fetch the raw HDF5 track tars +
-                                               #   grid videos (~tens of GB)
+                                               #   grid videos (~700 GB)
 ballpushing-fetch --verify-md5                 # checksum each downloaded file
 ```
 
