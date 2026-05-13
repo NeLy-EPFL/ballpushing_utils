@@ -33,13 +33,11 @@ from statsmodels.stats.multitest import multipletests
 
 from tqdm import tqdm
 from ballpushing_utils import read_feather
-
-### Configuration for the analysis
-
-datapath = Utils.get_data_server()
+import ballpushing_utils
 
 # Import the Split registry
-SplitRegistry = pd.read_csv(datapath / "MD/Region_map_250130.csv")
+region_map_path = Path(ballpushing_utils.__path__[0]) / "assets/Region_map_260506.csv"
+SplitRegistry = pd.read_csv(region_map_path)
 
 # Downsampling if any
 
