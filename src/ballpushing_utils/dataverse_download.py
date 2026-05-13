@@ -49,6 +49,7 @@ from pathlib import Path
 from .dataverse_naming import (
     BASENAME_TO_ARCHIVE,
     DATAVERSE_DOIS,
+    SCREEN_STANDARDIZED_CONTACTS_FEATHERS,
     SERVER_TO_DATAVERSE,
     dataverse_candidates,
 )
@@ -151,6 +152,14 @@ def collect_required_basenames() -> dict[str, list[str]]:
                 if archive is None:
                     continue
                 required.setdefault(archive, set()).add(basename)
+
+    # The UMAP pipeline (Fig. 3, ED Fig. 5, Supp. File 2) loads data via
+    # preprocess_screen_data.get_preprocessed_data(), not via dataset()
+    # literals, so the AST walk above won't find the standardized-contacts
+    # feathers automatically. Always include them with the screen archive.
+    for name in SCREEN_STANDARDIZED_CONTACTS_FEATHERS:
+        required.setdefault("screen", set()).add(name)
+
     return {archive: sorted(basenames) for archive, basenames in required.items()}
 
 
