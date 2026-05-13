@@ -39,11 +39,16 @@ ballpushing_utils/
 │   ├── paths.py                # Data/figure path helpers (env-var driven).
 │   └── ...
 ├── src/Screen_analysis/        # Brain-region screen analysis pipeline.
-├── figures/                    # Paper figure scripts (Fig. 1 – Fig. 3 +
-│   ├── Fig1-setup/             #   ED Fig. 6). One script per panel; each
-│   ├── Fig2-Affordance/        #   reads a feather, runs stats, writes a
-│   ├── Fig3-Screen/            #   PDF + a stats CSV.
-│   └── EDFigure6-Dendrogram/
+├── figures/                    # Paper figure scripts (Fig. 1–3, ED Fig. 1–10,
+│   ├── Fig1-setup/             #   Supp. Info & Videos). One script per panel;
+│   ├── Fig2-Affordance/        #   each reads a feather (or confocal tiff),
+│   ├── Fig3-Screen/            #   runs stats, writes a PDF + stats CSV.
+│   ├── EDFigure1-HighRes/      # ED Fig. 1 — high-res contact classification
+│   ├── EDFigure4-Confocal/     # ED Fig. 4 — confocal-stack registration
+│   ├── EDFigure5-UMAP/         # ED Fig. 5 — per-genotype UMAP projection
+│   ├── EDFigure6-Dendrogram/   # ED Fig. 6 — behavioural dendrogram
+│   ├── SuppInfo/               # Supplementary-information figure scripts
+│   └── SuppVideo/              # Supplementary-video scripts
 ├── plots/                      # Exploratory + supplementary plots
 │   ├── Ballpushing_PR/         #   (feeding state, wildtype push rate,
 │   ├── F1_tracks/              #   F1 paradigm, ball scents, etc.).
@@ -381,6 +386,28 @@ missing:
   `Brain region` columns. If absent, `load_brain_regions` skips
   silently with default values (`Nickname="PR"`, `Brain region="Control"`)
   — non-screen paradigms work fine without it.
+- **Dendrogram consistency CSVs (bundled — no download needed).**
+  `figures/EDFigure6-Dendrogram/edfigure6_dendrogram.py` needs three
+  CSV files (`statistical_criteria_comparison.csv`,
+  `combined_consistency_ranking.csv`, `enhanced_consistency_scores.csv`)
+  that record which genotypes passed the reproducibility screen. These
+  are bundled with the package under
+  `src/ballpushing_utils/assets/` and resolved automatically by
+  `ballpushing_utils.utilities.screen_consistency_dir()` — no extra
+  download required.
+- **UMAP standardized-contacts feathers (Screen archive).** The six
+  UMAP figure scripts (`fig3_umap.py`, `fig3_contact_image.py`,
+  `edfigure5_umap.py`, etc.) need per-brain-region contact feathers
+  that are **not** fetched by a bare `ballpushing-fetch` run. Add
+  `--archive screen` to fetch them alongside the other Screen files:
+  `ballpushing-fetch --archive screen`. See [*UMAP scripts*
+  ](#umap-scripts-standardized-contacts-feathers) for the full list.
+- **ED Fig. 4 confocal data (separate Dataverse archive).** The confocal
+  figure uses `.tiff` stacks from a dedicated archive
+  (`doi:10.7910/DVN/MY4GN5`) — `ballpushing-fetch` does **not**
+  download this. The figure script auto-downloads on first run. The
+  Janelia JRC2018 reference templates must be downloaded separately
+  (see [*Confocal-stacks dataset*](#confocal-stacks-dataset-ed-fig-4)).
 
 If your goal is figure reproduction, prefer the bundled feathers. If
 your goal is downstream custom analysis on individual flies, the
@@ -554,10 +581,13 @@ translation table lives in
 |  | `figures/Fig2-Affordance/fig2_f1_control_conditions.py` | `F1_Tracks/.../F1_New_Data/summary/pooled_summary.feather` | `Generalisation-Wild-type_ballpushing_metrics.feather` | Affordance |
 | **Fig. 3** — neural silencing screen | `figures/Fig3-Screen/fig3_screen_heatmap.py` | `Ballpushing_TNTScreen/.../summary/pooled_summary.feather` + `Region_map_*.csv` | `ballpushing_metrics_silencing_screen.feather` | Screen |
 |  | `figures/Fig3-Screen/fig3_f1_tnt.py` | `F1_Tracks/.../F1_TNT_Full_Data/summary/pooled_summary.feather` | `Generalisation-TNT_ballpushing_metrics.feather` | Affordance |
+|  | `figures/Fig3-Screen/fig3_umap.py`<br>`figures/Fig3-Screen/fig3_contact_image.py` | `Ballpushing_TNTScreen/Datasets/*/standardized_contacts/` | `<Region>_standardized_contacts.feather` (9 files, one per brain region — see *UMAP scripts* below) | Screen |
 | **ED Fig. 2** — MagnetBlock speeds | `figures/EDFigure2-Magnetblock_speeds/edfigure2_abc_speeds.py` | `MagnetBlock/.../{summary,coordinates}` | `Magnetblock_ballpushing_metrics.feather` + `Magnetblock_trajectories.feather` | Affordance |
 | **ED Fig. 3** — wild-type × light state | `figures/EDFigure3-Wild-type_Light/edfigure3_b_summary_metrics.py` | `Ballpushing_Exploration/.../summary/pooled_summary.feather` | `Wild-Type_ballpushing_metrics.feather` | Exploration |
 |  | `figures/EDFigure3-Wild-type_Light/edfigure3_a_trajectories.py` | coordinates directory (see *Dual-workflow scripts*) | `Wild-type_Lights-{on,off}_{Fed,Starved,Starved-without-water}_trajectories.feather` | Exploration |
-| **ED Fig. 6** — behavioural dendrogram | `figures/EDFigure6-Dendrogram/edfigure6_dendrogram.py` | `Ballpushing_TNTScreen/.../summary/pooled_summary.feather` | `ballpushing_metrics_silencing_screen.feather` | Screen |
+| **ED Fig. 4** — confocal-stack registration | `figures/EDFigure4-Confocal/edfigure4_confocal_stacks.py` | (confocal TIFFs + `stack_infos.yaml` — **not feathers**) | Separate Dataverse archive `doi:10.7910/DVN/MY4GN5` (see *Confocal-stacks dataset* below) | Confocal |
+| **ED Fig. 5** — UMAP per-genotype projection | `figures/EDFigure5-UMAP/edfigure5_umap.py` | `Ballpushing_TNTScreen/Datasets/*/standardized_contacts/` | `<Region>_standardized_contacts.feather` (same 9 files as Fig. 3 UMAP) | Screen |
+| **ED Fig. 6** — behavioural dendrogram | `figures/EDFigure6-Dendrogram/edfigure6_dendrogram.py` | `Ballpushing_TNTScreen/.../summary/pooled_summary.feather` + consistency CSVs (bundled) | `ballpushing_metrics_silencing_screen.feather` (consistency CSVs are in `src/ballpushing_utils/assets/` — **no download needed**) | Screen |
 | **ED Fig. 7** — ball types | `figures/EDFigure7-Balltypes/edfigure7_b_first_push_time.py` | `Ballpushing_Balltypes/.../summary/pooled_summary.feather` | `Balltypes_ballpushing_metrics.feather` | Exploration |
 |  | `figures/EDFigure7-Balltypes/edfigure7_c_trajectories.py` | `Ballpushing_Balltypes/.../coordinates/pooled_coordinates.feather` | `Balltypes_trajectories.feather` | Exploration |
 | **ED Fig. 8** — ball scents | `figures/EDFigure8-Ballscents/edfigure8_abc_metrics.py` | `Ball_scents/.../summary/pooled_summary.feather` + slice of pooled wild-type | `Ballscents_ballpushing_metrics.feather` + `Wild-Type_ballpushing_metrics.feather` | Exploration |
@@ -600,6 +630,69 @@ The pattern lookup table is in
 [`src/ballpushing_utils/dataverse_naming.py`](src/ballpushing_utils/dataverse_naming.py)
 under `SERVER_DIRECTORY_TO_DATAVERSE`; add an entry there if a new
 script needs to iterate a different on-server coordinates directory.
+
+### UMAP scripts (standardized-contacts feathers)
+
+Six figure scripts build the contact-event UMAP via
+`ballpushing_utils.preprocess_screen_data.get_preprocessed_data`:
+
+- `figures/Fig3-Screen/fig3_umap.py`
+- `figures/Fig3-Screen/fig3_contact_image.py`
+- `figures/EDFigure5-UMAP/edfigure5_umap.py`
+- `figures/SuppInfo/File2_umaps.py`
+- `figures/SuppVideo/Video8_9.py`
+
+All five need the **standardized-contacts feathers** — per-fly contact
+kinematics pooled by brain region. Download them with:
+
+```bash
+ballpushing-fetch --archive screen
+```
+
+This places nine feathers (`Central_Complex_standardized_contacts.feather`,
+`Control_standardized_contacts.feather`, `Lateral_Horn_standardized_contacts.feather`,
+`MB_extrinsic_standardized_contacts.feather`, `Mushroom_Body_standardized_contacts.feather`,
+`Neuropeptide_standardized_contacts.feather`, `Olfaction_standardized_contacts.feather`,
+`Others_standardized_contacts.feather`, `Vision_standardized_contacts.feather`)
+under `$BALLPUSHING_DATA_ROOT` (or `./Datasets/`). The data-source
+resolution in `preprocess_screen_data` tries the lab-share first (74
+per-date feathers under `Ballpushing_TNTScreen/Datasets/…/standardized_contacts/`,
+or override with `BALLPUSHING_SCREEN_DATASETS_DIR`) and falls back to
+the downloaded per-region feathers automatically.
+
+### Confocal-stacks dataset (ED Fig. 4)
+
+`figures/EDFigure4-Confocal/edfigure4_confocal_stacks.py` does **not**
+use the standard feather pipeline — it reads per-genotype `.tiff`
+confocal stacks and registers them against the Janelia JRC2018
+reference-brain templates.  Two separate downloads are required:
+
+1. **Confocal TIFF stacks** — published in a dedicated Dataverse
+   archive, `doi:10.7910/DVN/MY4GN5`. The script auto-downloads on
+   first run (prints progress, lands in `<repo>/Datasets/confocal/`).
+   You can also trigger the download manually from the figure directory:
+
+   ```bash
+   cd figures/EDFigure4-Confocal
+   python -c "from edfigure4_confocal_stacks import resolve_confocal_dir; resolve_confocal_dir()"
+   ```
+
+   Or set `BALLPUSHING_TL_CONFOCAL_DIR` to point at an existing copy
+   (lab members: the NFS share at
+   `/mnt/upramdya/data/TL/affordance_confocal_stacks` is used
+   automatically if mounted).
+
+2. **Janelia JRC2018 reference templates** — not on Dataverse; download
+   from the Janelia Figshare pages listed in the script:
+   - Brain: <https://figshare.com/s/afa673b1dcd163ad8f3f>
+   - VNC: <https://figshare.com/s/8103fa90a5cded0509c4>
+
+   Place both `.nrrd` files in `<repo>/.cache/registration/jrc2018_src/`
+   (or set `BALLPUSHING_JRC2018_DIR` to any directory containing them).
+
+`ballpushing-fetch` **does not** download the confocal dataset (it only
+fetches feathers); the auto-download in the figure script is the
+recommended path.
 
 Supplementary panels (feeding-state, ball scents, ball types, dark
 olfaction, learning mutants, broad TNT screen, etc.) live under

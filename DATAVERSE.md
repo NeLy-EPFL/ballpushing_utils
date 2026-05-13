@@ -1,11 +1,24 @@
 # Using `ballpushing_utils` with the Dataverse archives
 
-Companion guide to the three Harvard Dataverse datasets that accompany
+Companion guide to the Harvard Dataverse datasets that accompany
 Durrieu et al. (2026). The repo's main [`README.md`](README.md) covers
 installation and the high-level "data sources" hierarchy; this file is
 the precise per-archive reference: what's in each archive, how its
 folders are named, and exactly which CLI invocation rebuilds a
 feather from raw HDF5 tracks.
+
+Four Dataverse archives accompany the paper:
+
+| Archive | DOI | Contents |
+|---|---|---|
+| **Affordance** | `doi:10.7910/DVN/91R87T` | F1 + MagnetBlock SLEAP tracks + feathers (Fig. 2, ED Fig. 2) |
+| **Screen** | `doi:10.7910/DVN/SPBKKJ` | TNT silencing-screen SLEAP tracks + feathers + standardized-contacts feathers (Fig. 3, ED Figs. 5–6) |
+| **Exploration** | `doi:10.7910/DVN/VB4UI5` | Wild-type, ball types, scents, feeding state, dark olfaction, learning mutants (Fig. 1, ED Figs. 3/7–10) |
+| **Confocal stacks** | `doi:10.7910/DVN/MY4GN5` | Per-genotype confocal TIFF stacks + `stack_infos.yaml` (ED Fig. 4) |
+
+`ballpushing-fetch` handles the first three archives (feathers only).
+The confocal dataset is downloaded automatically by the figure script
+on first run (see [Section 4](#4-confocal-stacks-dataset-ed-fig-4)).
 
 If you only want to *reproduce paper figures*, you don't need to
 understand any of the naming conventions — extract any archive (or
@@ -41,7 +54,7 @@ tracks. Everything the package needs (`Genotype`, `Magnet`, `BallType`,
 
 ---
 
-## The three Dataverse datasets
+## The Dataverse datasets
 
 ### 1. Silencing screen (TNT)
 
@@ -63,6 +76,7 @@ The archive name **is** the value of the `Genotype` column. The
 |---|---|
 | `ballpushing_metrics_silencing_screen.feather` | summary / per-genotype heatmap (Fig. 3, ED Fig. 6) |
 | `<region>_trajectories.feather` (and `<region>_trajectories-2.feather` for big regions split in two) | regional trajectory plots — concatenate the `-2` halves before reading |
+| `<Region>_standardized_contacts.feather` (9 files, one per brain region: `Central_Complex`, `Control`, `Lateral_Horn`, `MB_extrinsic`, `Mushroom_Body`, `Neuropeptide`, `Olfaction`, `Others`, `Vision`) | UMAP contact-kinematics pipeline (Fig. 3 UMAP, ED Fig. 5) — download with `ballpushing-fetch --archive screen` |
 | `Config.json` | the `ballpushing_utils.Config` snapshot used to build the feathers |
 
 **Reproducing figures** — extract whichever feathers you need under
@@ -270,6 +284,53 @@ mkdir -p ~/dv_feeding
 for f in Wild-type_Lights-*.tar; do tar xf "$f" -C ~/dv_feeding; done
 python src/dataset_builder.py --dataverse-root ~/dv_feeding --datasets summary
 ```
+
+---
+
+## 4. Confocal-stacks dataset (ED Fig. 4)
+
+A **fourth** Dataverse archive holds the per-genotype confocal TIFF
+stacks and the `stack_infos.yaml` manifest used by
+`figures/EDFigure4-Confocal/edfigure4_confocal_stacks.py`.
+
+- **DOI:** `doi:10.7910/DVN/MY4GN5`
+  (direct link: <https://doi.org/10.7910/DVN/MY4GN5>)
+- **Contents:** one `.tiff` per genotype key (flat layout — date
+  prefix stripped from the lab-server filename) + `stack_infos.yaml`.
+- **`ballpushing-fetch` does NOT download this.** The figure script
+  handles it itself.
+
+### Getting the confocal data
+
+**Option A — automatic (recommended).** Just run the figure script; it
+auto-downloads on first run into `<repo>/Datasets/confocal/`:
+
+```bash
+python figures/EDFigure4-Confocal/edfigure4_confocal_stacks.py
+```
+
+**Option B — manual.** Download all files from
+<https://doi.org/10.7910/DVN/MY4GN5> and place them (the `.tiff` files
++ `stack_infos.yaml`) in `<repo>/Datasets/confocal/` (or set
+`BALLPUSHING_TL_CONFOCAL_DIR` to any directory containing them).
+
+**Lab members.** If the NFS share is mounted at the canonical path
+`/mnt/upramdya/data/TL/affordance_confocal_stacks`, the script picks
+it up automatically. Set `BALLPUSHING_TL_CONFOCAL_DIR` to override.
+
+### Janelia JRC2018 reference templates (separate download)
+
+The registration step requires two NRRD template files from Janelia.
+These are **not** on the paper's Dataverse — download them from:
+
+| Region | Filename | Janelia Figshare page |
+|---|---|---|
+| Brain | `JRC2018_FEMALE_38um_iso_16bit.nrrd` | <https://figshare.com/s/afa673b1dcd163ad8f3f> |
+| VNC | `JRC2018_VNC_FEMALE_4iso.nrrd` | <https://figshare.com/s/8103fa90a5cded0509c4> |
+
+Place both files in `<repo>/.cache/registration/jrc2018_src/` (created
+automatically) or set `BALLPUSHING_JRC2018_DIR` to an existing
+directory that contains them.
 
 ---
 
