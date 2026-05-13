@@ -191,7 +191,10 @@ def resolve_stack_tiff(raw_dir: Path, genotype_key: str, stack_info: dict) -> Pa
         return server_path
 
     # 2. Flat Dataverse layout
-    flat_path = raw_dir / f"{genotype_key}.tiff"
+    # need to strip date from path eg.
+    # 250729_MB247-Gal4xUAS-spm/image.tif -> MB247-Gal4xUAS-spm
+    filename = stack_info["path"].split("/")[0][7:]
+    flat_path = raw_dir / f"{filename}.tiff"
     if flat_path.exists():
         return flat_path
 
