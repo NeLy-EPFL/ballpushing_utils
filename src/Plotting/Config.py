@@ -181,16 +181,46 @@ def get_subset_data(df, col="Nickname", value="random", force_control=None):
         print(f"Using forced control: {associated_control}")
     else:
         # Need to do some remapping because names in df don't perfectly match those in split register
-        nickname_for_split_register = re.sub(r"[G|g][A|a][L|l]4", "gal4", nickname)
-        if nickname_for_split_register in {"72D07-gal4", "44H11-GAL4", "20G07-GAL4"}:
-            nickname_for_split_register = "R" + nickname_for_split_register
+        nickname_for_split_registry = re.sub(r"[G|g][A|a][L|l]4", "gal4", nickname)
+        if nickname_for_split_registry in {"72D07-gal4", "44H11-GAL4", "20G07-GAL4"}:
+            nickname_for_split_registry = "R" + nickname_for_split_registry
         if nickname == "LC10-2":
-            nickname_for_split_register = "LC10bc"
+            nickname_for_split_registry = "LC10bc"
         if nickname == "51983 (Mip-GAL4 1M)":
-            nickname_for_split_register = "Mip-gal4 1M"
+            nickname_for_split_registry = "Mip-gal4 1M"
+
+        # LH lines eg. 86615 (LH2201) -> LH2201
+        lh_line_match = re.search(r"^\d+ \((LH\d+)\)$", nickname)
+        if lh_line_match is not None:
+            nickname_for_split_registry = lh_line_match.group(1)
+
+        # OR, IR, GR lines eg. 9998 (OR67d-GAL4) - OR67d-gal4
+        lh_line_match = re.search(r"^\d+ \(([GOI]R.*)\)$", nickname)
+        if lh_line_match is not None:
+            nickname_for_split_registry = lh_line_match.group(1)
+            nickname_for_split_registry = re.sub(r"[G|g][A|a][L|l]4", "gal4", nickname_for_split_registry)
+
+        # MBON lines eg. MBON-08-GaL4  MBON-09-GaL4 -> MBON-γ3-MBON-γ3β′1(MBON-08-MBON-09-gal4)
+        mbon_line_match = re.search(r"^MBON-(\d+)-GaL4\s+MBON-(\d+)-GaL4\s*$", nickname)
+        if mbon_line_match is not None:
+            nickname_for_split_registry = f"(MBON-{mbon_line_match.group(1)}-MBON-{mbon_line_match.group(2)}-gal4)"
+
+        # split lines eg. SS32219-Gal4 (LAL-2) -> SS32219-gal4
+        ss_line_match = re.search(r"^(SS\d+-Gal4)\s+\((.*)\)$", nickname)
+        if ss_line_match is not None:
+            nickname_for_split_registry = ss_line_match.group(1)
+            nickname_for_split_registry = re.sub(r"[G|g][A|a][L|l]4", "gal4", nickname_for_split_registry)
 
         # Get the associated control via the split registry
-        split_value = SplitRegistry.loc[SplitRegistry["Nickname"] == nickname_for_split_register, "Split"].iloc[0]
+        split_registry_row = SplitRegistry.loc[
+            SplitRegistry["Nickname"].str.contains(nickname_for_split_registry, regex=False), "Split"
+        ]
+
+        if split_registry_row.empty:
+            print(f"Couldn't find line {nickname_for_split_registry} in split registry.")
+            return pd.DataFrame()
+
+        split_value = split_registry_row.iloc[0]
         associated_control = control_nicknames_dict.get(split_value)
 
         if not associated_control:
@@ -238,7 +268,7 @@ def load_datasets_for_brain_region(brain_region, data_path, registries, downsamp
     if brain_region_data.empty:
         raise ValueError(f"Empty dataset for {brain_region}")
     if control_region_data.empty:
-        raise ValueError(f"Empty control dataset")
+        raise ValueError("Empty control dataset")
 
     # Combine the datasets
     combined_data = pd.concat([brain_region_data, control_region_data], ignore_index=True)
