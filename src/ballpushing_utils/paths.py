@@ -240,7 +240,9 @@ def find_feather(
     # Step 5: Dataverse alias.
     from .dataverse_naming import dataverse_candidates, expand_split_parts
 
-    candidates = dataverse_candidates(rel)
+    # dataverse candidates needs a relative path from data_root
+    relative_path = rel.relative_to(data_root()) if data_root() in rel.parents else rel
+    candidates = dataverse_candidates(relative_path)
     if not candidates:
         return None
 
@@ -364,10 +366,7 @@ def detect_layout(root: str | os.PathLike[str]) -> str | None:
 
         date_re = re.compile(r"^\d{6}(?:-\d+)?$")
         grandparent = seen_h5_corridor.parent.parent
-        if (
-            not (grandparent / "Metadata.json").exists()
-            and date_re.match(grandparent.name)
-        ):
+        if not (grandparent / "Metadata.json").exists() and date_re.match(grandparent.name):
             return "dataverse"
 
     return None
@@ -404,10 +403,7 @@ def missing_data_message(
         Multi-line string ready to drop into a ``raise FileNotFoundError(…)``
         or ``logging.error(…)`` call.
     """
-    header = (
-        f"Could not find {context} at {requested}." if requested else
-        f"Could not find {context}."
-    )
+    header = f"Could not find {context} at {requested}." if requested else f"Could not find {context}."
     root = data_root()
     return (
         f"{header}\n\n"
@@ -507,11 +503,7 @@ def require_path(
         return p
 
     label = f" ({description})" if description else ""
-    override_hint = (
-        f"\n  - Override via env var: ``export {env_var}=/your/mount/path``"
-        if env_var
-        else ""
-    )
+    override_hint = f"\n  - Override via env var: ``export {env_var}=/your/mount/path``" if env_var else ""
     raise FileNotFoundError(
         f"Required path not found{label}: {p}\n\n"
         f"This script expects a fixed lab-share path that may not "
