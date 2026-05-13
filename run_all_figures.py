@@ -14,6 +14,7 @@ Usage:
     python run_all_figures.py
 """
 
+import argparse
 import subprocess
 import sys
 import time
@@ -29,7 +30,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 
-def discover_scripts(root: Path) -> list[Path]:
+def discover_scripts(root: Path, include_supplementary: bool) -> list[Path]:
     """Find every panel script under ``root``.
 
     Excludes ``run_all_panels.py`` files: those are per-figure orchestrators
@@ -39,14 +40,11 @@ def discover_scripts(root: Path) -> list[Path]:
     Excludes anything under an ``old/`` subdir — those are archived legacy
     versions kept for reference, not meant to ship.
     """
-    scripts = sorted(root.rglob("*.py"))
-    return [
-        s
-        for s in scripts
-        if s.resolve() != THIS_SCRIPT
-        and s.name != "run_all_panels.py"
-        and "old" not in s.parts
-    ]
+    if not include_supplementary:
+        scripts = sorted(root.rglob("Fig*/*.py"))
+    else:
+        scripts = sorted(root.rglob("*.py"))
+    return [s for s in scripts if s.resolve() != THIS_SCRIPT and s.name != "run_all_panels.py" and "old" not in s.parts]
 
 
 def run_script(script: Path) -> tuple[bool, float, str]:
@@ -62,8 +60,25 @@ def run_script(script: Path) -> tuple[bool, float, str]:
     return result.returncode == 0, elapsed, output
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="run_all_figures",
+        description="Regenerate all figures from the paper",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--include-supplementary",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to also generate all supplementary figures. Note - this first requires running ballpushing-fetch --include-supplementary",
+    )
+
+    return parser.parse_args()
+
+
 def main() -> None:
-    scripts = discover_scripts(FIGURES_DIR)
+    args = parse_args()
+
+    scripts = discover_scripts(FIGURES_DIR, args.include_supplementary)
     if not scripts:
         print(f"{YELLOW}No scripts found under {FIGURES_DIR}{RESET}")
         sys.exit(0)
@@ -88,8 +103,8 @@ def main() -> None:
             failed.append(script)
 
     # ── Summary ────────────────────────────────────────────────────────────────
-    print(f"\n{BOLD}{'─'*60}{RESET}")
-    print(f"{BOLD}Summary: {GREEN}{len(passed)} passed{RESET}{BOLD}, " f"{RED}{len(failed)} failed{RESET}")
+    print(f"\n{BOLD}{'─' * 60}{RESET}")
+    print(f"{BOLD}Summary: {GREEN}{len(passed)} passed{RESET}{BOLD}, {RED}{len(failed)} failed{RESET}")
     if failed:
         print(f"\n{RED}Failed scripts:{RESET}")
         for s in failed:
