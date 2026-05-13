@@ -95,10 +95,7 @@ def load_coordinates(coordinates_path, test_mode=False):
     Filters to IR8a genotype only and downsample to 1 Hz.
     """
     coordinates_path = Path(coordinates_path)
-    if not coordinates_path.exists():
-        raise FileNotFoundError(f"Coordinates not found: {coordinates_path}")
 
-    print(f"Loading coordinates from: {coordinates_path}")
     df = read_feather(coordinates_path)
     print(f"Loaded: {df.shape}")
 
