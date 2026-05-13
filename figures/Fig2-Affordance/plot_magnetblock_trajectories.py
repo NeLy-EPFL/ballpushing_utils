@@ -144,7 +144,7 @@ def load_coordinates_dataset():
 
     print(f"Loading coordinates dataset from: {dataset_path}")
     try:
-        dataset = read_feather(dataset_path)
+        dataset = read_feather(dataset_path, columns=["fly", "time", "distance_ball_0", "Magnet"])
         print(f"✅ MagnetBlock coordinates dataset loaded successfully! Shape: {dataset.shape}")
     except FileNotFoundError:
         print(f"❌ Dataset not found at {dataset_path}")

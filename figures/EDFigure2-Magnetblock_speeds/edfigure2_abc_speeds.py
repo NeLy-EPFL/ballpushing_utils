@@ -73,7 +73,7 @@ LABELS = {"n": "No access to ball", "y": "Access to immobile ball"}
 def load_data(test_mode: bool = False):
     """Load coordinates and subset to valid flies from summary."""
     print(f"\nLoading coordinates from:\n  {COORDINATES_PATH}")
-    coords = read_feather(COORDINATES_PATH)
+    coords = read_feather(COORDINATES_PATH, columns=["fly", "time", "y_fly_0", "Magnet"])
 
     if test_mode:
         # Sample subset for testing

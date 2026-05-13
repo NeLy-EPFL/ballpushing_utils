@@ -69,6 +69,37 @@ LEGACY_COLUMN_RENAMES: dict[str, str] = {
 _LEGACY_FRAME_RE = re.compile(r"^(?P<base>.+_frame\d+)_velocity$")
 
 
+def _feather_column_names(path: Path) -> list[str]:
+    """Return column names from a feather file without loading any data.
+
+    Uses the Arrow IPC file footer — a few bytes at the end of the file —
+    so the cost is a seek + small read regardless of file size.
+    """
+    import pyarrow as pa
+
+    reader = pa.ipc.open_file(str(path))
+    return reader.schema.names
+
+
+def _columns_for_file(requested: list[str], on_disk: set[str]) -> list[str]:
+    """Translate requested column names to their on-disk equivalents.
+
+    Maps modern ``speed*`` names to the legacy ``velocity*`` names when the
+    legacy name is present on disk but the modern one isn't. Columns that
+    exist under their modern name are left unchanged. Columns not found in
+    either form are passed through as-is so pandas raises a clear error.
+    """
+    result = []
+    for col in requested:
+        if col in on_disk:
+            result.append(col)
+        elif col in LEGACY_COLUMN_RENAMES and LEGACY_COLUMN_RENAMES[col] in on_disk:
+            result.append(LEGACY_COLUMN_RENAMES[col])
+        else:
+            result.append(col)
+    return result
+
+
 def normalize_legacy_columns(df: pd.DataFrame, *, copy: bool = False) -> pd.DataFrame:
     """Add modern ``speed*`` aliases for legacy ``velocity*`` columns.
 
@@ -108,34 +139,37 @@ def normalize_legacy_columns(df: pd.DataFrame, *, copy: bool = False) -> pd.Data
     return df
 
 
-def read_feather(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> pd.DataFrame:
+def read_feather(
+    path: str | os.PathLike[str],
+    columns: list[str] | None = None,
+    **kwargs: Any,
+) -> pd.DataFrame:
     """:func:`pandas.read_feather` + :func:`normalize_legacy_columns`.
 
-    Drop-in replacement: same signature as ``pandas.read_feather``.
-    The returned frame is guaranteed to have the modern ``speed*``
-    column names (either because the feather already had them or
-    because they were aliased from the legacy ``velocity*`` columns).
+    Drop-in replacement for ``pandas.read_feather``.  The returned frame
+    is guaranteed to have the modern ``speed*`` column names regardless of
+    dataset vintage.
 
-    When ``path`` doesn't resolve directly, this falls back to
-    :func:`ballpushing_utils.paths.find_feather`, which searches
-    ``BALLPUSHING_DATA_ROOT`` / ``BALLPUSHING_FEATHER_SEARCH`` and the
-    Dataverse alias table. That makes the figure scripts work for
-    users who downloaded the published Dataverse archive — they don't
-    need to recreate the on-server directory hierarchy.
+    Parameters
+    ----------
+    path : str or path-like
+        Path to the feather file, or a server-relative path resolved via
+        ``BALLPUSHING_DATA_ROOT`` / the Dataverse alias table.
+    columns : list of str, optional
+        Subset of columns to load.  Only those columns are read off disk —
+        the rest never enter RAM.  Modern ``speed*`` names are translated
+        to their legacy ``velocity*`` equivalents automatically when the
+        file predates the rename, so callers always use modern names.
+        ``None`` (default) loads all columns.
 
-    When the Dataverse publishes a feather as numerically-suffixed
-    split parts (``<stem>-1.feather``, ``<stem>-2.feather``, … —
-    happens for files >2.5 GiB; see
-    :mod:`ballpushing_utils.archive_split`), :func:`find_feather`
-    returns the list and this wrapper concatenates the parts in
-    numeric order before applying the column shim. Each part is
-    self-contained (whole flies are bin-packed during the split), so
-    concat reconstructs the original feather exactly.
+    Notes
+    -----
+    When ``path`` doesn't resolve directly this falls back to
+    :func:`ballpushing_utils.paths.find_feather`.  Split Dataverse parts
+    (``<stem>-1.feather``, ``<stem>-2.feather``, …) are concatenated in
+    order; ``columns`` is applied to every part.
 
-    If the search fails (or is ambiguous), raises
-    :class:`FileNotFoundError` with the standard three-option
-    breadcrumb from
-    :func:`ballpushing_utils.paths.missing_data_message`.
+    Raises :class:`FileNotFoundError` when the path can't be resolved.
     """
     from pathlib import Path
 
@@ -147,17 +181,29 @@ def read_feather(path: str | os.PathLike[str], *args: Any, **kwargs: Any) -> pd.
         if resolved is None:
             raise FileNotFoundError(missing_data_message(path, context="feather"))
         if isinstance(resolved, list):
-            frames = [pd.read_feather(p, *args, **kwargs) for p in resolved]
+            if columns is not None:
+                on_disk = set(_feather_column_names(resolved[0]))
+                actual_cols = _columns_for_file(columns, on_disk)
+                frames = [pd.read_feather(p, columns=actual_cols, **kwargs) for p in resolved]
+            else:
+                frames = [pd.read_feather(p, **kwargs) for p in resolved]
             df = pd.concat(frames, ignore_index=True)
             return normalize_legacy_columns(df)
         actual_path = resolved
 
-    df = pd.read_feather(actual_path, *args, **kwargs)
+    if columns is not None:
+        on_disk = set(_feather_column_names(actual_path))
+        actual_cols = _columns_for_file(columns, on_disk)
+        df = pd.read_feather(actual_path, columns=actual_cols, **kwargs)
+    else:
+        df = pd.read_feather(actual_path, **kwargs)
     return normalize_legacy_columns(df)
 
 
 def iter_coordinate_feathers(
     server_directory: str | os.PathLike[str],
+    *,
+    columns: list[str] | None = None,
 ) -> Iterator[tuple[str, pd.DataFrame]]:
     """Yield ``(label, dataframe)`` pairs covering ``server_directory``.
 
@@ -182,6 +228,16 @@ def iter_coordinate_feathers(
     layout — the on-server file stem maps 1:1 to one experiment, and
     the Dataverse ``experiment`` column gives the same identifier.
 
+    Parameters
+    ----------
+    server_directory : str or path-like
+        Path to the coordinates directory (on-server) or a server-relative
+        path covered by the Dataverse alias table.
+    columns : list of str, optional
+        Subset of columns to yield in each dataframe.  Only those columns
+        are read off disk.  Legacy ``velocity*`` → ``speed*`` translation
+        is applied automatically.  ``None`` (default) yields all columns.
+
     Raises :class:`FileNotFoundError` when neither layout resolves
     anything for ``server_directory``.
     """
@@ -195,7 +251,7 @@ def iter_coordinate_feathers(
         files = sorted(abs_path.glob("*_coordinates.feather"))
         if files:
             for fp in files:
-                yield fp.stem, read_feather(fp)
+                yield fp.stem, read_feather(fp, columns=columns)
             return
 
     # Dataverse layout: walk the per-condition pooled feathers.
@@ -216,8 +272,14 @@ def iter_coordinate_feathers(
 
     yielded_any = False
     for basename in candidates:
+        # Always include "experiment" for the internal groupby split, even
+        # if the caller didn't request it.
+        if columns is not None and "experiment" not in columns:
+            read_cols: list[str] | None = ["experiment"] + list(columns)
+        else:
+            read_cols = columns
         try:
-            pooled = read_feather(basename)
+            pooled = read_feather(basename, columns=read_cols)
         except FileNotFoundError:
             # A condition feather may be missing from a partial download.
             # Skip it rather than aborting — downstream code will surface
@@ -225,11 +287,16 @@ def iter_coordinate_feathers(
             continue
         if "experiment" not in pooled.columns:
             # Defensive — should never happen for a published pool.
-            yield Path(basename).stem, pooled
+            out = pooled[columns] if (columns is not None) else pooled
+            yield Path(basename).stem, out
             yielded_any = True
             continue
         for exp_name, group in pooled.groupby("experiment", sort=True):
-            yield str(exp_name), group.reset_index(drop=True)
+            group = group.reset_index(drop=True)
+            # Drop "experiment" if the caller didn't ask for it.
+            if columns is not None and "experiment" not in columns:
+                group = group.drop(columns=["experiment"])
+            yield str(exp_name), group
             yielded_any = True
 
     if not yielded_any:
@@ -241,7 +308,10 @@ def iter_coordinate_feathers(
 
 
 def load_wildtype_experiment(
-    experiment_name: str, *, allow_empty: bool = False
+    experiment_name: str,
+    *,
+    columns: list[str] | None = None,
+    allow_empty: bool = False,
 ) -> pd.DataFrame:
     """Load all trajectory rows for a single wild-type experiment.
 
@@ -260,6 +330,10 @@ def load_wildtype_experiment(
     experiment_name : str
         Value of the ``experiment`` column to filter on, typically the
         on-server experiment folder name.
+    columns : list of str, optional
+        Subset of columns to return.  ``"experiment"`` is always loaded
+        internally for the row filter but dropped from the result unless
+        explicitly requested.  ``None`` returns all columns.
     allow_empty : bool, optional
         If True, return an empty frame instead of raising when no rows
         match. Default False.
@@ -275,11 +349,19 @@ def load_wildtype_experiment(
     """
     from .dataverse_naming import WILDTYPE_TRAJECTORY_FEATHERS
 
+    # Always include "experiment" for row filtering; strip it from the
+    # result later if the caller didn't ask for it.
+    want_experiment = columns is None or "experiment" in columns
+    if columns is not None and not want_experiment:
+        read_cols: list[str] | None = ["experiment"] + list(columns)
+    else:
+        read_cols = columns
+
     matches: list[pd.DataFrame] = []
     any_resolved = False
     for basename in WILDTYPE_TRAJECTORY_FEATHERS:
         try:
-            pooled = read_feather(basename)
+            pooled = read_feather(basename, columns=read_cols)
             any_resolved = True
         except FileNotFoundError:
             continue
@@ -306,4 +388,7 @@ def load_wildtype_experiment(
             f"holds on-server folder names verbatim."
         )
 
-    return pd.concat(matches, ignore_index=True)
+    result = pd.concat(matches, ignore_index=True)
+    if columns is not None and not want_experiment and "experiment" in result.columns:
+        result = result.drop(columns=["experiment"])
+    return result

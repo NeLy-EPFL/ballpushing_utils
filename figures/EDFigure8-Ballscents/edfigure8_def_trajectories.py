@@ -175,7 +175,7 @@ def load_coordinates_data(coordinates_path=COORDINATES_PATH, test_mode=False):
     """
     coordinates_path = Path(coordinates_path)
 
-    df = read_feather(coordinates_path)
+    df = read_feather(coordinates_path, columns=["fly", "time", "distance_ball_0", "BallScent"])
     print(f"✅ Dataset loaded: {df.shape}")
 
     required_cols = ["time", "distance_ball_0", "fly", "BallScent"]

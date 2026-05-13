@@ -21,7 +21,7 @@ from ballpushing_utils.dataverse_naming import BASENAME_TO_ARCHIVE
 
 def test_collect_required_basenames_returns_archives_for_known_files():
     """Every figure-required basename rolls up to a known archive."""
-    required = collect_required_basenames()
+    required = collect_required_basenames(include_supplementary=False)
     # At minimum every paper archive contributes at least one feather.
     assert "affordance" in required
     assert "screen" in required
@@ -33,15 +33,19 @@ def test_collect_required_basenames_returns_archives_for_known_files():
 
 
 def test_collect_required_basenames_includes_magnetblock_and_screen():
-    required = collect_required_basenames()
+    # Affordance and screen files are required by main Fig* scripts.
+    required = collect_required_basenames(include_supplementary=False)
     assert (
         "Magnetblock_ballpushing_metrics.feather" in required["affordance"]
     )
     assert (
         "ballpushing_metrics_silencing_screen.feather" in required["screen"]
     )
+    # The exploration summary is only used by an EDFigure script, so it
+    # only appears when supplementary figures are included.
+    required_with_supp = collect_required_basenames(include_supplementary=True)
     assert (
-        "Wild-Type_ballpushing_metrics.feather" in required["exploration"]
+        "Wild-Type_ballpushing_metrics.feather" in required_with_supp["exploration"]
     )
 
 
