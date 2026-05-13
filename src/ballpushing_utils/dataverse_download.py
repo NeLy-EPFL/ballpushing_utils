@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import io
 import os
 import shutil
 import sys
@@ -45,6 +46,8 @@ import urllib.parse
 import urllib.request
 from collections.abc import Iterable
 from pathlib import Path
+
+import tqdm
 
 from .dataverse_naming import (
     BASENAME_TO_ARCHIVE,
@@ -71,10 +74,17 @@ _USER_AGENT = "ballpushing-fetch/0.1 (+https://github.com/NeLy-EPFL/ballpushing_
 
 
 def _http_get(url: str, *, timeout: float = 60.0) -> "urllib.request.addinfourl":
-    req = urllib.request.Request(
-        url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT}
-    )
+    req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT})
     return urllib.request.urlopen(req, timeout=timeout)
+
+
+def download_file(url: str, output_file: io.BufferedWriter, expected_size: int | None = None, *, timeout: float = 60.0):
+    req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT})
+    with tqdm.tqdm(total=expected_size, unit="B", unit_scale=True) as progress_bar:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            for chunk in response:
+                output_file.write(chunk)
+                progress_bar.update(len(chunk))
 
 
 # ---------------------------------------------------------------------------
@@ -117,12 +127,7 @@ def _dataset_literals_in(py_path: Path) -> list[str]:
         return []
     out: list[str] = []
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "dataset"
-            and node.args
-        ):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "dataset" and node.args:
             arg = node.args[0]
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 out.append(arg.value)
@@ -199,9 +204,7 @@ def _required_split_aware(required_basenames: Iterable[str], remote_files: dict[
 # ---------------------------------------------------------------------------
 
 
-def list_dataset_files(
-    doi: str, server: str = DEFAULT_API_BASE, *, timeout: float = 60.0
-) -> dict[str, dict]:
+def list_dataset_files(doi: str, server: str = DEFAULT_API_BASE, *, timeout: float = 60.0) -> dict[str, dict]:
     """Return the published files of a Dataverse dataset, keyed by filename.
 
     Each value is a dict with at least ``id`` (numeric ``dataFile.id``,
@@ -269,19 +272,14 @@ def _download_one(
     tmp_path = Path(tmp_name)
     try:
         os.close(fd)
-        with _http_get(url, timeout=120.0) as resp, tmp_path.open("wb") as out:
-            shutil.copyfileobj(resp, out, length=1 << 20)
+        with tmp_path.open("wb") as out:
+            download_file(url, out, expected_size, timeout=120.0)
         if expected_size is not None and tmp_path.stat().st_size != expected_size:
-            raise IOError(
-                f"size mismatch for {target.name}: "
-                f"got {tmp_path.stat().st_size}, expected {expected_size}"
-            )
+            raise IOError(f"size mismatch for {target.name}: got {tmp_path.stat().st_size}, expected {expected_size}")
         if verify_md5 and expected_md5:
             actual = _md5_of(tmp_path)
             if actual != expected_md5:
-                raise IOError(
-                    f"md5 mismatch for {target.name}: got {actual}, expected {expected_md5}"
-                )
+                raise IOError(f"md5 mismatch for {target.name}: got {actual}, expected {expected_md5}")
         tmp_path.replace(target)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
@@ -309,10 +307,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--dest",
         type=Path,
         default=None,
-        help=(
-            "Destination directory. Order: --dest → $BALLPUSHING_DATA_ROOT "
-            "→ <repo>/Datasets/. Created if missing."
-        ),
+        help=("Destination directory. Order: --dest → $BALLPUSHING_DATA_ROOT → <repo>/Datasets/. Created if missing."),
     )
     parser.add_argument(
         "--archive",
@@ -390,8 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     # Decide what to fetch.
     if args.include_raw:
         wanted_by_archive: dict[str, list[str]] = {
-            archive: sorted(remote_by_archive[archive].keys())
-            for archive in selected_archives
+            archive: sorted(remote_by_archive[archive].keys()) for archive in selected_archives
         }
     else:
         required = collect_required_basenames()
@@ -448,11 +442,7 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[tuple[str, Exception]] = []
     skipped = 0
     for archive, name, size, md5, target in plan:
-        if (
-            target.exists()
-            and (size is None or target.stat().st_size == size)
-            and not args.force
-        ):
+        if target.exists() and (size is None or target.stat().st_size == size) and not args.force:
             skipped += 1
             continue
         entry = remote_by_archive[archive][name]
@@ -474,9 +464,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print("=" * 60)
-    print(f"Done. Downloaded: {len(plan) - skipped - len(failures)}   "
-          f"Skipped (already on disk): {skipped}   "
-          f"Failed: {len(failures)}")
+    print(
+        f"Done. Downloaded: {len(plan) - skipped - len(failures)}   "
+        f"Skipped (already on disk): {skipped}   "
+        f"Failed: {len(failures)}"
+    )
 
     if failures:
         for name, exc in failures:
