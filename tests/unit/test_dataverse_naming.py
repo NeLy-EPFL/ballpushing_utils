@@ -27,6 +27,7 @@ import pytest
 
 from ballpushing_utils.dataverse_naming import (
     BASENAME_TO_ARCHIVE,
+    SCREEN_STANDARDIZED_CONTACTS_FEATHERS,
     SERVER_DIRECTORY_TO_DATAVERSE,
     SERVER_TO_DATAVERSE,
     dataverse_candidates,
@@ -165,7 +166,11 @@ def test_expand_split_parts_numeric_split(tmp_path: Path) -> None:
     for i in (1, 2, 3):
         (tmp_path / f"foo-{i}.feather").touch()
     parts = expand_split_parts("foo.feather", tmp_path)
-    assert [p.name for p in parts] == ["foo-1.feather", "foo-2.feather", "foo-3.feather"]
+    assert [p.name for p in parts] == [
+        "foo-1.feather",
+        "foo-2.feather",
+        "foo-3.feather",
+    ]
 
 
 def test_expand_split_parts_numeric_split_orders_double_digits(tmp_path: Path) -> None:
@@ -224,3 +229,52 @@ def test_dataverse_candidates_known_paths(
 
 def test_dataverse_candidates_unknown_returns_none() -> None:
     assert dataverse_candidates("does/not/exist/in/mapping.feather") is None
+
+
+# ---------------------------------------------------------------------------
+# standardized contacts — directory resolution and archive tagging.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "server_dir",
+    [
+        "Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/standardized_contacts",
+        # Wildcard path as used at runtime (timestamp segment varies).
+        "Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_Data/standardized_contacts",
+    ],
+)
+def test_dataverse_directory_candidates_standardized_contacts(server_dir: str) -> None:
+    """dataverse_directory_candidates resolves any timestamped standardized_contacts
+    directory under the TNT screen to the full set of brain-region feathers."""
+    result = dataverse_directory_candidates(server_dir)
+    assert result is not None, (
+        f"dataverse_directory_candidates returned None for {server_dir!r}; "
+        "SERVER_DIRECTORY_TO_DATAVERSE may be missing the standardized_contacts pattern."
+    )
+    assert set(result) == set(SCREEN_STANDARDIZED_CONTACTS_FEATHERS), (
+        "dataverse_directory_candidates should return exactly the "
+        "SCREEN_STANDARDIZED_CONTACTS_FEATHERS list."
+    )
+
+
+def test_all_standardized_contacts_feathers_in_basename_to_archive() -> None:
+    """Every SCREEN_STANDARDIZED_CONTACTS_FEATHERS entry must be tagged as
+    'screen' in BASENAME_TO_ARCHIVE so the download CLI knows which DOI to use."""
+    missing = [
+        name
+        for name in SCREEN_STANDARDIZED_CONTACTS_FEATHERS
+        if name not in BASENAME_TO_ARCHIVE
+    ]
+    assert not missing, (
+        f"BASENAME_TO_ARCHIVE is missing entries for: {missing}. "
+        "Add them with archive='screen'."
+    )
+    wrong_archive = [
+        name
+        for name in SCREEN_STANDARDIZED_CONTACTS_FEATHERS
+        if BASENAME_TO_ARCHIVE.get(name) != "screen"
+    ]
+    assert (
+        not wrong_archive
+    ), f"These standardized_contacts feathers are not tagged as 'screen': {wrong_archive}"
