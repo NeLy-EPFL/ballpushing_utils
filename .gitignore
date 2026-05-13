@@ -7,6 +7,7 @@ tests/integration/outputs/
 ._*
 .vscode/
 .idea/
+.claude/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

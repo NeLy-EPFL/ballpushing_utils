@@ -174,13 +174,6 @@ def load_coordinates_data(coordinates_path=COORDINATES_PATH, test_mode=False):
     pd.DataFrame  columns: fly, time (min), distance_ball_0 (pixels), BallScent
     """
     coordinates_path = Path(coordinates_path)
-    if not coordinates_path.exists():
-        raise FileNotFoundError(f"Coordinates file not found: {coordinates_path}")
-
-    print(f"\n{'='*60}")
-    print("LOADING COORDINATES DATASET")
-    print(f"{'='*60}")
-    print(f"Loading from: {coordinates_path.name}")
 
     df = read_feather(coordinates_path)
     print(f"✅ Dataset loaded: {df.shape}")

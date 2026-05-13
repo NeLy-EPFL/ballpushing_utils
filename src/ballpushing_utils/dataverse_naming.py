@@ -46,6 +46,7 @@ from pathlib import Path
 __all__ = [
     "BASENAME_TO_ARCHIVE",
     "DATAVERSE_DOIS",
+    "SCREEN_STANDARDIZED_CONTACTS_FEATHERS",
     "SERVER_DIRECTORY_TO_DATAVERSE",
     "SERVER_TO_DATAVERSE",
     "WILDTYPE_TRAJECTORY_FEATHERS",
@@ -143,6 +144,28 @@ SERVER_TO_DATAVERSE: dict[str, list[str]] = {
 }
 
 
+#: Per-brain-region standardized-contacts feathers (Screen archive).
+#: Built by ``src/build_region_standardized_contacts.py`` from the
+#: per-date ``*_standardized_contacts.feather`` files in
+#: ``Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/standardized_contacts/``.
+#: Each entry may be a single file or the first of a set of numbered
+#: split parts (``<stem>-1.feather``, ``<stem>-2.feather``, …);
+#: :func:`expand_split_parts` resolves both forms transparently.
+#: Used by the UMAP pipeline (Fig. 3, ED Fig. 5, Supp. File 2) via
+#: :mod:`ballpushing_utils.preprocess_screen_data`.
+SCREEN_STANDARDIZED_CONTACTS_FEATHERS: tuple[str, ...] = (
+    "Central_Complex_standardized_contacts.feather",
+    "Control_standardized_contacts.feather",
+    "Lateral_Horn_standardized_contacts.feather",
+    "MB_extrinsic_standardized_contacts.feather",
+    "Mushroom_Body_standardized_contacts.feather",
+    "Neuropeptide_standardized_contacts.feather",
+    "Olfaction_standardized_contacts.feather",
+    "Others_standardized_contacts.feather",
+    "Vision_standardized_contacts.feather",
+)
+
+
 #: Per-condition wild-type trajectory feathers (Exploration archive).
 #: One file per (Light × FeedingState) combination. Iterating these in
 #: place of an on-server ``coordinates/*_coordinates.feather`` directory
@@ -173,6 +196,13 @@ SERVER_DIRECTORY_TO_DATAVERSE: dict[str, list[str]] = {
     # Wild-type baseline trajectories — used by Fig 1, ED Fig 3, ED Fig 10.
     "Ballpushing_Exploration/Datasets/*/coordinates": list(WILDTYPE_TRAJECTORY_FEATHERS),
     "Ballpushing_Exploration/Datasets/*/Other/coordinates": list(WILDTYPE_TRAJECTORY_FEATHERS),
+    # Silencing-screen standardized contacts — used by the UMAP pipeline
+    # (Fig. 3, ED Fig. 5, Supp. File 2). The on-server layout is 74 per-date
+    # feathers; the Dataverse layout is one pooled feather per brain region.
+    # Built by src/build_region_standardized_contacts.py.
+    "Ballpushing_TNTScreen/Datasets/*/standardized_contacts": list(
+        SCREEN_STANDARDIZED_CONTACTS_FEATHERS
+    ),
 }
 
 
@@ -191,6 +221,7 @@ BASENAME_TO_ARCHIVE: dict[str, str] = {
     "Generalisation-TNT_trajectories.feather": "affordance",
     # Screen
     "ballpushing_metrics_silencing_screen.feather": "screen",
+    **{name: "screen" for name in SCREEN_STANDARDIZED_CONTACTS_FEATHERS},
     # Exploration
     "Balltypes_ballpushing_metrics.feather": "exploration",
     "Balltypes_trajectories.feather": "exploration",

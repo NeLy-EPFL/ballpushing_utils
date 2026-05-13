@@ -1,49 +1,91 @@
 """Pre-aggregation helpers for the TNT silencing-screen UMAP pipeline.
 
-This module reads the per-fly ``standardized_contacts`` feathers
-produced by ``dataset_builder.py``, reshapes the per-keypoint columns,
-and writes pooled parquets that the UMAP feature-matrix builder
-consumes.
+This module reads the per-fly ``standardized_contacts`` feathers produced by
+``dataset_builder.py``, reshapes the per-keypoint columns, and writes pooled
+parquets that the UMAP feature-matrix builder consumes.
 
-TODO(durrieu, coauthor):
-    The input dataset (``Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/``)
-    is **not yet on Dataverse**. Until it's published, this script
-    requires direct lab-share access (``$BALLPUSHING_DATA_ROOT`` pointing
-    at ``/mnt/upramdya_data/MD/`` or equivalent). When the dataset is
-    uploaded:
-      1. Document its archive name in ``DATAVERSE.md`` under the
-         silencing-screen section (alongside ``Magnetblock-Blocked``,
-         ``LC6.tar``, etc.).
-      2. Replace the hardcoded ``root_dir`` below with
-         ``ballpushing_utils.dataset(<relative_path>)`` so the script
-         resolves against ``$BALLPUSHING_DATA_ROOT``.
-      3. Add a Dataverse rebuild recipe (similar to the existing
-         silencing-screen tarballs) once the upload is confirmed.
+Data sources (tried in order)
+------------------------------
+1. **Lab share** — 74 per-date feathers in
+   ``Ballpushing_TNTScreen/Datasets/250809_02_standardized_contacts_TNT_screen_Data/standardized_contacts/``.
+   Override the root via the ``BALLPUSHING_SCREEN_DATASETS_DIR`` env var.
+2. **Dataverse download** — per-brain-region feathers published to the
+   silencing-screen Dataverse archive (``doi:10.7910/DVN/SPBKKJ``).
+   Download with ``ballpushing-fetch --archive screen`` and they land in
+   ``$BALLPUSHING_DATA_ROOT`` (or ``<repo>/Datasets/``).  Built from the
+   lab-share originals via ``src/build_region_standardized_contacts.py``.
 
-Until then a non-lab user running this will hit a
-``FileNotFoundError`` on ``data_dir``; that's expected.
+Both sources contain identical data; the Dataverse feathers are simply
+reorganised by brain region rather than by recording date.
 """
 
-from tqdm import tqdm
-import numpy as np
+import logging
+import os
 from pathlib import Path
-import polars as pl
+
+import numpy as np
 import pandas as pd
+import polars as pl
+from tqdm import tqdm
 
-# TODO(durrieu, coauthor): switch to ballpushing_utils.dataset(...) once the
-# input is on Dataverse — see module docstring above.
-# Canonical lab-share mount is /mnt/upramdya_data/. Override on machines
-# with a different mount layout via BALLPUSHING_SCREEN_DATASETS_DIR.
-from ballpushing_utils.paths import require_path
+_DATASET_NAME = "250809_02_standardized_contacts_TNT_screen_Data"
+_LAB_SHARE_DEFAULT = Path("/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/")
+_LAB_SHARE_ENV = "BALLPUSHING_SCREEN_DATASETS_DIR"
 
-root_dir = require_path(
-    "/mnt/upramdya_data/MD/Ballpushing_TNTScreen/Datasets/",
-    description="silencing-screen Datasets root",
-    env_var="BALLPUSHING_SCREEN_DATASETS_DIR",
-)
-dataset_name = "250809_02_standardized_contacts_TNT_screen_Data"
-data_dir = root_dir / dataset_name / "standardized_contacts"
-data_paths = sorted(data_dir.glob("2*.feather"))
+
+def _find_source_paths() -> list[Path]:
+    """Return feather files to process, with lab-share → Dataverse fallback.
+
+    Tries the lab-share path first (74 per-date feathers).  If unavailable,
+    looks for the brain-region feathers downloaded from the screen Dataverse
+    archive by ``ballpushing-fetch --archive screen``.
+
+    Raises
+    ------
+    FileNotFoundError
+        When neither the lab share nor the Dataverse feathers are found.
+    """
+    # 1. Lab-share: env-var override or default mount point
+    env_override = os.environ.get(_LAB_SHARE_ENV)
+    lab_root = Path(env_override).expanduser() if env_override else _LAB_SHARE_DEFAULT
+    if lab_root.exists():
+        data_dir = lab_root / _DATASET_NAME / "standardized_contacts"
+        paths = sorted(data_dir.glob("2*.feather"))
+        if paths:
+            return paths
+
+    # 2. Dataverse fallback: brain-region feathers in $BALLPUSHING_DATA_ROOT
+    from ballpushing_utils.dataverse_naming import (
+        SCREEN_STANDARDIZED_CONTACTS_FEATHERS,
+        expand_split_parts,
+    )
+    from ballpushing_utils.paths import data_root, missing_data_message
+
+    search_dir = data_root()
+    paths = []
+    for name in SCREEN_STANDARDIZED_CONTACTS_FEATHERS:
+        hits = expand_split_parts(name, search_dir)
+        paths.extend(hits)
+
+    if paths:
+        logging.info(
+            "Lab-share standardized_contacts directory not available; "
+            "using %d Dataverse brain-region feather(s) from %s.",
+            len(paths),
+            search_dir,
+        )
+        return sorted(paths, key=lambda p: p.name)
+
+    raise FileNotFoundError(
+        missing_data_message(
+            f"{_DATASET_NAME}/standardized_contacts",
+            context="silencing-screen standardized contacts",
+        )
+        + "\n\nFor the UMAP pipeline specifically, also run:\n"
+        "    ballpushing-fetch --archive screen\n"
+        "to download the brain-region standardized-contacts feathers."
+    )
+
 
 index_cols = ["fly", "event_id", "frame"]
 keypoints = {
@@ -157,7 +199,8 @@ def get_preprocessed_data(
         df = pl.read_parquet(cache_dir / "contacts.parquet")
         df_fly = pl.read_parquet(cache_dir / "flies.parquet")
     else:
-        df, df_fly = map(pl.concat, zip(*(preprocess_data(path) for path in tqdm(data_paths))))
+        source_paths = _find_source_paths()
+        df, df_fly = map(pl.concat, zip(*(preprocess_data(path) for path in tqdm(source_paths))))
         df.write_parquet(cache_dir / "contacts.parquet")
         df_fly.write_parquet(cache_dir / "flies.parquet")
 
