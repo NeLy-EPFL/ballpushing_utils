@@ -8,16 +8,54 @@ def load_data(
     event_id=198,
     frame_within_event=38,
 ) -> tuple[dict[str, float], np.ndarray]:
-    from pathlib import Path
-    from video_reader import PyVideoReader
-    from ballpushing_utils.preprocess_screen_data import get_preprocessed_data
+    import json
+    from importlib.resources import files
 
-    df, df_fly = get_preprocessed_data(cache_dir)
-    data = df.filter(fly=fly, event_id=event_id)[frame_within_event].to_dicts()[0]
-    fly_dir = Path(df_fly.filter(fly=fly)["path"].item())
-    video_path = (fly_dir / f"{fly_dir.stem}_preprocessed.mp4").as_posix()
-    im = PyVideoReader(video_path)[data["frame"]]
-    return data, im
+    def _load_bundled() -> tuple[dict[str, float], np.ndarray]:
+        import imageio.v3 as iio
+
+        assets = files("ballpushing_utils").joinpath("assets")
+        data = json.loads(
+            Path(str(assets.joinpath("fig3_contact_data.json"))).read_text()
+        )
+        im = iio.imread(str(assets.joinpath("fig3_contact_frame.png")))
+        return data, im
+
+    try:
+        from video_reader import PyVideoReader
+        from ballpushing_utils.preprocess_screen_data import get_preprocessed_data
+
+        df, df_fly = get_preprocessed_data(cache_dir)
+        data = df.filter(fly=fly, event_id=event_id)[frame_within_event].to_dicts()[0]
+        fly_dir = Path(df_fly.filter(fly=fly)["path"].item())
+        video_path = fly_dir / f"{fly_dir.stem}_preprocessed.mp4"
+        if not video_path.exists():
+            import warnings
+
+            warnings.warn(
+                f"Video file not found: {video_path}\n"
+                "Falling back to the bundled pre-extracted frame. "
+                "The figure will be identical to the published version, "
+                "but you cannot change the fly/event/frame selection. "
+                "To use a live video, ensure lab-server access and that "
+                "video files are present at the expected path.",
+                stacklevel=2,
+            )
+            return _load_bundled()
+        im = PyVideoReader(video_path.as_posix())[data["frame"]]
+        return data, im
+    except ImportError:
+        import warnings
+
+        warnings.warn(
+            "video_reader is not available (install with: "
+            "pip install 'ballpushing_utils[video]'). "
+            "Falling back to the bundled pre-extracted frame. "
+            "The figure will be identical to the published version, "
+            "but you cannot change the fly/event/frame selection.",
+            stacklevel=2,
+        )
+        return _load_bundled()
 
 
 def plot_contact_image(

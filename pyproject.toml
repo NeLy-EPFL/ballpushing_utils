@@ -86,7 +86,6 @@ dependencies = [
     "natsort>=8.4.0",
     "opencv-python>=4.11.0.86",
     "python-tsp>=0.2.0",
-    "video-reader-rs>=0.4.2",
     "polars>=1.40.1",
     "plotnine>=0.13",
     "flyplotlib>=0.5.2",
@@ -107,6 +106,14 @@ interactive = [
 video = [
     "moviepy>=2.0",
     "pygame>=2.5",
+    # video-reader-rs provides `from video_reader import PyVideoReader`, used
+    # by figure scripts that extract individual frames from raw lab-server
+    # videos (fig3_contact_image, SuppVideo/Video8_9).  It has Rust/ffmpeg
+    # bundled-library dependencies that can fail on some platforms, so it is
+    # an optional extra rather than a hard requirement.  External / Dataverse
+    # users do not need it — those scripts require raw video files that are
+    # only available on the lab server.
+    "video-reader-rs>=0.4.2",
 ]
 dev = [
     # pytest < 9.0.3 has CVE-2025-71176 (vulnerable /tmp/pytest-of-{user}
@@ -152,6 +159,7 @@ ballpushing_utils = [
     # Dataverse, not in the wheel.
     "assets/*.csv",
     "assets/*.png",
+    "assets/*.json",
     # UMAP analysis subpackage ships its genotype-renames CSV next to
     # the helpers that consume it (``ballpushing_utils.umap.analysis``).
     "umap/data/*.csv",

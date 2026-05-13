@@ -281,7 +281,14 @@ def get_event_frames(
     ball_color="#00aeef",
     do_flip=False,
 ) -> np.ndarray:
-    from video_reader import PyVideoReader
+    try:
+        from video_reader import PyVideoReader
+    except ImportError as exc:
+        raise ImportError(
+            "video_reader is not available. "
+            "Install it with: pip install 'ballpushing_utils[video]'\n"
+            "Note: this function requires raw video files from the lab server."
+        ) from exc
     import cv2
 
     def get_warped_pos(df_event, i, name, affine_mat):

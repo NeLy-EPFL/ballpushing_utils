@@ -24,7 +24,15 @@ def get_event_frames(
     ball_color="#00aeef",
     flipped=False,
 ) -> np.ndarray:
-    from video_reader import PyVideoReader
+    try:
+        from video_reader import PyVideoReader
+    except ImportError as exc:
+        raise ImportError(
+            "video_reader is not available. "
+            "Install it with: pip install 'ballpushing_utils[video]'\n"
+            "Note: this script also requires raw video files from the lab server "
+            "and cannot be reproduced from Dataverse data alone."
+        ) from exc
     import cv2
     from ballpushing_utils.plotting.palette import FLY_COLORS
 
@@ -169,7 +177,9 @@ def get_left_panel_for_video(
         ha="c",
         **dict(text_kwargs, size=4),
     )
-    ax.scatter(*embedding.T, s=1, c=cluster_palette[labels], alpha=0.05, lw=0, marker=".")
+    ax.scatter(
+        *embedding.T, s=1, c=cluster_palette[labels], alpha=0.05, lw=0, marker="."
+    )
     contour_kwargs = dict(antialiased=True, origin="lower", extent=(-bound, bound) * 2)
     ax.contour(
         im_regions + 1,
@@ -233,8 +243,12 @@ def save_grid_video(
     frames_per_event = len(t)
     n_videos = n_rows * n_cols
     selected_events = choice(np.where(labels == cluster_id)[0], n_videos, seed=seed)
-    df_events = df.select("fly", "event_id").unique(maintain_order=True)[selected_events]
-    frames = np.empty((frames_per_event, size[1] * n_rows, size[0] * n_cols, 3), dtype=np.uint8)
+    df_events = df.select("fly", "event_id").unique(maintain_order=True)[
+        selected_events
+    ]
+    frames = np.empty(
+        (frames_per_event, size[1] * n_rows, size[0] * n_cols, 3), dtype=np.uint8
+    )
     reshaped = frames.reshape((frames_per_event, n_rows, size[1], n_cols, size[0], 3))
 
     for i, (fly, event_id) in enumerate(df_events.iter_rows()):
@@ -284,21 +298,28 @@ def save_grid_video(
                     timeline_ax_.draw_artist(time_cursor_)
             g.fig.canvas.blit(g.fig.bbox)
             panel_frame = np.frombuffer(g.fig.canvas.buffer_rgba(), dtype=np.uint8)
-            panel_frame = panel_frame.reshape(g.fig.canvas.get_width_height()[::-1] + (4,))[..., :3]
+            panel_frame = panel_frame.reshape(
+                g.fig.canvas.get_width_height()[::-1] + (4,)
+            )[..., :3]
 
             if padding_frame is None:
                 total_width = panel_frame.shape[1] + video_frame.shape[1]
                 width_pad = int(np.ceil((total_width / 32))) * 32 - total_width
                 padding_frame = np.zeros((len(panel_frame), width_pad, 3), np.uint8)
 
-            writer.append_data(np.concatenate((panel_frame, padding_frame, video_frame), axis=1))
+            writer.append_data(
+                np.concatenate((panel_frame, padding_frame, video_frame), axis=1)
+            )
 
     plt.close(g.fig)
 
 
 if __name__ == "__main__":
     from ballpushing_utils.paths import figure_output_dir, get_cache_dir
-    from ballpushing_utils.preprocess_screen_data import get_preprocessed_data, get_features
+    from ballpushing_utils.preprocess_screen_data import (
+        get_preprocessed_data,
+        get_features,
+    )
 
     t = np.arange(-60, 60) / 29
     out_dir = figure_output_dir("SuppVideo", __file__)
@@ -322,7 +343,9 @@ if __name__ == "__main__":
             umap_data["labels"] = f["labels"]
             umap_data["flipped"] = ~f["flipped"]
     else:
-        raise FileNotFoundError("UMAP embedding not found. Please run Fig3-Screen/fig3_umap.py first.")
+        raise FileNotFoundError(
+            "UMAP embedding not found. Please run Fig3-Screen/fig3_umap.py first."
+        )
 
     kwargs = dict(
         t=t,
@@ -339,5 +362,7 @@ if __name__ == "__main__":
 
     for cluster_id, video_num in zip([3, 15], [8, 9]):
         save_grid_video(
-            cluster_id=cluster_id, save_path=out_dir / f"video_{video_num}_cluster{cluster_id + 1}.mp4", **kwargs
+            cluster_id=cluster_id,
+            save_path=out_dir / f"video_{video_num}_cluster{cluster_id + 1}.mp4",
+            **kwargs,
         )
