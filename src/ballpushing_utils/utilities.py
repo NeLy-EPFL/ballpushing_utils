@@ -36,7 +36,13 @@ def brain_regions_path():
 
     # Chained ``.joinpath`` calls (one arg each) so the lookup works
     # on the multiple ``Traversable`` backends across Python 3.10–3.12.
-    return Path(str(files("ballpushing_utils").joinpath("assets").joinpath(DEFAULT_BRAIN_REGIONS_FILENAME)))
+    return Path(
+        str(
+            files("ballpushing_utils")
+            .joinpath("assets")
+            .joinpath(DEFAULT_BRAIN_REGIONS_FILENAME)
+        )
+    )
 
 
 def f1_template_path():
@@ -55,7 +61,41 @@ def f1_template_path():
     """
     from importlib.resources import files
 
-    return Path(str(files("ballpushing_utils").joinpath("assets").joinpath("F1_New_Template.png")))
+    return Path(
+        str(
+            files("ballpushing_utils")
+            .joinpath("assets")
+            .joinpath("F1_New_Template.png")
+        )
+    )
+
+
+def screen_consistency_dir():
+    """Locate the bundled screen-analysis consistency CSV directory.
+
+    Returns the ``assets/`` directory containing the three tailored-control
+    consistency files:
+
+    * ``statistical_criteria_comparison.csv``
+    * ``combined_consistency_ranking.csv``
+    * ``enhanced_consistency_scores.csv``
+
+    These are derived from
+    ``src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files/``
+    and bundled here so the dendrogram figure runs without access to the
+    lab server. Only the tailored-control versions are shipped; to use a
+    different control mode, regenerate the CSVs from
+    ``src/Screen_analysis/`` and point ``CONSISTENCY_DIR`` at that output.
+
+    Returns
+    -------
+    pathlib.Path
+        Absolute path to the ``assets/`` directory inside the installed
+        package.
+    """
+    from importlib.resources import files
+
+    return Path(str(files("ballpushing_utils").joinpath("assets")))
 
 
 def save_object(obj, filename):
@@ -120,7 +160,9 @@ def find_interaction_events(
             )
             distances.append(distances_node)
     combined_distances = np.min(distances, axis=0)
-    interaction_mask = (np.array(combined_distances) > threshold[0]) & (np.array(combined_distances) < threshold[1])
+    interaction_mask = (np.array(combined_distances) > threshold[0]) & (
+        np.array(combined_distances) < threshold[1]
+    )
     interaction_frames = np.where(interaction_mask)[0]
     if len(interaction_frames) == 0:
         return []
@@ -184,13 +226,17 @@ def find_interaction_boundaries(
     data = data.copy()
 
     # Smoothing and derivative calculation
-    data["smoothed_distance"] = savgol_filter(data[distance_col], window_length=11, polyorder=3)
+    data["smoothed_distance"] = savgol_filter(
+        data[distance_col], window_length=11, polyorder=3
+    )
     data["smoothed_diff"] = data["smoothed_distance"].diff()
     data["smoothed_accel"] = data["smoothed_diff"].diff()  # Second derivative
 
     # Dynamic threshold for plateaus based on rolling standard deviation
     rolling_std = data["smoothed_diff"].rolling(window=window_size).std()
-    dynamic_threshold = rolling_std.mean() * threshold_multiplier  # Adjust multiplier as needed
+    dynamic_threshold = (
+        rolling_std.mean() * threshold_multiplier
+    )  # Adjust multiplier as needed
 
     # Plateau detection with dynamic threshold
     plateau_mask = data["smoothed_diff"].abs() < dynamic_threshold
@@ -199,7 +245,11 @@ def find_interaction_boundaries(
     # Initialize plateau markers
     data["plateau_start"] = 0
     data["plateau_end"] = 0
-    valid_plateaus = data[plateau_mask].groupby(plateau_groups).filter(lambda x: len(x) >= min_plateau_length)
+    valid_plateaus = (
+        data[plateau_mask]
+        .groupby(plateau_groups)
+        .filter(lambda x: len(x) >= min_plateau_length)
+    )
     if not valid_plateaus.empty:
         start_indices = valid_plateaus.groupby(plateau_groups).head(1).index
         end_indices = valid_plateaus.groupby(plateau_groups).tail(1).index
@@ -207,22 +257,38 @@ def find_interaction_boundaries(
         data.loc[end_indices, "plateau_end"] = 1
 
     # Peak detection with stricter prominence
-    peaks, _ = find_peaks(-data["smoothed_distance"], prominence=peak_prominence, width=3)
-    troughs, _ = find_peaks(data["smoothed_distance"], prominence=peak_prominence, width=3)
+    peaks, _ = find_peaks(
+        -data["smoothed_distance"], prominence=peak_prominence, width=3
+    )
+    troughs, _ = find_peaks(
+        data["smoothed_distance"], prominence=peak_prominence, width=3
+    )
 
     # Refine peak detection for better alignment
     refined_peaks = []
     for peak in peaks:
         if peak > 0 and peak < len(data) - 1:
-            local_region = data.iloc[max(0, peak - peak_window_size) : min(len(data), peak + peak_window_size)]
-            true_peak_idx = local_region[distance_col].idxmin()  # Find true minimum in this region
+            local_region = data.iloc[
+                max(0, peak - peak_window_size) : min(
+                    len(data), peak + peak_window_size
+                )
+            ]
+            true_peak_idx = local_region[
+                distance_col
+            ].idxmin()  # Find true minimum in this region
             refined_peaks.append(true_peak_idx)
 
     refined_troughs = []
     for trough in troughs:
         if trough > 0 and trough < len(data) - 1:
-            local_region = data.iloc[max(0, trough - peak_window_size) : min(len(data), trough + peak_window_size)]
-            true_trough_idx = local_region[distance_col].idxmax()  # Find true maximum in this region
+            local_region = data.iloc[
+                max(0, trough - peak_window_size) : min(
+                    len(data), trough + peak_window_size
+                )
+            ]
+            true_trough_idx = local_region[
+                distance_col
+            ].idxmax()  # Find true maximum in this region
             refined_troughs.append(true_trough_idx)
 
     # Combine plateau and refined peak detections
@@ -233,13 +299,17 @@ def find_interaction_boundaries(
     end_candidates = sorted(list(plateau_end_indices) + refined_troughs)
 
     # Fallback to minimum/maximum distance if no markers found
-    start_index = start_candidates[0] if start_candidates else data[distance_col].idxmin()
+    start_index = (
+        start_candidates[0] if start_candidates else data[distance_col].idxmin()
+    )
     end_index = end_candidates[-1] if end_candidates else data[distance_col].idxmax()
 
     # Ensure end_index is after start_index
     if end_index <= start_index:
         # Find the next valid end candidate after the start_index
-        end_candidates_after_start = [idx for idx in end_candidates if idx > start_index]
+        end_candidates_after_start = [
+            idx for idx in end_candidates if idx > start_index
+        ]
         if end_candidates_after_start:
             end_index = end_candidates_after_start[0]
         else:

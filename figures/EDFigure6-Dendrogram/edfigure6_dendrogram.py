@@ -36,6 +36,7 @@ from statsmodels.stats.multitest import multipletests
 
 from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
+from ballpushing_utils.utilities import screen_consistency_dir
 
 # Rebuild font cache if needed
 fm._load_fontmanager(try_read_cache=False)
@@ -66,9 +67,13 @@ _spec.loader.exec_module(Config)
 # ── Configuration ────────────────────────────────────────────────────────────
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-DATA_PATH = dataset("Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather")
-CONSISTENCY_DIR = _REPO_ROOT / "src/Screen_analysis/pca_analysis_results_tailored_20251219_163028/data_files"
-METRICS_PATH = _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
+DATA_PATH = dataset(
+    "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data/summary/pooled_summary.feather"
+)
+CONSISTENCY_DIR = screen_consistency_dir()
+METRICS_PATH = (
+    _REPO_ROOT / "src/Screen_analysis/metrics_lists/final_metrics_for_pca_alt.txt"
+)
 OUTPUT_DIR = figure_output_dir("EDFigure6", __file__, create=False)
 
 MIN_COMBINED_CONSISTENCY = 0.80
@@ -80,7 +85,9 @@ CLIP_EFFECTS = 1.5
 # ── Brain-region look-ups ─────────────────────────────────────────────────────
 
 try:
-    nickname_to_brainregion = dict(zip(Config.SplitRegistry["Nickname"], Config.SplitRegistry["Simplified region"]))
+    nickname_to_brainregion = dict(
+        zip(Config.SplitRegistry["Nickname"], Config.SplitRegistry["Simplified region"])
+    )
     color_dict = Config.color_dict
 except Exception as e:
     print(f"⚠️  Could not load region mapping from Config: {e}")
@@ -149,7 +156,9 @@ def bootstrap_ci_difference(group1, group2, n_bootstrap=10000, ci=95, random_sta
         s2 = rng.choice(group2, size=len(group2), replace=True)
         diffs[i] = np.mean(s1) - np.mean(s2)
     alpha = 100 - ci
-    return float(np.percentile(diffs, alpha / 2)), float(np.percentile(diffs, 100 - alpha / 2))
+    return float(np.percentile(diffs, alpha / 2)), float(
+        np.percentile(diffs, 100 - alpha / 2)
+    )
 
 
 def cohens_d(group1, group2):
@@ -225,7 +234,10 @@ def load_consistency_results():
         return []
 
     # Fallback to combined consistency files
-    for fname in ("combined_consistency_ranking.csv", "enhanced_consistency_scores.csv"):
+    for fname in (
+        "combined_consistency_ranking.csv",
+        "enhanced_consistency_scores.csv",
+    ):
         fpath = os.path.join(CONSISTENCY_DIR, fname)
         if os.path.exists(fpath):
             df = pd.read_csv(fpath)
@@ -238,7 +250,9 @@ def load_consistency_results():
         if "Overall_Consistency" in df.columns:
             for col in ("Optimized_Only_Consistency", "Optimized_Consistency"):
                 if col in df.columns:
-                    df["Combined_Consistency"] = 0.5 * df["Overall_Consistency"] + 0.5 * df[col]
+                    df["Combined_Consistency"] = (
+                        0.5 * df["Overall_Consistency"] + 0.5 * df[col]
+                    )
                     break
             else:
                 print("❌ Cannot derive Combined_Consistency.")
@@ -247,7 +261,11 @@ def load_consistency_results():
             print("❌ Cannot derive Combined_Consistency.")
             return []
 
-    genotype_col = "Genotype" if "Genotype" in df.columns else ("genotype" if "genotype" in df.columns else None)
+    genotype_col = (
+        "Genotype"
+        if "Genotype" in df.columns
+        else ("genotype" if "genotype" in df.columns else None)
+    )
     if genotype_col is None:
         print("❌ No genotype column.")
         return []
@@ -256,13 +274,16 @@ def load_consistency_results():
         "Combined_Consistency", ascending=False
     )
 
-    stats_file = os.path.join(CONSISTENCY_DIR, "static_pca_stats_results_allmethods_tailoredctrls.csv")
+    stats_file = os.path.join(
+        CONSISTENCY_DIR, "static_pca_stats_results_allmethods_tailoredctrls.csv"
+    )
     if os.path.exists(stats_file):
         stats_df = pd.read_csv(stats_file)
         keep = set(
-            stats_df[stats_df["Permutation_FDR_significant"] & stats_df["Mahalanobis_FDR_significant"]][
-                "Nickname"
-            ].unique()
+            stats_df[
+                stats_df["Permutation_FDR_significant"]
+                & stats_df["Mahalanobis_FDR_significant"]
+            ]["Nickname"].unique()
         )
         filtered = filtered[filtered[genotype_col].isin(keep)]
 
@@ -287,11 +308,16 @@ def load_metrics_list():
 def load_nickname_mapping():
     # Bundled with the package (src/ballpushing_utils/assets/).
     from ballpushing_utils.utilities import brain_regions_path
+
     region_map_path = brain_regions_path()
     try:
         region_map = pd.read_csv(region_map_path)
-        nickname_mapping = dict(zip(region_map["Nickname"], region_map["Simplified Nickname"]))
-        simplified_to_region = dict(zip(region_map["Simplified Nickname"], region_map["Simplified region"]))
+        nickname_mapping = dict(
+            zip(region_map["Nickname"], region_map["Simplified Nickname"])
+        )
+        simplified_to_region = dict(
+            zip(region_map["Simplified Nickname"], region_map["Simplified region"])
+        )
         print(f"📋 Loaded {len(nickname_mapping)} nickname mappings")
         return nickname_mapping, simplified_to_region
     except Exception as e:
@@ -315,7 +341,10 @@ def prepare_data():
     exclude = ["Ple-Gal4.F a.k.a TH-Gal4", "TNTxCS", "MB247-Gal4"]
     dataset = dataset[~dataset["Nickname"].isin(exclude)]
     dataset.rename(
-        columns={"major_event": "first_major_event", "major_event_time": "first_major_event_time"},
+        columns={
+            "major_event": "first_major_event",
+            "major_event_time": "first_major_event_time",
+        },
         inplace=True,
     )
     for col in dataset.columns:
@@ -328,7 +357,9 @@ def prepare_data():
 
 
 def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
-    print(f"\n🔬 RUNNING METRIC ANALYSIS — {len(metrics_list)} metrics, {len(high_consistency_hits)} genotypes")
+    print(
+        f"\n🔬 RUNNING METRIC ANALYSIS — {len(metrics_list)} metrics, {len(high_consistency_hits)} genotypes"
+    )
     available_metrics = [m for m in metrics_list if m in dataset.columns]
     binary_metrics = {"has_finished", "has_major", "has_significant"}
     available_metrics = [m for m in available_metrics if m not in binary_metrics]
@@ -345,17 +376,26 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
 
     metadata_cols = [c for c in dataset_clean.columns if c not in valid_metrics]
     metric_with_meta = pd.concat(
-        [dataset_clean[metadata_cols].reset_index(drop=True), dataset_clean[valid_metrics].reset_index(drop=True)],
+        [
+            dataset_clean[metadata_cols].reset_index(drop=True),
+            dataset_clean[valid_metrics].reset_index(drop=True),
+        ],
         axis=1,
     )
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    dataset_clean[valid_metrics].to_csv(os.path.join(OUTPUT_DIR, "metric_values.csv"), index=False)
+    dataset_clean[valid_metrics].to_csv(
+        os.path.join(OUTPUT_DIR, "metric_values.csv"), index=False
+    )
     correlation_matrix = dataset_clean[valid_metrics].corr()
     correlation_matrix.to_csv(os.path.join(OUTPUT_DIR, "metric_correlations.csv"))
-    metric_with_meta.to_feather(os.path.join(OUTPUT_DIR, "metrics_with_metadata.feather"))
+    metric_with_meta.to_feather(
+        os.path.join(OUTPUT_DIR, "metrics_with_metadata.feather")
+    )
 
-    analysis_genotypes = [g for g in high_consistency_hits if g in metric_with_meta["Nickname"].values]
+    analysis_genotypes = [
+        g for g in high_consistency_hits if g in metric_with_meta["Nickname"].values
+    ]
     print(f"   🎯 Analyzing {len(analysis_genotypes)} genotypes")
 
     results = []
@@ -366,7 +406,12 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         elif CONTROL_MODE == "tnt_pr":
             force_control = "TNTxPR"
 
-        subset = Config.get_subset_data(metric_with_meta, col="Nickname", value=nickname, force_control=force_control)
+        subset = Config.get_subset_data(
+            metric_with_meta,
+            col="Nickname",
+            value=nickname,
+            force_control=force_control,
+        )
         if subset.empty or (subset["Nickname"] == nickname).sum() == 0:
             continue
         control_names = [n for n in subset["Nickname"].unique() if n != nickname]
@@ -374,19 +419,33 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             continue
         control_name = control_names[0]
 
-        ppc_pvals, metrics_tested, directions, effect_sizes, metric_stats = [], [], {}, {}, {}
+        ppc_pvals, metrics_tested, directions, effect_sizes, metric_stats = (
+            [],
+            [],
+            {},
+            {},
+            {},
+        )
 
         for metric in valid_metrics:
-            group_arr = subset[subset["Nickname"] == nickname][metric].values.astype(float)
-            control_arr = subset[subset["Nickname"] == control_name][metric].values.astype(float)
+            group_arr = subset[subset["Nickname"] == nickname][metric].values.astype(
+                float
+            )
+            control_arr = subset[subset["Nickname"] == control_name][
+                metric
+            ].values.astype(float)
             if len(group_arr) == 0 or len(control_arr) == 0:
                 continue
 
             genotype_mean = float(np.mean(group_arr))
             control_mean = float(np.mean(control_arr))
             mean_diff = genotype_mean - control_mean
-            ci_lower, ci_upper = bootstrap_ci_difference(group_arr, control_arr, n_bootstrap=10000, random_state=42)
-            pct_change = (mean_diff / control_mean * 100) if control_mean != 0 else np.nan
+            ci_lower, ci_upper = bootstrap_ci_difference(
+                group_arr, control_arr, n_bootstrap=10000, random_state=42
+            )
+            pct_change = (
+                (mean_diff / control_mean * 100) if control_mean != 0 else np.nan
+            )
 
             if USE_PERMUTATION_PER_PC:
                 pval = permutation_test_1d(group_arr, control_arr, random_state=42)
@@ -410,8 +469,12 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
             }
 
         if ppc_pvals:
-            rejected, pvals_corr, _, _ = multipletests(ppc_pvals, alpha=0.05, method="fdr_bh")
-            significant_metrics = [metrics_tested[i] for i, r in enumerate(rejected) if r]
+            rejected, pvals_corr, _, _ = multipletests(
+                ppc_pvals, alpha=0.05, method="fdr_bh"
+            )
+            significant_metrics = [
+                metrics_tested[i] for i, r in enumerate(rejected) if r
+            ]
             ppc_any = any(rejected)
         else:
             rejected, pvals_corr, significant_metrics, ppc_any = [], [], [], False
@@ -426,8 +489,12 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
         for i, metric in enumerate(metrics_tested):
             if i < len(ppc_pvals):
                 result_dict[f"{metric}_pval"] = ppc_pvals[i]
-                result_dict[f"{metric}_pval_corrected"] = pvals_corr[i] if i < len(pvals_corr) else ppc_pvals[i]
-                result_dict[f"{metric}_significant"] = bool(rejected[i]) if i < len(rejected) else False
+                result_dict[f"{metric}_pval_corrected"] = (
+                    pvals_corr[i] if i < len(pvals_corr) else ppc_pvals[i]
+                )
+                result_dict[f"{metric}_significant"] = (
+                    bool(rejected[i]) if i < len(rejected) else False
+                )
                 result_dict[f"{metric}_direction"] = directions.get(metric, 0)
                 result_dict[f"{metric}_cohens_d"] = effect_sizes.get(metric, 0.0)
                 s = metric_stats.get(metric, {})
@@ -450,7 +517,9 @@ def run_metric_analysis(dataset, metrics_list, high_consistency_hits):
 
     results_df = pd.DataFrame(results)
     test_method = "permutation" if USE_PERMUTATION_PER_PC else "mannwhitney"
-    results_df.to_csv(os.path.join(OUTPUT_DIR, f"metric_stats_results_{test_method}.csv"), index=False)
+    results_df.to_csv(
+        os.path.join(OUTPUT_DIR, f"metric_stats_results_{test_method}.csv"), index=False
+    )
     print(f"   ✅ Statistical testing complete — {len(results_df)} genotypes")
     return results_df, correlation_matrix
 
@@ -503,7 +572,9 @@ def save_statistical_results_table(results_df, metrics_list):
         print("   ⚠️  No statistical results to tabulate")
         return
 
-    stats_table = pd.DataFrame(table_rows).sort_values(["Genotype", "P_value_corrected"])
+    stats_table = pd.DataFrame(table_rows).sort_values(
+        ["Genotype", "P_value_corrected"]
+    )
 
     csv_path = os.path.join(OUTPUT_DIR, "statistical_results_detailed.csv")
     stats_table.to_csv(csv_path, index=False)
@@ -512,7 +583,9 @@ def save_statistical_results_table(results_df, metrics_list):
     md_path = os.path.join(OUTPUT_DIR, "statistical_results_detailed.md")
     with open(md_path, "w") as f:
         f.write("# Statistical Results: Detailed Metric Analysis\n\n")
-        f.write(f"**Analysis Type:** {'Permutation test' if USE_PERMUTATION_PER_PC else 'Mann-Whitney U test'}\n")
+        f.write(
+            f"**Analysis Type:** {'Permutation test' if USE_PERMUTATION_PER_PC else 'Mann-Whitney U test'}\n"
+        )
         f.write(f"**FDR Correction:** Benjamini-Hochberg (α = 0.05)\n")
         f.write(f"**Total comparisons:** {len(table_rows)}\n\n")
         for genotype in stats_table["Genotype"].unique():
@@ -528,10 +601,18 @@ def save_statistical_results_table(results_df, metrics_list):
                 "|--------|---------|--------|--------|-------|-----------|-----|---------|---------------|-----------|-----|\n"
             )
             for _, mr in gdata.iterrows():
-                gn = f"{int(mr['Genotype_n'])}" if not pd.isna(mr["Genotype_n"]) else "N/A"
-                cn = f"{int(mr['Control_n'])}" if not pd.isna(mr["Control_n"]) else "N/A"
+                gn = (
+                    f"{int(mr['Genotype_n'])}"
+                    if not pd.isna(mr["Genotype_n"])
+                    else "N/A"
+                )
+                cn = (
+                    f"{int(mr['Control_n'])}" if not pd.isna(mr["Control_n"]) else "N/A"
+                )
                 ci_text = f"[{_fmt_num(mr.get('Bootstrap_CI_lower'))}, {_fmt_num(mr.get('Bootstrap_CI_upper'))}]"
-                d_str = f"{mr['Cohens_d']:.3f}" if not pd.isna(mr["Cohens_d"]) else "N/A"
+                d_str = (
+                    f"{mr['Cohens_d']:.3f}" if not pd.isna(mr["Cohens_d"]) else "N/A"
+                )
                 f.write(
                     f"| {mr['Metric']} | {gn}/{cn} | {_fmt_num(mr.get('Genotype_mean'))} | "
                     f"{_fmt_num(mr.get('Control_mean'))} | {_fmt_num(mr.get('Mean_diff'))} | {ci_text} | "
@@ -552,13 +633,21 @@ def save_statistical_results_table(results_df, metrics_list):
 
 def _collect_metric_columns(results_df, all_metrics):
     cols = [
-        c for c in results_df.columns if c.endswith("_significant") and c.replace("_significant", "") in all_metrics
+        c
+        for c in results_df.columns
+        if c.endswith("_significant") and c.replace("_significant", "") in all_metrics
     ]
     return sorted({c.replace("_significant", "") for c in cols})
 
 
-def _build_signed_weighted_matrix(results_df, all_metrics, only_significant_hits=False, alpha=0.05):
-    df = results_df[results_df["significant"]].copy() if only_significant_hits else results_df.copy()
+def _build_signed_weighted_matrix(
+    results_df, all_metrics, only_significant_hits=False, alpha=0.05
+):
+    df = (
+        results_df[results_df["significant"]].copy()
+        if only_significant_hits
+        else results_df.copy()
+    )
     if df.empty:
         return pd.DataFrame(), []
 
@@ -619,7 +708,10 @@ def plot_two_way_dendrogram_metrics(
 
     all_metrics = list(correlation_matrix.columns)
     M, metric_names = _build_signed_weighted_matrix(
-        results_df, all_metrics, only_significant_hits=only_significant_hits, alpha=alpha
+        results_df,
+        all_metrics,
+        only_significant_hits=only_significant_hits,
+        alpha=alpha,
     )
     if M.empty:
         print("No data to build dendrogram.")
@@ -642,7 +734,11 @@ def plot_two_way_dendrogram_metrics(
             simplified_to_original[name] = name
 
     # Row linkage
-    row_Z = linkage(pdist(M.values, metric=row_metric), method=row_linkage) if M.shape[0] > 1 else None
+    row_Z = (
+        linkage(pdist(M.values, metric=row_metric), method=row_linkage)
+        if M.shape[0] > 1
+        else None
+    )
 
     # Column linkage from correlation-based distance
     corr_subset = correlation_matrix.loc[metric_names, metric_names].fillna(0.0)
@@ -654,18 +750,31 @@ def plot_two_way_dendrogram_metrics(
     col_distances = dist_mat[np.triu_indices(n, k=1)]
     if not np.all(np.isfinite(col_distances)):
         col_distances = np.where(np.isfinite(col_distances), col_distances, 1.0)
-    col_Z = linkage(col_distances, method=col_linkage) if len(metric_names) > 1 else None
+    col_Z = (
+        linkage(col_distances, method=col_linkage) if len(metric_names) > 1 else None
+    )
 
     # Row cluster assignments
     genotypes_by_cluster = {}
     cluster_order = []
 
     if row_cluster_level is not None and row_Z is not None and M.shape[0] > 1:
-        row_cluster_assignments = fcluster(row_Z, row_cluster_level, criterion="maxclust")
-        cluster_map = {i: row_cluster_assignments[i] for i in range(len(row_cluster_assignments))}
+        row_cluster_assignments = fcluster(
+            row_Z, row_cluster_level, criterion="maxclust"
+        )
+        cluster_map = {
+            i: row_cluster_assignments[i] for i in range(len(row_cluster_assignments))
+        }
 
         set_link_color_palette(list(row_palette))
-        dg_row = dendrogram(row_Z, orientation="left", color_threshold=None, no_labels=True, ax=None, no_plot=True)
+        dg_row = dendrogram(
+            row_Z,
+            orientation="left",
+            color_threshold=None,
+            no_labels=True,
+            ax=None,
+            no_plot=True,
+        )
         row_order_idx = dg_row["leaves"]
 
         for genotype_idx in row_order_idx:
@@ -675,7 +784,9 @@ def plot_two_way_dendrogram_metrics(
                 cluster_order.append(cluster_id)
             genotypes_by_cluster[cluster_id].append(M.index[genotype_idx])
 
-        print(f"   🔀 {row_cluster_level} clusters: {[len(genotypes_by_cluster[c]) for c in cluster_order]}")
+        print(
+            f"   🔀 {row_cluster_level} clusters: {[len(genotypes_by_cluster[c]) for c in cluster_order]}"
+        )
     else:
         genotypes_by_cluster[1] = list(M.index)
         cluster_order = [1]
@@ -704,7 +815,9 @@ def plot_two_way_dendrogram_metrics(
 
     ax_top_dendro = fig.add_subplot(gs[0, 2])
     set_link_color_palette(["#404040"])
-    dg_col = dendrogram(col_Z, orientation="top", color_threshold=None, no_labels=True, ax=ax_top_dendro)
+    dg_col = dendrogram(
+        col_Z, orientation="top", color_threshold=None, no_labels=True, ax=ax_top_dendro
+    )
     col_order_idx = dg_col["leaves"]
     col_labels_ordered = [metric_names[i] for i in col_order_idx]
 
@@ -720,9 +833,17 @@ def plot_two_way_dendrogram_metrics(
                 (light_segs if max_y >= max_dist_top * 0.80 else dark_segs).append(seg)
             old_coll.remove()
             if light_segs:
-                ax_top_dendro.add_collection(LineCollection(light_segs, colors="lightgray", linewidths=2.0, zorder=8))
+                ax_top_dendro.add_collection(
+                    LineCollection(
+                        light_segs, colors="lightgray", linewidths=2.0, zorder=8
+                    )
+                )
             if dark_segs:
-                ax_top_dendro.add_collection(LineCollection(dark_segs, colors="#404040", linewidths=2.0, zorder=10))
+                ax_top_dendro.add_collection(
+                    LineCollection(
+                        dark_segs, colors="#404040", linewidths=2.0, zorder=10
+                    )
+                )
         for line in ax_top_dendro.get_lines():
             max_y = max(line.get_ydata()) if len(line.get_ydata()) > 0 else 0
             if max_y >= max_dist_top * 0.80:
@@ -740,7 +861,11 @@ def plot_two_way_dendrogram_metrics(
     # Save canonical metric order
     try:
         canonical_path = (
-            Path(__file__).parent.parent.parent / "src" / "PCA" / "metrics_lists" / "canonical_metrics_order.txt"
+            Path(__file__).parent.parent.parent
+            / "src"
+            / "PCA"
+            / "metrics_lists"
+            / "canonical_metrics_order.txt"
         )
         canonical_path.parent.mkdir(parents=True, exist_ok=True)
         with canonical_path.open("w") as fh:
@@ -765,7 +890,9 @@ def plot_two_way_dendrogram_metrics(
     for cluster_id in display_order:
         genotypes = genotypes_by_cluster[cluster_id]
         cm = M.loc[genotypes, :]
-        cluster_matrices[cluster_id] = cm.iloc[:, col_order_idx] if col_order_idx else cm
+        cluster_matrices[cluster_id] = (
+            cm.iloc[:, col_order_idx] if col_order_idx else cm
+        )
 
     cmap_obj = plt.get_cmap("RdBu_r").copy()
     try:
@@ -793,10 +920,18 @@ def plot_two_way_dendrogram_metrics(
                 annot=False,
             )
         else:
-            ax_hm.imshow(display_matrix.values, cmap=cmap_obj, vmin=vmin, vmax=vmax, aspect="auto")
+            ax_hm.imshow(
+                display_matrix.values,
+                cmap=cmap_obj,
+                vmin=vmin,
+                vmax=vmax,
+                aspect="auto",
+            )
             ax_hm.set_xticks(np.arange(display_matrix.shape[1] + 1) - 0.5, minor=True)
             ax_hm.set_yticks(np.arange(display_matrix.shape[0] + 1) - 0.5, minor=True)
-            ax_hm.grid(which="minor", color=linecolor, linestyle="-", linewidth=linewidths)
+            ax_hm.grid(
+                which="minor", color=linecolor, linestyle="-", linewidth=linewidths
+            )
             ax_hm.tick_params(which="minor", size=0)
 
         ax_hm.set_yticks([])
@@ -809,7 +944,9 @@ def plot_two_way_dendrogram_metrics(
         ax_label.yaxis.tick_right()
         ax_label.yaxis.set_label_position("right")
         ax_label.set_yticks(np.arange(len(display_matrix.index)))
-        ax_label.set_yticklabels(display_matrix.index, fontsize=row_label_fontsize, ha="right")
+        ax_label.set_yticklabels(
+            display_matrix.index, fontsize=row_label_fontsize, ha="right"
+        )
         ax_label.tick_params(axis="y", which="both", length=0, pad=2)
         for spine in ax_label.spines.values():
             spine.set_visible(False)
@@ -828,7 +965,11 @@ def plot_two_way_dendrogram_metrics(
 
         # Colour y-tick labels by brain region
         try:
-            region_mapping = simplified_to_region if simplified_to_region else nickname_to_brainregion
+            region_mapping = (
+                simplified_to_region
+                if simplified_to_region
+                else nickname_to_brainregion
+            )
             colour_y_ticklabels(ax_label, region_mapping, color_dict)
         except Exception as e:
             print(f"   ⚠️  Could not colour y-labels for cluster {cluster_id}: {e}")
@@ -843,13 +984,21 @@ def plot_two_way_dendrogram_metrics(
                 pval = grow.iloc[0].get(f"{metric}_pval_corrected", np.nan)
                 if pd.isna(pval):
                     continue
-                stars = "***" if pval < 0.001 else "**" if pval < 0.01 else "*" if pval < 0.05 else None
+                stars = (
+                    "***"
+                    if pval < 0.001
+                    else "**" if pval < 0.01 else "*" if pval < 0.05 else None
+                )
                 if stars:
                     try:
                         cell_val = display_matrix.iloc[row_idx_cell, j]
                     except Exception:
                         cell_val = None
-                    tc = "white" if (cell_val is not None and abs(cell_val) >= 0.5) else "black"
+                    tc = (
+                        "white"
+                        if (cell_val is not None and abs(cell_val) >= 0.5)
+                        else "black"
+                    )
                     ax_hm.text(
                         j + 0.5,
                         row_idx_cell + 0.5,
@@ -865,7 +1014,12 @@ def plot_two_way_dendrogram_metrics(
     if row_Z is not None and M.shape[0] > 1:
         set_link_color_palette(["#404040"])
         dg_left = dendrogram(
-            row_Z, orientation="left", color_threshold=0, above_threshold_color="#404040", no_labels=True, no_plot=True
+            row_Z,
+            orientation="left",
+            color_threshold=0,
+            above_threshold_color="#404040",
+            no_labels=True,
+            no_plot=True,
         )
 
         leaf_to_position = {}
@@ -880,7 +1034,9 @@ def plot_two_way_dendrogram_metrics(
             ax_left = ax_left_dendro_list[i]
             cluster_genotypes_list = genotypes_by_cluster[cluster_id]
             cluster_size = len(cluster_genotypes_list)
-            cluster_leaf_indices = {list(M.index).index(g) for g in cluster_genotypes_list}
+            cluster_leaf_indices = {
+                list(M.index).index(g) for g in cluster_genotypes_list
+            }
 
             global_to_local_y = {}
             for j, genotype in enumerate(cluster_genotypes_list):
@@ -902,9 +1058,14 @@ def plot_two_way_dendrogram_metrics(
                     max_distance_in_cluster = max(max_distance_in_cluster, max(dc))
 
             max_x = 0
-            for ic, dc, color in zip(dg_left["icoord"], dg_left["dcoord"], dg_left.get("color_list", [])):
+            for ic, dc, color in zip(
+                dg_left["icoord"], dg_left["dcoord"], dg_left.get("color_list", [])
+            ):
                 seg_leaves = get_segment_leaves(ic)
-                if not (seg_leaves and all(leaf in cluster_leaf_indices for leaf in seg_leaves)):
+                if not (
+                    seg_leaves
+                    and all(leaf in cluster_leaf_indices for leaf in seg_leaves)
+                ):
                     continue
                 new_ic, valid = [], True
                 for y_val in ic:
@@ -919,18 +1080,25 @@ def plot_two_way_dendrogram_metrics(
                             break
                     else:
                         frac = max(0, min((y_val - 5) / 10, len(dg_left["leaves"]) - 1))
-                        lo, hi = int(np.floor(frac)), min(int(np.floor(frac)) + 1, len(dg_left["leaves"]) - 1)
+                        lo, hi = int(np.floor(frac)), min(
+                            int(np.floor(frac)) + 1, len(dg_left["leaves"]) - 1
+                        )
                         ll, hl = dg_left["leaves"][lo], dg_left["leaves"][hi]
                         if ll in cluster_leaf_indices and hl in cluster_leaf_indices:
                             lly = global_to_local_y.get(leaf_to_position[ll], 0)
-                            hly = global_to_local_y.get(leaf_to_position[hl], cluster_size - 1)
+                            hly = global_to_local_y.get(
+                                leaf_to_position[hl], cluster_size - 1
+                            )
                             new_ic.append(lly * (1 - (frac - lo)) + hly * (frac - lo))
                         else:
                             valid = False
                             break
 
                 if valid and len(new_ic) == 4:
-                    is_root = max_distance_in_cluster > 0 and max(dc) >= max_distance_in_cluster * 0.90
+                    is_root = (
+                        max_distance_in_cluster > 0
+                        and max(dc) >= max_distance_in_cluster * 0.90
+                    )
                     ax_left.plot(
                         dc,
                         new_ic,
@@ -967,7 +1135,9 @@ def plot_two_way_dendrogram_metrics(
         cluster_roots = []
         for i, cluster_id in enumerate(display_order):
             ax_left = ax_left_dendro_list[i]
-            cluster_leaf_indices = {list(M.index).index(g) for g in genotypes_by_cluster[cluster_id]}
+            cluster_leaf_indices = {
+                list(M.index).index(g) for g in genotypes_by_cluster[cluster_id]
+            }
             max_d = 0
             for dc, ic in zip(dg_left["dcoord"], dg_left["icoord"]):
                 segs = []
@@ -978,7 +1148,11 @@ def plot_two_way_dendrogram_metrics(
                 if segs and all(l in cluster_leaf_indices for l in segs):
                     max_d = max(max_d, max(dc))
             cluster_roots.append(
-                {"ax": ax_left, "y_pos": (len(genotypes_by_cluster[cluster_id]) - 1) / 2.0, "max_dist": max_d}
+                {
+                    "ax": ax_left,
+                    "y_pos": (len(genotypes_by_cluster[cluster_id]) - 1) / 2.0,
+                    "max_dist": max_d,
+                }
             )
 
         stem_x = max(cr["max_dist"] for cr in cluster_roots) * 1.15
@@ -1035,7 +1209,9 @@ def plot_two_way_dendrogram_metrics(
     pos = ax_cbar.get_position()
     nh = pos.height * 0.35
     ax_cbar.set_position((pos.x0, pos.y0 + (pos.height - nh) / 2, pos.width, nh))
-    cbar = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=plt.get_cmap("RdBu_r")), cax=ax_cbar)
+    cbar = fig.colorbar(
+        plt.cm.ScalarMappable(norm=norm, cmap=plt.get_cmap("RdBu_r")), cax=ax_cbar
+    )
     cbar.set_label(cbar_label, fontsize=8)
 
     try:
@@ -1043,7 +1219,11 @@ def plot_two_way_dendrogram_metrics(
         base_ticks = [-1.0, -0.5, 0.0, 0.5, 1.0]
         ticks = sorted({-thresh} | set(base_ticks) | {thresh})
         tick_labels = [
-            f"≤ {t:.2f}" if np.isclose(t, -thresh) else f"≥ {t:.2f}" if np.isclose(t, thresh) else f"{t:.1f}"
+            (
+                f"≤ {t:.2f}"
+                if np.isclose(t, -thresh)
+                else f"≥ {t:.2f}" if np.isclose(t, thresh) else f"{t:.1f}"
+            )
             for t in ticks
         ]
         cbar.set_ticks(ticks)
@@ -1070,7 +1250,9 @@ def plot_two_way_dendrogram_metrics(
     ax_top_dendro.set_yticks([])
     for spine in ax_top_dendro.spines.values():
         spine.set_visible(False)
-    ax_top_dendro.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+    ax_top_dendro.tick_params(
+        left=False, bottom=False, labelleft=False, labelbottom=False
+    )
 
     if despine:
         for _, ax_hm in ax_hm_list:
@@ -1100,10 +1282,16 @@ def plot_two_way_dendrogram_metrics(
     # Save
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     for ext in ("png", "pdf", "svg"):
-        kwargs = {"dpi": 300, "bbox_inches": "tight"} if ext == "png" else {"bbox_inches": "tight"}
+        kwargs = (
+            {"dpi": 300, "bbox_inches": "tight"}
+            if ext == "png"
+            else {"bbox_inches": "tight"}
+        )
         if ext == "svg":
             kwargs["format"] = "svg"
-        fig.savefig(os.path.join(OUTPUT_DIR, f"metric_two_way_dendrogram.{ext}"), **kwargs)
+        fig.savefig(
+            os.path.join(OUTPUT_DIR, f"metric_two_way_dendrogram.{ext}"), **kwargs
+        )
     plt.close(fig)
 
     # Save matrices / orders
@@ -1149,7 +1337,9 @@ def main():
         return
 
     dataset = prepare_data()
-    results_df, correlation_matrix = run_metric_analysis(dataset, metrics_list, high_consistency_hits)
+    results_df, correlation_matrix = run_metric_analysis(
+        dataset, metrics_list, high_consistency_hits
+    )
 
     if results_df.empty:
         print("❌ No results generated.")

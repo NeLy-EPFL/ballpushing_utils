@@ -1,0 +1,204 @@
+Genotype,Total_Hit_Count,Total_Configs,Overall_Consistency,Optimized_Only_Consistency,Combined_Consistency,Optimized_Hit_Count,Optimized_Configs,Optimized_Consistency,Edge_Case_Hit_Count,Edge_Case_Configs,Edge_Case_Consistency,Found_In_Both,Optimized_Only,Edge_Case_Only,Is_Robust,Optimization_Dependent
+72D07-GAL4,20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+KC-α/βc-GaL4,20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+MB418B ,20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+DDC-gal4,20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+86615 (LH2201),20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+MB434B,20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+9943 (GR63a-GAL4),20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+854 (OK107-Gal4),20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+75823 (LH2446),20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+MB304B (PPL1-04),20,20,1.0,1.0,1.0,20,20,1.0,0,0,0,False,True,False,False,True
+MB247-Gal4,19,20,0.95,0.95,0.95,19,20,0.95,0,0,0,False,True,False,False,True
+86720 (LH18),19,20,0.95,0.95,0.95,19,20,0.95,0,0,0,False,True,False,False,True
+MB312B (PAM-07),19,20,0.95,0.95,0.95,19,20,0.95,0,0,0,False,True,False,False,True
+MBON-08-GaL4  MBON-09-GaL4 ,19,20,0.95,0.95,0.95,19,20,0.95,0,0,0,False,True,False,False,True
+LC16-1,19,20,0.95,0.95,0.95,19,20,0.95,0,0,0,False,True,False,False,True
+50742 (MB247-GAL4),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+MB504B (All PPL1),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+SS32219-Gal4 (LAL-2),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+86685 (LH272),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+51983 (Mip-GAL4 1M),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+LC10-2,18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+75945 (LH1543),18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+KC-γmain-GaL4,18,20,0.9,0.9,0.9,18,20,0.9,0,0,0,False,True,False,False,True
+MB310C,17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+MB296B (PPL1-03),17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+LC22,17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+SS32230-Gal4 (LAL-1),17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+41731 (IR8a-GAL4),17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+9998 (OR67d-GAL4),17,20,0.85,0.85,0.85,17,20,0.85,0,0,0,False,True,False,False,True
+86707 (LH578),16,20,0.8,0.8,0.8,16,20,0.8,0,0,0,False,True,False,False,True
+MB465C (MB-CSD),14,20,0.7,0.7,0.7,14,20,0.7,0,0,0,False,True,False,False,True
+LC6,13,20,0.65,0.65,0.65,13,20,0.65,0,0,0,False,True,False,False,True
+KC-α/βs-GaL4,13,20,0.65,0.65,0.65,13,20,0.65,0,0,0,False,True,False,False,True
+MBON-04-GaL4 (MBON-β′2mp_bilateral),10,20,0.5,0.5,0.5,10,20,0.5,0,0,0,False,True,False,False,True
+86643 (LH1893),10,20,0.5,0.5,0.5,10,20,0.5,0,0,0,False,True,False,False,True
+MB371B,8,20,0.4,0.4,0.4,8,20,0.4,0,0,0,False,True,False,False,True
+SS02239-gal4 (P-F3LC patch line),8,20,0.4,0.4,0.4,8,20,0.4,0,0,0,False,True,False,False,True
+MB022B (OA-VPM3),8,20,0.4,0.4,0.4,8,20,0.4,0,0,0,False,True,False,False,True
+"JON-AB
+JO-15""",7,20,0.35,0.35,0.35,7,20,0.35,0,0,0,False,True,False,False,True
+41744 (IR8a mutant),7,20,0.35,0.35,0.35,7,20,0.35,0,0,0,False,True,False,False,True
+LC4,6,20,0.3,0.3,0.3,6,20,0.3,0,0,0,False,True,False,False,True
+LC15,5,20,0.25,0.25,0.25,5,20,0.25,0,0,0,False,True,False,False,True
+MB213B (PAM-04),4,20,0.2,0.2,0.2,4,20,0.2,0,0,0,False,True,False,False,True
+KC-γd-GaL4,4,20,0.2,0.2,0.2,4,20,0.2,0,0,0,False,True,False,False,True
+23129 (ORCO mutant),4,20,0.2,0.2,0.2,4,20,0.2,0,0,0,False,True,False,False,True
+86669 (LH567),4,20,0.2,0.2,0.2,4,20,0.2,0,0,0,False,True,False,False,True
+SS52244-GAL4 (P-F1N3 (target FSB)),3,20,0.15,0.15,0.15,3,20,0.15,0,0,0,False,True,False,False,True
+86694 (LH1337),2,20,0.1,0.1,0.1,2,20,0.1,0,0,0,False,True,False,False,True
+LC11,2,20,0.1,0.1,0.1,2,20,0.1,0,0,0,False,True,False,False,True
+86636 (LH2087),2,20,0.1,0.1,0.1,2,20,0.1,0,0,0,False,True,False,False,True
+86830 (pC1-SS1),2,20,0.1,0.1,0.1,2,20,0.1,0,0,0,False,True,False,False,True
+86703 (LH1531),1,20,0.05,0.05,0.05,1,20,0.05,0,0,0,False,True,False,False,True
+51980 (Burs-GAL4 4M),1,20,0.05,0.05,0.05,1,20,0.05,0,0,0,False,True,False,False,True
+R38H02-gal4 (R4 (EB)),1,20,0.05,0.05,0.05,1,20,0.05,0,0,0,False,True,False,False,True
+51969 (Capa-GAL4 4F),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC12,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-14-GaL4 (MBON-α3),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+41728 (IR25a-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-13-GaL4 (MBON-α′2),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB194B (PAM-09),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86630 (LH2385),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51977 (Crz-GAL4 4M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB441B (PAM-12),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-16-GaL4   MBON-17-Gal4 ,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86641 (LH1900),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R58E02 (All PAMs),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+76013 (LH1827),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86659 (LH1721),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86653 (LH1925),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51978 (AstA-GAL4 3M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB380B (MB-C1),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC20,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R31A12-Gal4 (ER1 (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+34497 (MZ19-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51993 (Lk-GAL4 2M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB463B,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-01-GaL4 (MBON-γ5β′2a),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86652 (LH2033),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86634 (LH2193),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+23292 (ORCO-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51991 (sNPF-GAL4 2),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86633 (LH2382),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS52577-gal4 (PBG2‐9.s‐FBℓ3.b‐NO2V.b (PB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB399B,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86661 (LH1554),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R12D09 (P-EN1(2) patch line),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+75860 (LH2454),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC13,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LPLC2,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+76003 (LH528),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC9,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51973 (Tk-GAL4 2Ma),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC25,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86699 (LH123),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB058B (PPL1-05),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+GMR70G12-Gal4,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R15B07-gal4 (R1/R3/R4d (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS54295-gal4 (PBG2‐9.s‐EBt.b‐NO1.b (PB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+30026 (GH146-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51988 (Dh31-GAL4 2M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86710 (LH290),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51987 (Dh44-GAL4 2M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51975 (Tk-GAL4 5Fa),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86667 (LH1000),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB543B,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB032B (PAM-06),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86697 (LH989),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86670 (LH1594),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+20G07-GAL4,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86639 (LH1990),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+VT43924 (MB-APL),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86632 (LH2392),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86714 (LH180),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS02255-GAL4 (P-F2N3 (target FSB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86671 (LH412),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86666 (LH1139),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-12-GaL4 (MBON-γ2α′1),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB188B (PAM-08),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-10-GaL4 (MBON-β′1),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R12B01-gal4 (R4d - distal (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86713 (LH279),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R19G02 (E-PG),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86647 (LH1959),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB301B (PAM-03),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+41737 (IR25a mutant),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC10-1,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+52017 (AstC-GAL4 1M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86695 (LH1284),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+GMR86D09-GAL4,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB320C (PPL1-01),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+23137 (OR88a-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS00078-gal4 (PBG2‐9.s‐FBℓ3.b‐NO2D.b (PB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R14G09 (ExR4 (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51992 (Lk-GAL4 1),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86682 (LH85),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R59B10-gal4 (R4m - medial (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86637 (LH2220),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86712 (LH421),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R28E01-gal4 (ER3m (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86656 (LH721),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51984 (Mip-GAL4 2M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB013B (SIFamide),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86658 (LH1744),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R44B10 (Ventral P-FN silencing line),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86701 (LH849),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+9983 (OR47b-GAL4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51976 (Crz-GAL4 3M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB315C (PAM-01),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51989 (Dh31-GAL4 5F),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-11-GaL4 (MBON-γ1pedc>α/β),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-22-GaL4 (MBON-calyx),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS54549 (P-F3-5R patch line),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+75956 (LH2445),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB542B,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+7362 (C739-Gal4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+c316 (MB-DPM),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86675 (LH542),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51981 (Dsk-GAL4 3M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86705 (LH1668),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51970 (Capa-GAL4 5F),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R78A01 (ExR1 (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86692 (LH1479),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86693 (LH979),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+TNTxPR,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51306 (OR47b mutant),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86676 (LH191),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB025B (PAM-13-14),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC16-2,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB549C,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86680 (LH788),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R80C07-gal4 (ER3d (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51985 (Ms-GAL4 1M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC21,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MBON-03-GaL4 (MBON-β′2mp),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB109B (PAM-02),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+Empty-Gal4,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86657 (LH629),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+SS47432 (LNa imaging line),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB063B (PAM-10),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC26,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86698 (LH258),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB043B (PAM-11),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51979 (AstA-GAL4 5),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+44H11-GAL4,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+LC24,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R70G12 (E-PG),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB065B (PPL1-06),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51986 (Ms-GAL4 6Ma),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+9941 (GR63a mutant),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86690 (LH374),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86604 (LH2001),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86678 (LH1112),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51974 (Tk-GAL4 3Ma),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+51990 (FMRFa-GAL4 1M),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86683 (LH168),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB113C (OA-VPM4),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+Empty-Split,0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86681 (LH141),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+86674 (LH247),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+MB056B (PAM-05),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+25681 (NPF-GAL4 2),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False
+R78B06-gal4 (ER2 (EB)),0,20,0.0,0.0,0.0,0,20,0.0,0,0,0,False,False,False,False,False

@@ -149,7 +149,9 @@ def write_region(
 
     if not overwrite:
         if single_path.exists() or any(output_dir.glob(f"{stem}-*.feather")):
-            logging.info(f"[{region}] Already written, skipping (use --overwrite to replace).")
+            logging.info(
+                f"[{region}] Already written, skipping (use --overwrite to replace)."
+            )
             return
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -163,20 +165,29 @@ def write_region(
 
     if file_size <= max_bytes:
         tmp_path.rename(single_path)
-        logging.info(f"[{region}] ✅  {single_path.name}  ({size_gb:.2f} GB,  {len(df)} rows)")
+        logging.info(
+            f"[{region}] ✅  {single_path.name}  ({size_gb:.2f} GB,  {len(df)} rows)"
+        )
         return
 
     # --- Split required ---------------------------------------------------
-    logging.info(f"[{region}] {size_gb:.2f} GB exceeds limit — splitting by {GENOTYPE_COL}…")
+    logging.info(
+        f"[{region}] {size_gb:.2f} GB exceeds limit — splitting by {GENOTYPE_COL}…"
+    )
     tmp_path.unlink()
 
     if GENOTYPE_COL not in df.columns:
-        logging.warning(f"[{region}] No '{GENOTYPE_COL}' column — splitting into equal chunks.")
+        logging.warning(
+            f"[{region}] No '{GENOTYPE_COL}' column — splitting into equal chunks."
+        )
         _split_equal_chunks(region, stem, df, output_dir, max_bytes, file_size)
         return
 
     bytes_per_row = file_size / len(df)
-    max_rows_per_part = int(max_bytes / bytes_per_row)
+    # Apply a 15 % safety margin: per-genotype feather compression varies from
+    # the whole-region average, so a purely row-count-based budget can overshoot.
+    effective_max_bytes = int(max_bytes * 0.85)
+    max_rows_per_part = int(effective_max_bytes / bytes_per_row)
 
     geno_counts = df[GENOTYPE_COL].value_counts().sort_values(ascending=False)
     geno_sizes = list(geno_counts.items())
@@ -199,10 +210,17 @@ def write_region(
         part_path = output_dir / f"{stem}-{i}.feather"
         part_df.to_feather(part_path)
         actual_gb = part_path.stat().st_size / 1e9
+        status = "⚠️  OVER LIMIT" if part_path.stat().st_size > max_bytes else "✅"
         logging.info(
             f"[{region}]   part {i}/{n_parts}: {part_path.name}  "
-            f"({len(part_df)} rows,  {actual_gb:.2f} GB)"
+            f"({len(part_df)} rows,  {actual_gb:.2f} GB)  {status}"
         )
+        if part_path.stat().st_size > max_bytes:
+            logging.warning(
+                f"[{region}] Part {i} is {actual_gb:.2f} GB — exceeds the {max_bytes/1e9:.1f} GB "
+                f"limit. The genotype(s) in this part may have above-average row density. "
+                f"Consider splitting this part manually or reducing --max-gb."
+            )
 
 
 def _split_equal_chunks(
@@ -216,14 +234,16 @@ def _split_equal_chunks(
     """Fallback: equal-row chunks when no Genotype column is present."""
     n_rows = len(df)
     bytes_per_row = file_size / n_rows
-    max_rows = int(max_bytes / bytes_per_row)
+    max_rows = int(max_bytes * 0.85 / bytes_per_row)  # 15 % safety margin
     n_parts = -(-n_rows // max_rows)  # ceiling division
     for i in range(n_parts):
         chunk = df.iloc[i * max_rows : (i + 1) * max_rows].copy().reset_index(drop=True)
         part_path = output_dir / f"{stem}-{i + 1}.feather"
         chunk.to_feather(part_path)
         actual_gb = part_path.stat().st_size / 1e9
-        logging.info(f"[{region}]   chunk {i + 1}/{n_parts}: {part_path.name}  ({actual_gb:.2f} GB)")
+        logging.info(
+            f"[{region}]   chunk {i + 1}/{n_parts}: {part_path.name}  ({actual_gb:.2f} GB)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +361,9 @@ def main() -> None:
                 continue
             n_files = len(region_to_files[region])
             stem = f"{region}_standardized_contacts"
-            print(f"  {region:<28} {n_files:>7}  {stem}.feather  (or -1.feather/-2.feather if >2.5 GB)")
+            print(
+                f"  {region:<28} {n_files:>7}  {stem}.feather  (or -1.feather/-2.feather if >2.5 GB)"
+            )
         print(f"\n{'='*60}")
         print("Dry run complete. No files written.")
         return
@@ -366,14 +388,14 @@ def main() -> None:
     # ---- Processing: one region at a time to limit peak memory ----
     for region in regions_to_process:
         files_for_region = region_to_files[region]
-        logging.info(
-            f"[{region}] Loading from {len(files_for_region)} file(s)…"
-        )
+        logging.info(f"[{region}] Loading from {len(files_for_region)} file(s)…")
         chunks: list[pd.DataFrame] = []
         for path in files_for_region:
             df_full = pd.read_feather(path)
             # Re-map the Brain region column for correct grouping
-            mask = df_full[BRAIN_REGION_COL].map(lambda r: remap_region(str(r))) == region
+            mask = (
+                df_full[BRAIN_REGION_COL].map(lambda r: remap_region(str(r))) == region
+            )
             chunk = df_full[mask]
             if not chunk.empty:
                 chunks.append(chunk)
@@ -387,7 +409,9 @@ def main() -> None:
         df_region = pd.concat(chunks, ignore_index=True)
         del chunks
 
-        write_region(region, df_region, args.output_dir, max_bytes, overwrite=args.overwrite)
+        write_region(
+            region, df_region, args.output_dir, max_bytes, overwrite=args.overwrite
+        )
         del df_region
 
     print("\nDone.")
