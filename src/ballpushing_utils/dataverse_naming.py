@@ -64,6 +64,14 @@ DATAVERSE_DOIS: dict[str, str] = {
     "exploration": "doi:10.7910/DVN/VB4UI5",
 }
 
+#: DOI for the confocal-stacks dataset (ED Figure 4).
+#: Contains per-genotype ``.tiff`` files (flat layout, one file per genotype
+#: key with the leading date prefix stripped) plus the ``stack_infos.yaml``
+#: manifest.  Not included in the main :data:`DATAVERSE_DOIS` dict because
+#: it is consumed by a dedicated helper in the figure script rather than by
+#: the generic ``ballpushing-fetch`` feather downloader.
+CONFOCAL_DOI: str = "doi:10.7910/DVN/MY4GN5"
+
 
 #: Server-relative path (as written in the figure scripts' ``dataset(...)``
 #: literals) → list of Dataverse basenames that, after concat, reproduce
@@ -194,8 +202,12 @@ WILDTYPE_TRAJECTORY_FEATHERS: tuple[str, ...] = (
 #: scripts.
 SERVER_DIRECTORY_TO_DATAVERSE: dict[str, list[str]] = {
     # Wild-type baseline trajectories — used by Fig 1, ED Fig 3, ED Fig 10.
-    "Ballpushing_Exploration/Datasets/*/coordinates": list(WILDTYPE_TRAJECTORY_FEATHERS),
-    "Ballpushing_Exploration/Datasets/*/Other/coordinates": list(WILDTYPE_TRAJECTORY_FEATHERS),
+    "Ballpushing_Exploration/Datasets/*/coordinates": list(
+        WILDTYPE_TRAJECTORY_FEATHERS
+    ),
+    "Ballpushing_Exploration/Datasets/*/Other/coordinates": list(
+        WILDTYPE_TRAJECTORY_FEATHERS
+    ),
     # Silencing-screen standardized contacts — used by the UMAP pipeline
     # (Fig. 3, ED Fig. 5, Supp. File 2). The on-server layout is 74 per-date
     # feathers; the Dataverse layout is one pooled feather per brain region.
@@ -239,10 +251,9 @@ BASENAME_TO_ARCHIVE: dict[str, str] = {
 # tables must have an archive assigned. Catches the obvious typo where a
 # new basename was added to SERVER_TO_DATAVERSE (or
 # SERVER_DIRECTORY_TO_DATAVERSE) but not BASENAME_TO_ARCHIVE.
-_expected_basenames = (
-    {b for v in SERVER_TO_DATAVERSE.values() for b in v}
-    | {b for v in SERVER_DIRECTORY_TO_DATAVERSE.values() for b in v}
-)
+_expected_basenames = {b for v in SERVER_TO_DATAVERSE.values() for b in v} | {
+    b for v in SERVER_DIRECTORY_TO_DATAVERSE.values() for b in v
+}
 _missing = _expected_basenames - set(BASENAME_TO_ARCHIVE)
 if _missing:  # pragma: no cover - import-time guard
     raise RuntimeError(
