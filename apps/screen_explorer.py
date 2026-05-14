@@ -22,9 +22,18 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import panel as pn
-import holoviews as hv
-from holoviews import opts
+
+try:
+    import panel as pn
+    import holoviews as hv
+    from holoviews import opts
+except ImportError as _exc:
+    sys.exit(
+        f"This app requires the '[interactive]' extras (panel, holoviews, bokeh).\n"
+        f"Install them with:\n\n"
+        f"    pip install -e '.[interactive]'\n\n"
+        f"Missing package: {_exc.name}"
+    )
 
 pn.extension("bokeh")
 hv.extension("bokeh")

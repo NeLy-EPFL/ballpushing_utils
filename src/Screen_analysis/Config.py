@@ -19,10 +19,13 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 
-import holoviews as hv
-from holoviews import opts
-
-hv.extension("bokeh")
+try:
+    import holoviews as hv
+    from holoviews import opts
+    hv.extension("bokeh")
+except ImportError:
+    hv = None  # type: ignore[assignment]
+    opts = None  # type: ignore[assignment]
 
 from utils_behavior import utils as Utils
 from utils_behavior import processing as Processing
