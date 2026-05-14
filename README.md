@@ -568,6 +568,30 @@ The hermetic invariants of these builders are locked down in
 
 ---
 
+## Interactive data exploration
+
+The `apps/` directory contains Panel/HoloViews dashboards for exploring the
+paper datasets interactively. Install the `[interactive]` extras first:
+
+```bash
+pip install -e ".[interactive]"
+```
+
+### `screen_explorer` — TNT silencing screen
+
+Browse the ~225-genotype silencing screen: filter by brain region or genotype,
+compare metrics as boxplots with strip plots, or explore pairwise metric
+correlations in scatter mode. If the screen feather is not yet present, the
+app shows one-line download instructions.
+
+```bash
+panel serve apps/screen_explorer.py --show
+```
+
+See `apps/README.md` for details on all available apps.
+
+---
+
 ## Figure ↔ feather mapping
 
 Each figure script resolves its dataset path through
