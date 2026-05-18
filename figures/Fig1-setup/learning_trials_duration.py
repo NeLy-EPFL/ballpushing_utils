@@ -544,7 +544,6 @@ def create_duration_plot(trial_durations, friedman_stat, friedman_p, posthoc_res
     print(f"  - {png_path}")
     print(f"  - {pdf_path}")
 
-    plt.show()
     plt.close(fig)
 
 
