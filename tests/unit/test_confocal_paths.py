@@ -432,7 +432,7 @@ def test_resolve_jrc_nrrd_paths_missing_raises_with_urls(
         (confocal_flat_dir / "jrc2018" / fname).unlink()
 
     with pytest.raises(FileNotFoundError) as exc_info:
-        mod.resolve_jrc_nrrd_paths(confocal_flat_dir)
+        mod.resolve_jrc_nrrd_paths(confocal_flat_dir, auto_download=False)
     msg = str(exc_info.value)
     assert "figshare.com" in msg
     assert "BALLPUSHING_JRC2018_DIR" in msg
