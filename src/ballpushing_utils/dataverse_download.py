@@ -83,8 +83,10 @@ def _http_get(url: str, *, timeout: float = 60.0) -> "urllib.request.addinfourl"
 
 def download_file(url: str, output_file: io.BufferedWriter, expected_size: int | None = None, *, timeout: float = 60.0):
     req = urllib.request.Request(url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT})
-    with tqdm.tqdm(total=expected_size, unit="B", unit_scale=True) as progress_bar:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        if expected_size is None:
+            expected_size = int(response.info()["Content-Length"]) or None
+        with tqdm.tqdm(total=expected_size, unit="B", unit_scale=True) as progress_bar:
             for chunk in response:
                 output_file.write(chunk)
                 progress_bar.update(len(chunk))
