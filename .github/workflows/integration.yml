@@ -46,7 +46,6 @@ jobs:
       - name: Install ballpushing_utils with dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install "utils_behavior @ git+https://github.com/NeLy-EPFL/utils_behavior"
           pip install -e ".[dev]"
 
       - name: Sanity-check that LFS payloads actually downloaded
