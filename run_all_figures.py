@@ -30,7 +30,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 
-def discover_scripts(root: Path, include_supplementary: bool) -> list[Path]:
+def discover_scripts(root: Path, include_supplementary: bool, include_videos: bool) -> list[Path]:
     """Find every panel script under ``root``.
 
     Excludes ``run_all_panels.py`` files: those are per-figure orchestrators
@@ -44,6 +44,10 @@ def discover_scripts(root: Path, include_supplementary: bool) -> list[Path]:
         scripts = sorted(root.rglob("Fig*/*.py"))
     else:
         scripts = sorted(root.rglob("*.py"))
+
+    if not include_videos:
+        scripts = [script for script in scripts if "SuppVideo" not in script.parts]
+
     return [s for s in scripts if s.resolve() != THIS_SCRIPT and s.name != "run_all_panels.py" and "old" not in s.parts]
 
 
@@ -71,6 +75,11 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         help="Whether to also generate all supplementary figures. Note - this first requires running ballpushing-fetch --include-supplementary",
     )
+    parser.add_argument(
+        "--include-videos",
+        action=argparse.BooleanOptionalAction,
+        help="Whether to also render supplementary videos. Note - this requires raw videos (please contact the authors).",
+    )
 
     return parser.parse_args()
 
@@ -78,7 +87,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    scripts = discover_scripts(FIGURES_DIR, args.include_supplementary)
+    scripts = discover_scripts(FIGURES_DIR, args.include_supplementary, include_videos=args.include_videos)
     if not scripts:
         print(f"{YELLOW}No scripts found under {FIGURES_DIR}{RESET}")
         sys.exit(0)
