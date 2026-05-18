@@ -1,11 +1,13 @@
 from pathlib import Path
+
 import ants
 import cv2
-import numpy as np
-import yaml
-import tifffile
 import matplotlib.pyplot as plt
+import numpy as np
+import tifffile
+import yaml
 from tqdm import tqdm
+
 from ballpushing_utils.paths import get_cache_dir
 
 regions = ["brain", "vnc"]
@@ -24,6 +26,12 @@ _JRC_FILENAMES = {
 _JRC_LANDING_URLS = {
     "brain": "https://figshare.com/s/afa673b1dcd163ad8f3f",
     "vnc": "https://figshare.com/s/8103fa90a5cded0509c4",
+}
+
+# Links for automatic download of the Janelia templates.
+_JRC_DOWNLOAD_URLS = {
+    "brain": "https://ndownloader.figshare.com/files/12809636?private_link=afa673b1dcd163ad8f3f",
+    "vnc": "https://ndownloader.figshare.com/files/12824438?private_link=8103fa90a5cded0509c4",
 }
 
 _CONFOCAL_SUBDIR = "confocal"
@@ -46,25 +54,21 @@ def _download_confocal_from_dataverse(dest: Path) -> None:
     are downloaded (the tiff stack files + ``stack_infos.yaml``).
     """
     import json
+    import os
+    import tempfile
     import urllib.parse
     import urllib.request
-    import shutil
-    import tempfile
-    import os
 
+    from ballpushing_utils.dataverse_download import _USER_AGENT, DEFAULT_API_BASE, download_file
     from ballpushing_utils.dataverse_naming import CONFOCAL_DOI
-    from ballpushing_utils.dataverse_download import DEFAULT_API_BASE, _USER_AGENT
 
     dest.mkdir(parents=True, exist_ok=True)
 
     print(f"Querying Dataverse for confocal-stacks archive ({CONFOCAL_DOI})…")
-    api_url = (
-        f"{DEFAULT_API_BASE}/api/datasets/:persistentId/?"
-        + urllib.parse.urlencode({"persistentId": CONFOCAL_DOI})
+    api_url = f"{DEFAULT_API_BASE}/api/datasets/:persistentId/?" + urllib.parse.urlencode(
+        {"persistentId": CONFOCAL_DOI}
     )
-    req = urllib.request.Request(
-        api_url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT}
-    )
+    req = urllib.request.Request(api_url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT})
     with urllib.request.urlopen(req, timeout=60) as resp:
         payload = json.load(resp)
 
@@ -82,25 +86,50 @@ def _download_confocal_from_dataverse(dest: Path) -> None:
             print(f"  [skip] {name} (already present)")
             continue
         dl_url = f"{DEFAULT_API_BASE}/api/access/datafile/{file_id}"
-        dl_req = urllib.request.Request(
-            dl_url, headers={"Accept": "*/*", "User-Agent": _USER_AGENT}
-        )
         fd, tmp_name = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=dest)
         tmp_path = Path(tmp_name)
         try:
             os.close(fd)
             print(f"  Downloading {name} …")
-            with (
-                urllib.request.urlopen(dl_req, timeout=600) as resp,
-                tmp_path.open("wb") as out,
-            ):
-                shutil.copyfileobj(resp, out, length=1 << 20)
+            with tmp_path.open("wb") as out:
+                download_file(dl_url, out, timeout=600)
             tmp_path.replace(target)
             print(f"  [done] {name}")
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
     print("Confocal data download complete.")
+
+
+def _download_jrc_nrrds_from_figshare(dest: Path, regions_to_download: list[str]) -> None:
+    """Download the JRC2018 reference-brain NRRDs into *dest*."""
+    import os
+    import tempfile
+
+    from ballpushing_utils.dataverse_download import download_file
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    for region in regions_to_download:
+        name = _JRC_FILENAMES[region]
+        target = dest / name
+        if target.exists():
+            print(f"  [skip] {name} (already present)")
+            continue
+        dl_url = _JRC_DOWNLOAD_URLS[region]
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{name}.", suffix=".part", dir=dest)
+        tmp_path = Path(tmp_name)
+        try:
+            os.close(fd)
+            print(f"  Downloading {name} …")
+            with tmp_path.open("wb") as out:
+                download_file(dl_url, out, timeout=600)
+            tmp_path.replace(target)
+            print(f"  [done] {name}")
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+    print("JRC2018 reference-brain data download complete.")
 
 
 def resolve_confocal_dir(*, auto_download: bool = True) -> Path:
@@ -167,9 +196,7 @@ def resolve_confocal_dir(*, auto_download: bool = True) -> Path:
         "    python edfigure4_confocal_stacks.py\n"
         "  (the script will auto-download on first run if you have internet access)\n\n"
         "Lab members: mount the NFS share and/or set\n"
-        "  export BALLPUSHING_TL_CONFOCAL_DIR=/your/mount/path\n".format(
-            datasets=datasets
-        )
+        "  export BALLPUSHING_TL_CONFOCAL_DIR=/your/mount/path\n".format(datasets=datasets)
     )
 
 
@@ -206,7 +233,7 @@ def resolve_stack_tiff(raw_dir: Path, genotype_key: str, stack_info: dict) -> Pa
     )
 
 
-def resolve_jrc_nrrd_paths(raw_dir: Path) -> dict[str, Path]:
+def resolve_jrc_nrrd_paths(raw_dir: Path, auto_download: bool = True) -> dict[str, Path]:
     """Return ``{region: Path}`` for the JRC2018 reference-brain NRRDs.
 
     Resolution order per region:
@@ -246,19 +273,27 @@ def resolve_jrc_nrrd_paths(raw_dir: Path) -> dict[str, Path]:
             missing.append((region, filename))
 
     if missing:
-        missing_str = "\n".join(f"  {region}: {fn}" for region, fn in missing)
-        search_str = "\n".join(f"  {d}" for d in search_dirs)
-        raise FileNotFoundError(
-            f"Janelia JRC2018 reference-brain templates not found.\n\n"
-            f"Missing files:\n{missing_str}\n\n"
-            f"Searched in:\n{search_str}\n\n"
-            f"To fix — download the templates from Janelia:\n"
-            f"  Brain : {_JRC_LANDING_URLS['brain']}\n"
-            f"  VNC   : {_JRC_LANDING_URLS['vnc']}\n\n"
-            f"Place the downloaded NRRD files in one of the search directories\n"
-            f"above, OR set the environment variable:\n"
-            f"  export BALLPUSHING_JRC2018_DIR=/path/to/directory/containing/nrrds\n"
-        )
+        if auto_download:
+            download_directory = search_dirs[0]
+            print(
+                f"\nJanelia JRC2018 reference-brain templates not found. Attempting to download from figshare to {download_directory}\n"
+                + "\n".join((f"  {region}: {_JRC_LANDING_URLS[region]}" for region, _ in missing))
+            )
+            _download_jrc_nrrds_from_figshare(download_directory, [region for region, _ in missing])
+        else:
+            missing_str = "\n".join(f"  {region}: {fn}" for region, fn in missing)
+            search_str = "\n".join(f"  {d}" for d in search_dirs)
+            raise FileNotFoundError(
+                f"Janelia JRC2018 reference-brain templates not found.\n\n"
+                f"Missing files:\n{missing_str}\n\n"
+                f"Searched in:\n{search_str}\n\n"
+                f"To fix — download the templates from Janelia:\n"
+                f"  Brain : {_JRC_LANDING_URLS['brain']}\n"
+                f"  VNC   : {_JRC_LANDING_URLS['vnc']}\n\n"
+                f"Place the downloaded NRRD files in one of the search directories\n"
+                f"above, OR set the environment variable:\n"
+                f"  export BALLPUSHING_JRC2018_DIR=/path/to/directory/containing/nrrds\n"
+            )
 
     return paths
 
@@ -312,9 +347,7 @@ def registration_exists(directory: str | Path):
 
 def antsread(path):
     path = Path(path).as_posix()
-    assert path.endswith(
-        (".nii", ".nii.gz", ".nrrd")
-    ), "Only support .nii, .nii.gz, .nrrd"
+    assert path.endswith((".nii", ".nii.gz", ".nrrd")), "Only support .nii, .nii.gz, .nrrd"
     return ants.image_read(path)
 
 
@@ -385,12 +418,7 @@ def crop_stack(genotype_key, stack_info):
         s = np.sqrt(np.linalg.det(matrix[:, :2]))
         spacing = (stack_info["dx"] / s, stack_info["dx"] / s, stack_info["dz"] * 2)
         for channel in range(2):
-            cropped = np.array(
-                [
-                    cv2.warpAffine(im, matrix, size, **warp_kws)
-                    for im in stack[:, channel]
-                ]
-            )
+            cropped = np.array([cv2.warpAffine(im, matrix, size, **warp_kws) for im in stack[:, channel]])
             if not stack_info[region]["ventral"]:
                 cropped = cropped[::-1, ..., ::-1]
             yield region, channel, ants.from_numpy(cropped.T, spacing=spacing)
@@ -398,11 +426,7 @@ def crop_stack(genotype_key, stack_info):
 
 def crop_stacks(stack_infos: dict[str, dict], stacks_dir: Path):
     for genotype, stack_info in tqdm(stack_infos.items()):
-        if all(
-            (stacks_dir / genotype / r / f"{c}g.nii.gz").exists()
-            for r in regions
-            for c in "fb"
-        ):
+        if all((stacks_dir / genotype / r / f"{c}g.nii.gz").exists() for r in regions for c in "fb"):
             print(f"All crops for {genotype} exist, skipping")
             continue
         for region, channel, cropped in crop_stack(genotype, stack_info):
@@ -425,10 +449,7 @@ def build_lab_templates(
             continue
 
         with TemporaryDirectory() as temp_dir:
-            stacks = [
-                antsread(stacks_dir / genotype / region / "bg.nii.gz")
-                for genotype in genotypes
-            ]
+            stacks = [antsread(stacks_dir / genotype / region / "bg.nii.gz") for genotype in genotypes]
             stacks = sum([[stack, stack.reflect_image(axis=0)] for stack in stacks], [])
             output_path.parent.mkdir(exist_ok=True, parents=True)
             ants.build_template(
@@ -449,9 +470,9 @@ def register_lab_to_jrc(
         fixed_path.parent.mkdir(exist_ok=True, parents=True)
 
         if not fixed_path.exists():
-            antsread(jrc_raw_paths[region]).resample_image(
-                jrc_target_spacing[region], interp_type=3
-            ).to_file(fixed_path.as_posix())
+            antsread(jrc_raw_paths[region]).resample_image(jrc_target_spacing[region], interp_type=3).to_file(
+                fixed_path.as_posix()
+            )
         else:
             print(f"{fixed_path} exists, skipping")
 
@@ -508,12 +529,7 @@ def register_and_transform_stacks(
 
             fg_path = stacks_dir / genotype / region / "fg.nii.gz"
             for moving_path in [bg_path, fg_path]:
-                dst = (
-                    stacks_dir
-                    / genotype
-                    / region
-                    / f"{moving_path.stem[:2]}_to_jrc.nii.gz"
-                )
+                dst = stacks_dir / genotype / region / f"{moving_path.stem[:2]}_to_jrc.nii.gz"
 
                 if dst.exists():
                     print(f"{dst} exists, skipping")
@@ -541,9 +557,7 @@ def read_stack(genotype_dir, stack_info):
     vnc_fg = read_max_proj(genotype_dir / "vnc" / "fg_to_jrc.nii.gz")
     vnc_bg = read_max_proj(genotype_dir / "vnc" / "bg_to_jrc.nii.gz")
 
-    vmax_fg = stack_info.get(
-        "vmax0", max(brain_fg.max(), vnc_fg.max())
-    ) * stack_info.get("s0", 1)
+    vmax_fg = stack_info.get("vmax0", max(brain_fg.max(), vnc_fg.max())) * stack_info.get("s0", 1)
     vmax_bg = np.concatenate([vnc_bg.ravel(), brain_bg.ravel()]).mean() * 4
     lims_fg = (vmax_fg * 0.05, vmax_fg)
     lims_bg = (vmax_bg * 0.05, vmax_bg)
@@ -629,13 +643,12 @@ if __name__ == "__main__":
     crop_stacks(stack_infos, stacks_dir)
     build_lab_templates(stacks_dir, genotypes_for_building_templates, lab_dir)
     jrc_nrrd_paths = resolve_jrc_nrrd_paths(raw_dir)
-    register_lab_to_jrc(
-        lab_dir, jrc_dir, jrc_nrrd_paths, jrc_target_spacing, lab_to_jrc_dir
-    )
-    register_and_transform_stacks(
-        stack_infos, stacks_dir, lab_dir, jrc_dir, lab_to_jrc_dir
-    )
+    print("Registering lab template to JRC space")
+    register_lab_to_jrc(lab_dir, jrc_dir, jrc_nrrd_paths, jrc_target_spacing, lab_to_jrc_dir)
+    print("Registering confocal stacks to JRC space")
+    register_and_transform_stacks(stack_infos, stacks_dir, lab_dir, jrc_dir, lab_to_jrc_dir)
     images = get_combined_images(jrc_dir, stack_infos, stacks_dir)
+    print("Rendering aligned confocal images")
     g = plot_confocal_stacks(images)
     out_dir = figure_output_dir("EDFigure4", __file__)
     g.savefig(out_dir / "edfigure4_confocal_stacks.pdf")
