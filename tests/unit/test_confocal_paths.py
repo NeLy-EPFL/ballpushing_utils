@@ -492,15 +492,22 @@ class _FakeResponse:
 
     def __init__(self, data: bytes):
         self._io = BytesIO(data)
+        self._headers = {"Content-Length": str(len(data))}
 
     def read(self, n=-1):
         return self._io.read(n)
+
+    def info(self):
+        return self._headers
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
         pass
+
+    def __iter__(self):
+        return self._io
 
 
 def test_download_confocal_skips_existing(monkeypatch, tmp_path, confocal_flat_dir):
