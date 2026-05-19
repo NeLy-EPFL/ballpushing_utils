@@ -280,6 +280,8 @@ def resolve_jrc_nrrd_paths(raw_dir: Path, auto_download: bool = True) -> dict[st
                 + "\n".join((f"  {region}: {_JRC_LANDING_URLS[region]}" for region, _ in missing))
             )
             _download_jrc_nrrds_from_figshare(download_directory, [region for region, _ in missing])
+            # calling this function again will find the files now
+            return resolve_jrc_nrrd_paths(raw_dir)
         else:
             missing_str = "\n".join(f"  {region}: {fn}" for region, fn in missing)
             search_str = "\n".join(f"  {d}" for d in search_dirs)
