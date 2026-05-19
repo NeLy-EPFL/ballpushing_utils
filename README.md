@@ -244,7 +244,7 @@ would normally read from `Metadata.json` — see
 
 ### Reproducing figures from the Dataverse
 
-Three commands from a fresh clone:
+Three commands are required from a fresh clone to reproduce the main figures in the paper:
 
 ```bash
 pip install -e .
@@ -252,12 +252,20 @@ ballpushing-fetch                  # downloads ~50 GB of feathers into ./Dataset
 python run_all_figures.py          # create figure panels under $BALLPUSHING_FIGURES_ROOT
 ```
 
+Downloading the files could take ~1.5 hours with a fast internet connection,
+and generating the figures ~15 minutes on a fast desktop computer.
+
 To also reproduce all the supplementary figures, run:
 
 ```bash
 ballpushing-fetch --include-supplementary
 python run_all_figures.py --include-supplementary
 ```
+
+Downloading the extra supplementary files could take ~10 minutes with a fast
+internet connection, and generating all the main and supplementary
+figures (which includes downloading an extra 10 GB of confocal stacks)
+could take ~3 hours on a fast desktop computer.
 
 `ballpushing-fetch` reads the file list from `figures/**/*.py`, queries
 the three published Dataverse archives (Affordance, Screen, Exploration
