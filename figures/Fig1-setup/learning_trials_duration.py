@@ -17,12 +17,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pyarrow.feather as feather
 import scipy.stats as stats
 import seaborn as sns
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils import dataset, figure_output_dir, read_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -43,7 +42,7 @@ def load_annotated_data(data_path):
         Loaded dataset
     """
     print(f"Loading data from: {data_path}")
-    data = feather.read_feather(data_path)
+    data = read_feather(data_path)
     print(f"Loaded {len(data)} rows with {data['fly'].nunique()} unique flies")
     return data
 
