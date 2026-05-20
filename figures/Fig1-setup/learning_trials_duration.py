@@ -17,11 +17,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import polars as pl
 import scipy.stats as stats
 import seaborn as sns
 from statsmodels.stats.multitest import multipletests
 
-from ballpushing_utils import dataset, figure_output_dir, read_feather
+from ballpushing_utils import dataset, figure_output_dir
+from ballpushing_utils.paths import find_feather
 from ballpushing_utils.plotting import set_illustrator_style
 
 set_illustrator_style()
@@ -38,22 +40,26 @@ def load_annotated_data(data_path):
 
     Returns
     -------
-    pd.DataFrame
-        Loaded dataset
+    pl.LazyFrame
+        Lazy loaded dataset
     """
     print(f"Loading data from: {data_path}")
-    data = read_feather(data_path)
-    print(f"Loaded {len(data)} rows with {data['fly'].nunique()} unique flies")
+    feather_path = find_feather(data_path)
+    if feather_path is None:
+        raise FileNotFoundError(f"Couldn't find {data_path}")
+
+    # keep only the columns we need for later
+    data = pl.scan_ipc(feather_path).select("fly", "trial", "trial_time")
     return data
 
 
-def filter_flies_with_n_trials(data, n_trials=4):
+def filter_flies_with_n_trials(data: pl.LazyFrame, n_trials=4):
     """
     Filter dataset to keep only flies that completed at least n trials.
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pl.LazyFrame
         Input dataset
     n_trials : int, optional
         Minimum number of trials required (default: 4)
@@ -66,15 +72,16 @@ def filter_flies_with_n_trials(data, n_trials=4):
     print(f"\nFiltering flies with at least {n_trials} trials...")
 
     # Keep only trials 1 to n_trials
-    data_filtered = data[data["trial"] <= n_trials]
+    data_filtered = data.filter(pl.col("trial") <= n_trials)
 
     # Keep only flies that have all n trials
-    data_filtered = data_filtered.groupby("fly").filter(lambda x: x["trial"].nunique() >= n_trials)
+    data_filtered = data_filtered.filter(pl.col("trial").n_unique().over("fly") >= n_trials)
 
-    n_flies = data_filtered["fly"].nunique()
+    data_filtered = data_filtered.collect()
+    n_flies = data_filtered.n_unique("fly")
     print(f"Found {n_flies} flies with at least {n_trials} trials")
 
-    return data_filtered
+    return data_filtered.to_pandas()
 
 
 def compute_trial_durations(data):
