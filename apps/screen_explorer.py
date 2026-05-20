@@ -2,15 +2,15 @@
 """Interactive explorer for the TNT silencing-screen ballpushing metrics.
 
 Provides two views:
-- **Boxplots**: one box-and-strip plot per selected metric, grouped by genotype
-- **Scatter / Correlation**: one scatter plot comparing two metrics, coloured by
-  brain region or genotype
+- **Boxplots**: one box-and-strip plot per selected metric, grouped by genotype,
+  with a bootstrapped 95 % CI band for the control group as a reference
+- **Scatter / Correlation**: two-metric scatter coloured by brain region or genotype;
+  controls always rendered as diamonds with a 95 % data-confidence ellipse
 
 Usage
 -----
     panel serve apps/screen_explorer.py --show
-    # with auto-reload during development:
-    panel serve apps/screen_explorer.py --show --autoreload
+    panel serve apps/screen_explorer.py --show --autoreload   # dev mode
 
 If the screen feather is not yet present, the app shows download instructions.
 Run ``ballpushing-fetch --archive screen`` to fetch it.
@@ -21,6 +21,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 try:
@@ -50,9 +51,8 @@ from ballpushing_utils.paths import find_feather
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-# Server-relative path used by the figure scripts; find_feather resolves this
-# to the Dataverse basename (ballpushing_metrics_silencing_screen.feather) when
-# the flat Datasets/ layout is used by external users.
+# Server-relative path; find_feather resolves this to the Dataverse basename
+# (ballpushing_metrics_silencing_screen.feather) for external users.
 _SCREEN_SERVER_PATH = (
     "Ballpushing_TNTScreen/Datasets/250811_18_summary_TNT_screen_Data"
     "/summary/pooled_summary.feather"
@@ -72,8 +72,8 @@ REGION_COLORS: dict[str, str] = {
     "JON": "#ffbb78",
 }
 
-# Human-readable labels for metric columns (covers both old velocity* and new
-# speed* names, since read_feather runs the compat shim before we see the data)
+# Covers both old velocity* and new speed* column names (read_feather compat shim
+# normalises them before the data reaches this app, but the dict handles edge cases)
 METRIC_LABELS: dict[str, str] = {
     "first_major_event": "First major event rank",
     "major_event": "First major event rank",
@@ -106,7 +106,6 @@ METRIC_LABELS: dict[str, str] = {
     "time_chamber_beginning": "Time to first chamber contact (s)",
 }
 
-# Columns that should never appear as selectable metrics
 _META_COLS: frozenset[str] = frozenset({
     "has_finished", "has_major", "has_significant", "nb_significant_events",
     "fly", "experiment", "Genotype", "Nickname", "Brain region", "Split",
@@ -118,11 +117,12 @@ _CONTROL_NICKNAMES: frozenset[str] = frozenset({
     "Empty-gal4", "Empty-Split", "TNTxPR", "TNTxCS",
 })
 
-DEFAULT_METRICS: list[str] = [
-    "first_major_event", "max_event", "nb_events", "normalized_speed",
-]
-
+# One metric by default keeps the initial view lightweight
+DEFAULT_METRICS: list[str] = ["first_major_event"]
 DEFAULT_REGIONS: list[str] = ["Control", "MB", "Vision"]
+
+# Fixed seed for reproducible bootstrap draws
+_RNG = np.random.default_rng(42)
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -134,7 +134,6 @@ def _load_screen() -> pd.DataFrame | None:
     paths = result if isinstance(result, list) else [result]
     parts = [read_feather(p) for p in paths]
     df = pd.concat(parts, ignore_index=True) if len(parts) > 1 else parts[0]
-    # Rename columns that changed between dataset-builder versions
     for old, new in [
         ("major_event", "first_major_event"),
         ("major_event_time", "first_major_event_time"),
@@ -155,7 +154,7 @@ def _label(col: str) -> str:
 
 
 def _nick_color_map(df_full: pd.DataFrame, sub: pd.DataFrame) -> dict[str, str]:
-    """Map each Nickname to its brain region colour."""
+    """Map each Nickname to its brain-region colour."""
     nick_to_region = (
         df_full.drop_duplicates("Nickname")
         .set_index("Nickname")["Brain region"]
@@ -165,6 +164,68 @@ def _nick_color_map(df_full: pd.DataFrame, sub: pd.DataFrame) -> dict[str, str]:
         nick: REGION_COLORS.get(nick_to_region.get(nick, ""), "#888888")
         for nick in sub["Nickname"].unique()
     }
+
+
+# ── Statistical helpers ───────────────────────────────────────────────────────
+
+def _bootstrap_ci_median(
+    arr: np.ndarray, *, n_boot: int = 1000, ci: float = 95
+) -> tuple[float, float]:
+    """Vectorised bootstrap CI of the median (reproducible via module-level RNG)."""
+    arr = np.asarray(arr, dtype=float)
+    arr = arr[~np.isnan(arr)]
+    if len(arr) < 2:
+        return np.nan, np.nan
+    boots = _RNG.choice(arr, size=(n_boot, len(arr)), replace=True)
+    medians = np.median(boots, axis=1)
+    lo = float(np.percentile(medians, (100 - ci) / 2))
+    hi = float(np.percentile(medians, 100 - (100 - ci) / 2))
+    return lo, hi
+
+
+def _confidence_ellipse_xy(
+    x: np.ndarray, y: np.ndarray, *, n_std: float = 2.45, n_pts: int = 120
+) -> tuple[np.ndarray, np.ndarray] | tuple[None, None]:
+    """Path tracing a bivariate data-confidence ellipse.
+
+    n_std=2.45 ≈ sqrt(chi2(2, 0.95)) — encloses ~95 % of bivariate-normal data.
+    """
+    xy = np.column_stack([x, y])
+    xy = xy[~np.isnan(xy).any(axis=1)]
+    if len(xy) < 4:
+        return None, None
+    mean = xy.mean(axis=0)
+    cov = np.cov(xy.T)
+    vals, vecs = np.linalg.eigh(cov)
+    order = vals.argsort()[::-1]
+    vals, vecs = vals[order], vecs[:, order]
+    angle = np.arctan2(*vecs[:, 0][::-1])
+    w, h = 2 * n_std * np.sqrt(np.maximum(vals, 0))
+    t = np.linspace(0, 2 * np.pi, n_pts + 1)
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    ex, ey = w / 2 * np.cos(t), h / 2 * np.sin(t)
+    return cos_a * ex - sin_a * ey + mean[0], sin_a * ex + cos_a * ey + mean[1]
+
+
+# ── Bokeh hook for enforcing categorical axis order ───────────────────────────
+
+def _make_order_hook(nick_order: list[str]):
+    """Return a finalise hook that sets FactorRange.factors to nick_order.
+
+    hv.Dimension(values=...) and pd.Categorical are both silently ignored by
+    BoxWhisker's internal grouping.  The only reliable fix is to reach into the
+    underlying bokeh figure after rendering and overwrite the FactorRange.
+    """
+    def _hook(plot, element) -> None:
+        try:
+            from bokeh.models import FactorRange
+            fig = plot.handles["plot"]
+            for rng in (fig.x_range, fig.y_range):
+                if isinstance(rng, FactorRange):
+                    rng.factors = list(nick_order)
+        except Exception:
+            pass
+    return _hook
 
 
 # ── Missing-data screen ───────────────────────────────────────────────────────
@@ -205,9 +266,7 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
     default_regions = [r for r in DEFAULT_REGIONS if r in all_regions]
     default_metrics = [c for c in DEFAULT_METRICS if c in all_metrics]
 
-    # Metric dropdown options: displayed as human-readable labels, values are
-    # column names. We use a list of labels for MultiChoice (simpler) and a
-    # separate dict to convert labels→column names in callbacks.
+    # Labels displayed in dropdowns; reverse mapping used to recover column names
     metric_label_to_col: dict[str, str] = {_label(c): c for c in all_metrics}
     metric_labels_ordered: list[str] = list(metric_label_to_col)
 
@@ -238,12 +297,18 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
     def _filtered_df(genotypes: list[str], regions: list[str], include_controls: bool) -> pd.DataFrame:
         if genotypes:
             mask = df["Nickname"].isin(genotypes)
+            # Controls are always appended when the toggle is on so they provide
+            # a visible reference regardless of which experimental subset is chosen.
+            if include_controls:
+                mask = mask | df["Nickname"].isin(_CONTROL_NICKNAMES)
         elif regions:
             mask = df["Brain region"].isin(regions)
+            if not include_controls:
+                mask = mask & ~df["Nickname"].isin(_CONTROL_NICKNAMES)
         else:
             mask = pd.Series(True, index=df.index)
-        if not include_controls:
-            mask = mask & ~df["Nickname"].isin(_CONTROL_NICKNAMES)
+            if not include_controls:
+                mask = mask & ~df["Nickname"].isin(_CONTROL_NICKNAMES)
         return df[mask].copy()
 
     @pn.depends(genotype_w.param.value, region_w.param.value, controls_w.param.value)
@@ -258,7 +323,9 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
         options=metric_labels_ordered,
         value=[_label(c) for c in default_metrics],
     )
-    n_cols_w = pn.widgets.IntSlider(name="Columns", start=1, end=4, value=2, width=160)
+    n_cols_w = pn.widgets.IntSlider(name="Columns", start=1, end=4, value=1, width=160)
+    invert_axes_w = pn.widgets.Checkbox(name="Horizontal layout", value=True)
+    sort_desc_w = pn.widgets.Checkbox(name="High to low", value=False)
 
     @pn.depends(
         genotype_w.param.value,
@@ -266,8 +333,10 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
         controls_w.param.value,
         boxplot_metric_w.param.value,
         n_cols_w.param.value,
+        invert_axes_w.param.value,
+        sort_desc_w.param.value,
     )
-    def _boxplot_view(genotypes, regions, include_controls, metric_labels, n_cols):
+    def _boxplot_view(genotypes, regions, include_controls, metric_labels, n_cols, invert_axes, sort_desc):
         sub = _filtered_df(genotypes, regions, include_controls)
         metrics = [metric_label_to_col[lbl] for lbl in metric_labels if lbl in metric_label_to_col]
 
@@ -275,7 +344,10 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
             return pn.pane.Markdown("_No data for the current selection._")
 
         cmap = _nick_color_map(df, sub)
-        box_w = max(320, 75 * sub["Nickname"].nunique())
+        ctrl_mask = sub["Nickname"].isin(_CONTROL_NICKNAMES)
+        n_nicks = sub["Nickname"].nunique()
+        # Width scales with genotype count; height is fixed for readability
+        box_w = max(340, 75 * n_nicks)
 
         plots = []
         for metric in metrics:
@@ -285,18 +357,34 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
             if data.empty:
                 continue
 
+            # Sort genotypes by per-nickname median.
+            # hv.Dimension(values=...) and pd.Categorical are both ignored by
+            # BoxWhisker's internal grouping.  We use a bokeh finalise hook that
+            # sets FactorRange.factors directly after the figure is built.
+            nick_order = (
+                data.groupby("Nickname")[metric]
+                .median()
+                .sort_values(ascending=sort_desc)
+                .index.tolist()
+            )
+
             bw = hv.BoxWhisker(data, kdims=["Nickname"], vdims=[metric]).opts(
                 opts.BoxWhisker(
-                    width=box_w,
-                    height=370,
-                    xrotation=45,
-                    box_color=hv.dim("Nickname").categorize(cmap, default="#888888"),
+                    width=400 if invert_axes else box_w,
+                    height=max(300, 22 * n_nicks) if invert_axes else 380,
+                    xrotation=0 if invert_axes else 45,
+                    box_fill_color="white",
+                    box_fill_alpha=0,
+                    box_line_color="black",
+                    box_line_width=1.2,
                     whisker_color="black",
                     show_grid=True,
                     toolbar="above",
                     title=_label(metric),
-                    ylabel=_label(metric),
-                    xlabel="",
+                    ylabel="" if invert_axes else _label(metric),
+                    xlabel=_label(metric) if invert_axes else "",
+                    invert_axes=invert_axes,
+                    hooks=[_make_order_hook(nick_order)],
                 )
             )
             sc = hv.Scatter(data, kdims=["Nickname"], vdims=[metric]).opts(
@@ -307,9 +395,31 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
                     jitter=0.4,
                     tools=["hover"],
                     toolbar=None,
+                    invert_axes=invert_axes,
                 )
             )
-            plots.append(bw * sc)
+            layers: list = [bw, sc]
+
+            # Bootstrapped 95 % CI band from all controls combined.
+            # Rendered behind box/scatter; disappears automatically when controls
+            # are hidden, so no separate toggle is needed.
+            if include_controls:
+                ctrl_vals = sub.loc[ctrl_mask, metric].dropna().values
+                if len(ctrl_vals) >= 2:
+                    ci_lo, ci_hi = _bootstrap_ci_median(ctrl_vals)
+                    if not (np.isnan(ci_lo) or np.isnan(ci_hi)):
+                        # VSpan for horizontal layout (value axis is now x),
+                        # HSpan for vertical (value axis is y)
+                        Span = hv.VSpan if invert_axes else hv.HSpan
+                        band = Span(ci_lo, ci_hi).opts(
+                            fill_color="#888888",
+                            fill_alpha=0.18,
+                            line_color="#555555",
+                            line_alpha=0.45,
+                        )
+                        layers.insert(0, band)
+
+            plots.append(hv.Overlay(layers))
 
         if not plots:
             return pn.pane.Markdown("_No valid metrics for the current selection._")
@@ -318,7 +428,7 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
         return pn.pane.HoloViews(layout, sizing_mode="stretch_width")
 
     boxplot_tab = pn.Column(
-        pn.Row(boxplot_metric_w, n_cols_w),
+        pn.Row(boxplot_metric_w, n_cols_w, invert_axes_w, sort_desc_w),
         _boxplot_view,
         sizing_mode="stretch_width",
     )
@@ -355,9 +465,14 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
         if sub.empty or x_col is None or y_col is None:
             return pn.pane.Markdown("_No data for the current selection._")
 
-        # Keep colour column + hover extras in vdims without duplication
-        hover_extra = [c for c in ("Nickname", "Brain region") if c not in (x_col, y_col, color_col)]
-        data = sub[[x_col, y_col, color_col] + hover_extra].dropna(subset=[x_col, y_col])
+        # Build column list without duplicates (order matters for vdims)
+        seen: set[str] = set()
+        all_cols: list[str] = []
+        for c in [x_col, y_col, color_col, "Nickname", "Brain region"]:
+            if c not in seen:
+                all_cols.append(c)
+                seen.add(c)
+        data = sub[all_cols].dropna(subset=[x_col, y_col])
 
         if data.empty:
             return pn.pane.Markdown("_No data after dropping NaN values._")
@@ -366,30 +481,96 @@ def _build_app(df: pd.DataFrame) -> pn.template.BootstrapTemplate:
         if color_col == "Brain region":
             cmap = {v: REGION_COLORS.get(v, "#888888") for v in color_vals}
         else:
-            # Category20 gives 20 distinguishable colours; cycle for larger sets
             from bokeh.palettes import Category20  # type: ignore[import]
             palette = list(Category20[20]) * (len(color_vals) // 20 + 1)
             cmap = {v: palette[i] for i, v in enumerate(sorted(color_vals))}
 
-        vdims = [color_col] + hover_extra
-        scatter = hv.Scatter(data, kdims=[x_col, y_col], vdims=vdims).opts(
-            opts.Scatter(
-                color=hv.dim(color_col).categorize(cmap, default="#888888"),
-                alpha=0.65,
-                size=7,
-                tools=["hover"],
-                width=750,
-                height=520,
-                xlabel=_label(x_col),
-                ylabel=_label(y_col),
-                title=f"{_label(x_col)}  vs  {_label(y_col)}",
-                show_grid=True,
-                legend_position="right",
-                show_legend=True,
-                toolbar="above",
-            )
+        vdims = [c for c in all_cols if c not in (x_col, y_col)]
+        ctrl_mask = data["Nickname"].isin(_CONTROL_NICKNAMES)
+        ctrl_data = data[ctrl_mask]
+        main_data = data[~ctrl_mask]
+
+        # Base display opts shared by both scatter layers
+        base = dict(
+            width=750, height=520,
+            xlabel=_label(x_col), ylabel=_label(y_col),
+            title=f"{_label(x_col)}  vs  {_label(y_col)}",
+            show_grid=True, toolbar="above",
         )
-        return pn.pane.HoloViews(scatter, sizing_mode="stretch_width")
+
+        layers: list = []
+
+        # ── Per-control confidence ellipses (rendered first, behind points) ──
+        # One ellipse per control nickname so their individual spreads are visible.
+        if include_controls:
+            for ctrl_nick in sorted(ctrl_data["Nickname"].unique()):
+                cd = ctrl_data[ctrl_data["Nickname"] == ctrl_nick]
+                if len(cd) < 4:
+                    continue
+                xs, ys = _confidence_ellipse_xy(cd[x_col].values, cd[y_col].values)
+                if xs is None:
+                    continue
+                # Use the control's own colour from the active cmap
+                ctrl_color = cmap.get(
+                    cd[color_col].iloc[0] if color_col == "Brain region" else ctrl_nick,
+                    REGION_COLORS["Control"],
+                )
+                layers.append(
+                    hv.Polygons([{"x": xs, "y": ys}]).opts(
+                        opts.Polygons(
+                            fill_color=ctrl_color,
+                            fill_alpha=0.12,
+                            line_color=ctrl_color,
+                            line_alpha=0.8,
+                            line_width=1.5,
+                            line_dash="dashed",
+                            **base,
+                        )
+                    )
+                )
+
+        # ── Non-control scatter (circles) ──────────────────────────────────────
+        if not main_data.empty:
+            layers.append(
+                hv.Scatter(main_data, kdims=[x_col, y_col], vdims=vdims).opts(
+                    opts.Scatter(
+                        color=hv.dim(color_col).categorize(cmap, default="#888888"),
+                        alpha=0.65,
+                        size=7,
+                        marker="circle",
+                        tools=["hover"],
+                        show_legend=True,
+                        legend_position="right",
+                        **base,
+                    )
+                )
+            )
+
+        # ── Control scatter (diamonds, on top, with black outline) ─────────────
+        if include_controls and not ctrl_data.empty:
+            layers.append(
+                hv.Scatter(ctrl_data, kdims=[x_col, y_col], vdims=vdims).opts(
+                    opts.Scatter(
+                        color=hv.dim(color_col).categorize(cmap, default="#888888"),
+                        alpha=0.9,
+                        size=11,
+                        marker="diamond",
+                        line_color="black",
+                        line_width=1.2,
+                        tools=["hover"],
+                        # Legend handled by the main scatter above; showing it
+                        # here would duplicate entries for the same colour groups.
+                        show_legend=main_data.empty,
+                        legend_position="right",
+                        **base,
+                    )
+                )
+            )
+
+        if not layers:
+            return pn.pane.Markdown("_No data to display._")
+
+        return pn.pane.HoloViews(hv.Overlay(layers), sizing_mode="stretch_width")
 
     scatter_tab = pn.Column(
         pn.Row(scatter_x_w, scatter_y_w, color_by_w),
