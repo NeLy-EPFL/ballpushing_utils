@@ -72,6 +72,7 @@ def filter_flies_with_n_trials(data: pl.LazyFrame, n_trials=4):
     print(f"\nFiltering flies with at least {n_trials} trials...")
 
     # Keep only trials 1 to n_trials
+    # Note: this also filters out rows where trial is None so the next step works correctly
     data_filtered = data.filter(pl.col("trial") <= n_trials)
 
     # Keep only flies that have all n trials
