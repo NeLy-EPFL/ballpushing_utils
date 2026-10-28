@@ -100,6 +100,8 @@ class Config:
     success_cutoff: bool = False
     success_cutoff_method: str = "final_event"
     tracks_smoothing: bool = True
+    tracks_smoothing_order: int = 1
+    tracks_smoothing_window: int = 221  # default in utils_behavior
     chamber_radius: int = 50
     rolling_window: int = 10
 

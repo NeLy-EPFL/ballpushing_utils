@@ -159,11 +159,17 @@ class FlyTrackingData:
         pattern,
         object_type,
         smoothing=None,
+        smoothing_window=None,
+        smoothing_order=None,
     ):
         """Load a tracking file for the fly with arena/corridor validation."""
 
         if smoothing is None:
             smoothing = self.fly.config.tracks_smoothing
+        if smoothing_window is None:
+            smoothing_window = self.fly.config.tracks_smoothing_window
+        if smoothing_order is None:
+            smoothing_order = self.fly.config.tracks_smoothing_order
 
         try:
             tracking_file = list(self.fly.directory.glob(pattern))[0]
@@ -173,6 +179,7 @@ class FlyTrackingData:
                 tracking_file,
                 object_type=object_type,
                 smoothed_tracks=smoothing,
+                smoothing_params=(smoothing_window, smoothing_order),
                 debug=False,
             )
 
