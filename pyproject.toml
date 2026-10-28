@@ -52,7 +52,7 @@ classifiers = [
 # reproduce the paper figures live in `requirements.txt`.
 dependencies = [
     "numpy>=1.26",
-    "pandas>=2.0,<3",
+    "pandas[parquet,feather]>=2.0,<3",
     "scipy>=1.11",
     "scikit-learn>=1.3",
     "scikit-bio>=0.6",
