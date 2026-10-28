@@ -145,29 +145,51 @@ class FlyMetadata:
         )
 
     def compute_F1_condition(self):
-        if "Pretraining" in self.arena_metadata and "Unlocked" in self.arena_metadata:
-            pretraining = self.arena_metadata["Pretraining"]
+        """Determine whether this fly was control or pretrained, and unlocked or not.
+
+        If the metadata contains a two character code (eg. ym) then we need to determine which side
+        of the arena this fly was on to know whether it was pretrained or not.
+
+        Raises:
+            ValueError: if pretraining or unlocked metadata values aren't 1 or 2 characters comprised of y/n
+        """
+        pretraining_key = "Pretraining" if "Pretraining" in self.arena_metadata else "Pretrained"
+        if pretraining_key in self.arena_metadata and "Unlocked" in self.arena_metadata:
+            pretraining = self.arena_metadata[pretraining_key]
             unlocked = self.arena_metadata["Unlocked"]
 
-            if "n" in pretraining:
+            if self.corridor == "Left":
+                side = 0
+            elif self.corridor == "Right":
+                side = 1
+            else:
+                raise ValueError(f"Corridor should be Left or Right but was {self.corridor}")
+
+            if len(pretraining) == 2:
+                pretraining = pretraining[side]
+            if len(unlocked) == 2:
+                unlocked = unlocked[side]
+
+            assert len(pretraining) == 1, ValueError(
+                f"metadata pretrained field should either be one or two characters, but was {pretraining}"
+            )
+            assert len(unlocked) == 1, ValueError(
+                f"metadata unlocked field should either be one or two characters, but was {unlocked}"
+            )
+
+            if pretraining == "n":
                 self.arena_metadata["F1_condition"] = "control"
-            elif "y" in pretraining:
-                if "Left" in self.corridor:
-                    if unlocked[0] == "y":
-                        self.arena_metadata["F1_condition"] = "pretrained_unlocked"
-                    else:
-                        self.arena_metadata["F1_condition"] = "pretrained"
-                elif "Right" in self.corridor:
-                    if unlocked[1] == "y":
-                        self.arena_metadata["F1_condition"] = "pretrained_unlocked"
-                    else:
-                        self.arena_metadata["F1_condition"] = "pretrained"
+            elif pretraining == "y":
+                if unlocked == "y":
+                    self.arena_metadata["F1_condition"] = "pretrained_unlocked"
+                else:
+                    self.arena_metadata["F1_condition"] = "pretrained"
             else:
                 print(f"Error: Pretraining value not valid for {self.name}")
 
         # Add F1_condition as an attribute of the fly
         if "F1_condition" in self.arena_metadata:
-            setattr(self, "F1_condition", self.arena_metadata["F1_condition"])
+            self.F1_condition = self.arena_metadata["F1_condition"]
 
     def display_metadata(self):
         """
